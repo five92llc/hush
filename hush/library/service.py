@@ -12,7 +12,7 @@ from .. import media
 from . import art
 from .parse import (local_episode_thumb, local_fanart, local_poster, local_show_fanart, local_show_poster, nfo_for, parse_name,
                     show_nfo_for)
-from .providers import norm, pick_providers
+from .providers import CinemetaProvider, background_url, norm, pick_providers, tvmaze_background
 
 log = logging.getLogger("hush.library")
 RETRY_UNMATCHED_AFTER = 7 * 86400
@@ -264,6 +264,44 @@ class MetadataService:
                 done["fanart"] += 1
         return done
 
+    def sync_online_fanart(self, limit: int = 40) -> int:
+        """Background pictures for titles and shows that have none, from their IMDb id (found through Cinemeta when the
+        NFO does not give one). A title that has no picture is tried again after a week, not on every refresh."""
+        movies, shows = pick_providers(self.settings())
+        if movies is None and shows is None:
+            return 0                                           # online details are switched off
+        tried = self.db.get_setting("fanart_tried", {})
+        now, got, looked = time.time(), 0, 0
+        todo = [("meta", "media_key", m["media_key"], m["title"], m["year"], m["ids"] or {}) for m in
+                self.db._all("SELECT media_key, title, year, ids FROM meta WHERE kind='movie' AND fanart=0 AND locked=0")
+                for m in [self.db._decode(m)]]
+        todo += [("shows", "show_key", s["show_key"], s["title"], s["year"], s["ids"] or {}) for s in
+                 self.db._all("SELECT show_key, title, year, ids FROM shows WHERE fanart=0") for s in [self.db._decode(s)]]
+        cine = CinemetaProvider()
+        for table, col, key, title, year, ids in todo:
+            if looked >= limit:
+                break
+            if now - tried.get(key, 0) < 7 * 86400 or art.fanart_path(self.art_dir, key).exists():
+                continue
+            looked += 1
+            tried[key] = now
+            try:
+                url = background_url(ids)
+                if not url and table == "shows" and ids.get("tvmaze"):
+                    url = tvmaze_background(str(ids["tvmaze"]))
+                    time.sleep(0.4)
+                if not url:
+                    hit = (cine.movie(title, year) if table == "meta" else cine.show(title, year))
+                    url = background_url((hit or {}).get("ids"))
+                    time.sleep(0.4)
+                if url and art.from_url(self.cfg.ffmpeg, url, art.fanart_path(self.art_dir, key), width=art.FANART_WIDTH):
+                    self.db.set_art(table, col, key, fanart=1)
+                    got += 1
+            except httpx.HTTPError as exc:
+                log.info("no background for %s: %s", title, exc)
+        self.db.set_setting("fanart_tried", {k: v for k, v in tried.items() if now - v < 30 * 86400})
+        return got
+
     def backfill_certs(self) -> int:
         """Titles saved before ratings were read get theirs from the .nfo files next to them (once)."""
         if self.db.get_setting("certs_backfilled", False):
@@ -313,8 +351,9 @@ class MetadataService:
         self.finish_shows()
         try:
             self.last_local = self.sync_local_art()
+            self.last_local["online_fanart"] = self.sync_online_fanart()
         except Exception as exc:  # noqa: BLE001 - pictures are a bonus; never fail the whole pass over them
-            log.warning("local artwork: %s", exc)
+            log.warning("artwork: %s", exc)
             self.last_local = {}
         return {"processed": done, "failed": failed}
 

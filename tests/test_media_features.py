@@ -107,7 +107,7 @@ def test_playlist_header_advertises_its_guide():
 
 def test_artwork_follows_redirects_only_between_trusted_hosts(tmp_path, monkeypatch):
     from hush.library import art
-    monkeypatch.setattr(art, "_scale", lambda ffmpeg, src, dst, extra_in=None: dst.write_bytes(b"ok") or True)
+    monkeypatch.setattr(art, "_scale", lambda ffmpeg, src, dst, extra_in=None, width=art.WIDTH: dst.write_bytes(b"ok") or True)
 
     def handler(req: httpx.Request) -> httpx.Response:
         if req.url.path == "/a.jpg":

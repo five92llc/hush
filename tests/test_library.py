@@ -445,3 +445,27 @@ def test_library_uses_local_pictures_and_picks_up_changes(tmp_path, monkeypatch)
     later = t.time() + 60
     os.utime(folder / "poster.jpg", (later, later))                      # the file was replaced
     assert lib.sync_local_art()["posters"] == 1
+
+
+def test_online_fanart_uses_the_imdb_id_and_does_not_retry_at_once(tmp_path, monkeypatch):
+    from hush.config import Config
+    from hush.db import DB
+    from hush.library import art, service
+    from hush.library.providers import background_url
+    from hush.library.service import MetadataService
+    from hush.sources import Registry
+    assert background_url({"imdb": "tt0133093"}) == "https://images.metahub.space/background/medium/tt0133093/img"
+    assert background_url({"imdb": "nope"}) is None and background_url({}) is None
+    cfg = Config(data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    db = DB(cfg.db_path)
+    db.save_meta({"media_key": "m1", "source_id": "s", "item_id": "i", "kind": "movie", "title": "Film", "year": 2020, "provider": "nfo", "ids": {"imdb": "tt0133093"}})
+    db.save_show({"show_key": "sh", "title": "Show", "year": 2020, "provider": "nfo", "ids": {"imdb": "tt11280740"}})
+    fetched = []
+    monkeypatch.setattr(service, "pick_providers", lambda s: (object(), object()))
+    monkeypatch.setattr(art, "from_url", lambda ff, url, dst, client=None, width=art.WIDTH: fetched.append((url, width)) or True)
+    lib = MetadataService(cfg, db, Registry([], db))
+    assert lib.sync_online_fanart() == 2
+    assert sorted(u for u, w in fetched) == ["https://images.metahub.space/background/medium/tt0133093/img", "https://images.metahub.space/background/medium/tt11280740/img"]
+    assert all(w == art.FANART_WIDTH for _, w in fetched)
+    assert db.get_meta("m1")["fanart"] == 1 and db.get_show("sh")["fanart"] == 1
+    assert lib.sync_online_fanart() == 0 and len(fetched) == 2

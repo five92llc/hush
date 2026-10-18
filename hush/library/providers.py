@@ -203,6 +203,17 @@ class WikipediaProvider:
         return (d.get("thumbnail") or d.get("originalimage") or {}).get("source")
 
 
+def tvmaze_background(tvmaze_id: str, client: httpx.Client | None = None) -> str | None:
+    """A show's background picture from TVmaze (used when it has no IMDb id)."""
+    r = polite_get(client or httpx.Client(timeout=15, headers=UA), f"{TVMAZE}/shows/{tvmaze_id}/images")
+    if r.status_code != 200:
+        return None
+    for img in r.json():
+        if img.get("type") == "background":
+            return ((img.get("resolutions") or {}).get("original") or {}).get("url")
+    return None
+
+
 class TVmazeProvider:
     """Shows and episodes without a key."""
     name = "tvmaze"
@@ -237,6 +248,12 @@ class TVmazeProvider:
         return {(e["season"], e["number"]): {"title": e.get("name") or "", "overview": _plain(e.get("summary")),
                                              "still_url": (e.get("image") or {}).get("original")}
                 for e in r.json() if e.get("number") is not None}
+
+
+def background_url(ids: dict | None) -> str | None:
+    """A wide background picture for a title, from its IMDb id (keyless; IMDb-sourced)."""
+    imdb = (ids or {}).get("imdb") or ""
+    return f"https://images.metahub.space/background/medium/{imdb}/img" if re.fullmatch(r"tt\d{6,10}", imdb) else None
 
 
 class CinemetaProvider:

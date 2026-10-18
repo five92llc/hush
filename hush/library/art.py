@@ -44,7 +44,7 @@ def from_file(ffmpeg: str, image: Path, dst: Path, width: int = WIDTH) -> bool:
     return _scale(ffmpeg, str(image), dst, width=width)
 
 
-def from_url(ffmpeg: str, url: str, dst: Path, client: httpx.Client | None = None) -> bool:
+def from_url(ffmpeg: str, url: str, dst: Path, client: httpx.Client | None = None, width: int = WIDTH) -> bool:
     def allowed(u: str) -> bool:
         p = urlparse(u)
         return p.scheme == "https" and (p.hostname or "") in IMAGE_HOSTS
@@ -70,7 +70,7 @@ def from_url(ffmpeg: str, url: str, dst: Path, client: httpx.Client | None = Non
     dst.parent.mkdir(parents=True, exist_ok=True)
     raw.write_bytes(r.content)
     try:
-        return _scale(ffmpeg, str(raw), dst)
+        return _scale(ffmpeg, str(raw), dst, width=width)
     finally:
         raw.unlink(missing_ok=True)
 
