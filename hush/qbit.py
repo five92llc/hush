@@ -65,7 +65,12 @@ class Qbit:
                     r = http.post("/api/v2/auth/login", data={"username": s["username"], "password": s["password"]})
                 except httpx.HTTPError as exc:
                     raise QbitError(f"Could not reach qBittorrent at {s['url']}: {exc}") from exc
-                if r.text.strip() != "Ok.":
+                # Older versions answer 200 "Ok." / "Fails."; qBittorrent 5.2 answers 204 with a session cookie.
+                ok = r.status_code in (200, 204) and r.text.strip() != "Fails." and (r.text.strip() == "Ok." or bool(http.cookies))
+                if r.status_code == 403 and "banned" in r.text.lower():
+                    raise QbitError("qBittorrent has temporarily banned Hush's address after failed logins. "
+                                    "Wait a while, or restart qBittorrent, then try again.")
+                if not ok:
                     raise QbitError("qBittorrent refused the login. Check the user name and password, and that "
                                     "'Web User Interface' is switched on in its options.")
                 self._http, self._base = http, s["url"]

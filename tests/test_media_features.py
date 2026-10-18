@@ -168,6 +168,26 @@ def fake_qbit(torrents, calls):
     return httpx.MockTransport(handler)
 
 
+def test_qbit_5_2_login_answers_204_with_a_cookie(tmp_path):
+    from hush.db import DB
+    from hush.qbit import Qbit, QbitError
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/v2/auth/login":
+            good = b"password=pw" in req.content
+            return httpx.Response(204, headers={"set-cookie": "QBT_SID_1=abc; path=/"}) if good else httpx.Response(401, text="Fails.")
+        return httpx.Response(200, text="v5.2.4")
+    qb = Qbit(DB(tmp_path / "q2.db"), transport=httpx.MockTransport(handler))
+    qb.update({"url": "http://qb:1", "username": "u", "password": "pw"})
+    assert qb.version() == "v5.2.4"
+    qb.update({"password": "bad"})
+    try:
+        qb.version()
+        assert False
+    except QbitError:
+        pass
+
+
 def test_qbit_reads_downloads_and_rss_and_notices_finished_ones(tmp_path):
     from hush.db import DB
     from hush.qbit import Qbit, QbitError
