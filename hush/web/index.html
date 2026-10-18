@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Hush</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23191A2C'/%3E%3Cpath d='M9 13h4l5-4v14l-5-4H9z' fill='%23F0B04A'/%3E%3Cpath d='M21 12l6 8M27 12l-6 8' stroke='%23A99CF0' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+
+<!-- Login -->
+<main id="login" class="login" hidden>
+  <form id="login-form" class="login-card">
+    <h1 class="brand-mark">Hush</h1>
+    <p class="login-lede">Movies and music, without the language.</p>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required autofocus>
+    <p id="login-error" class="error" role="alert"></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</main>
+
+<!-- App -->
+<div id="app" class="app" hidden>
+  <header class="topbar">
+    <a href="#/" class="brand-mark small" aria-label="Hush home">Hush</a>
+    <div class="topbar-actions">
+      <button id="jobs-btn" class="btn ghost" type="button" aria-haspopup="dialog">
+        <span id="jobs-dot" class="dot" hidden></span><span id="jobs-label">Scans</span>
+      </button>
+      <button id="logout-btn" class="btn ghost" type="button" hidden>Sign out</button>
+    </div>
+  </header>
+
+  <!-- Library -->
+  <section id="library" class="library">
+    <nav class="rail" aria-label="Sources">
+      <ul id="source-list" class="source-list"></ul>
+      <button id="add-source-btn" class="btn subtle wide" type="button">Add a source</button>
+      <form id="url-form" class="url-form">
+        <label for="url-input">Play a link</label>
+        <div class="row">
+          <input id="url-input" type="url" placeholder="https://…/movie.mp4" required>
+          <button class="btn subtle" type="submit">Play</button>
+        </div>
+      </form>
+    </nav>
+
+    <div class="browser">
+      <div class="browser-head">
+        <ol id="crumbs" class="crumbs" aria-label="Folder path"></ol>
+        <input id="filter-input" class="search" type="search" placeholder="Find in this folder" aria-label="Find in this folder">
+      </div>
+      <ul id="entries" class="entries" aria-live="polite"></ul>
+      <div id="browser-empty" class="empty" hidden></div>
+    </div>
+  </section>
+
+  <!-- Player -->
+  <section id="player" class="player" hidden>
+    <div class="stage" id="stage">
+      <video id="video" playsinline preload="auto"></video>
+      <div id="audio-art" class="audio-art" hidden>
+        <div class="audio-disc" aria-hidden="true"></div>
+        <h2 id="audio-title"></h2>
+      </div>
+      <div id="subs" class="subs" aria-live="off"></div>
+      <div id="stage-msg" class="stage-msg" hidden></div>
+      <button id="back-btn" class="btn ghost back" type="button">Back to library</button>
+    </div>
+
+    <div class="controls" id="controls">
+      <div class="timeline" id="timeline" role="slider" tabindex="0" aria-label="Seek"
+           aria-valuemin="0" aria-valuemax="0" aria-valuenow="0">
+        <div class="tl-buffer" id="tl-buffer"></div>
+        <div class="tl-played" id="tl-played"></div>
+        <div class="tl-marks" id="tl-marks"></div>
+        <div class="tl-head" id="tl-head"></div>
+        <div class="tl-tip" id="tl-tip" hidden></div>
+      </div>
+      <div class="bar">
+        <button id="play-btn" class="icon-btn play" type="button" aria-label="Play">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+        <button id="back10" class="icon-btn" type="button" aria-label="Back 10 seconds">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
+        </button>
+        <button id="fwd10" class="icon-btn" type="button" aria-label="Forward 10 seconds">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a5 5 0 1 0 5 5h2a7 7 0 1 1-7-7z"/></svg>
+        </button>
+        <span class="time"><span id="t-now">0:00</span> / <span id="t-dur">0:00</span></span>
+        <h1 id="now-title" class="now-title"></h1>
+
+        <button id="filter-btn" class="hush-toggle" type="button" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="x" d="M16 9l5 6M21 9l-5 6"/></svg>
+          <span id="filter-label">Filter on</span>
+        </button>
+        <label class="vol" aria-label="Volume">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+          <input id="volume" type="range" min="0" max="1" step="0.02" value="1">
+        </label>
+        <button id="panel-btn" class="btn subtle" type="button" aria-controls="panel" aria-expanded="false">Language</button>
+        <button id="settings-btn" class="icon-btn" type="button" aria-label="Audio and subtitles" aria-expanded="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 13h4M12 13h6M6 16h8"/></svg>
+        </button>
+        <button id="fs-btn" class="icon-btn" type="button" aria-label="Full screen">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+      </div>
+      <div id="settings" class="settings" hidden>
+        <label>Audio track <select id="audio-select"></select></label>
+        <label>Subtitles <select id="sub-select"><option value="">Off</option></select></label>
+        <label>When filtering
+          <select id="mode-select">
+            <option value="mute">Mute the word</option>
+            <option value="bleep">Play a soft tone</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <!-- Language panel -->
+    <aside id="panel" class="panel" hidden aria-label="Language filter">
+      <div class="panel-head">
+        <h2>Language</h2>
+        <button id="panel-close" class="icon-btn" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+      </div>
+      <div id="panel-status" class="panel-status"></div>
+      <fieldset id="cats" class="cats" hidden>
+        <legend>Filter these</legend>
+        <div id="cat-list"></div>
+      </fieldset>
+      <div id="range-tools" class="range-tools" hidden>
+        <button id="mark-btn" class="btn subtle" type="button" title="Shortcut: M">Mark a moment</button>
+        <label class="reveal"><input id="reveal" type="checkbox"> Show words</label>
+      </div>
+      <ol id="ranges" class="ranges"></ol>
+      <div id="panel-foot" class="panel-foot" hidden>
+        <button id="rescan-btn" class="btn ghost" type="button">Scan again</button>
+        <button id="rematch-btn" class="btn ghost" type="button" title="Use an edited word list without transcribing again">Reapply word list</button>
+        <a id="export-json" class="btn ghost" href="#" download>Save filter file</a>
+        <a id="export-edl" class="btn ghost" href="#" download>Kodi EDL</a>
+        <button id="external-btn" class="btn ghost" type="button">Watch on another player</button>
+      </div>
+    </aside>
+  </section>
+</div>
+
+<!-- Add source -->
+<dialog id="source-dialog" class="dialog">
+  <form id="source-form" method="dialog">
+    <h2>Add a source</h2>
+    <label>Kind
+      <select id="src-type" name="type">
+        <option value="smb">Network share (SMB / NAS)</option>
+        <option value="local">Folder on the server</option>
+        <option value="dlna">DLNA media server</option>
+        <option value="jellyfin">Jellyfin or Emby</option>
+        <option value="plex">Plex</option>
+        <option value="http">Web folder or links</option>
+      </select>
+    </label>
+    <label>Name <input name="name" required placeholder="Living room NAS"></label>
+    <div id="src-fields"></div>
+    <p id="src-error" class="error" role="alert"></p>
+    <div class="dialog-actions">
+      <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+      <button class="btn primary" value="save" type="submit">Add source</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Scans -->
+<dialog id="jobs-dialog" class="dialog wide">
+  <div class="dialog-head">
+    <h2>Scans</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </div>
+  <ul id="jobs-list" class="jobs-list"></ul>
+</dialog>
+
+<!-- External player -->
+<dialog id="external-dialog" class="dialog">
+  <div class="dialog-head">
+    <h2>Watch on another player</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </div>
+  <p>Open this link in VLC (Media → Open Network Stream), Kodi, or a smart TV app. The filtered words are removed from the audio on the server. The link works for 12 hours.</p>
+  <div class="row"><input id="external-url" readonly><button id="copy-url" class="btn subtle" type="button">Copy</button></div>
+</dialog>
+
+<div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

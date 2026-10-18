@@ -1,0 +1,71 @@
+# Hush configuration. Copy to config.yaml and edit.
+# Any value written as ${NAME} is read from the environment, so secrets can
+# live in a .env file or your secret manager instead of this file.
+
+password: ${HUSH_PASSWORD}      # required for anything beyond a trusted LAN
+port: 8642
+data_dir: /data                 # database, cached transcripts, Whisper models
+# public_url: https://hush.example.com   # set when behind a reverse proxy, used for VLC/TV links
+
+# Video encoding for files the browser can't play directly (HEVC, MPEG-2, DivX...).
+video_encoder: libx264          # or h264_nvenc (NVIDIA), h264_qsv (Intel), h264_vaapi
+# hwaccel: cuda                 # decode acceleration passed to ffmpeg -hwaccel
+
+analysis:
+  engine: auto                  # auto = Whisper if installed, otherwise subtitles
+  whisper_model: small.en       # tiny.en | base.en | small.en | medium.en | large-v3
+  whisper_device: auto          # auto | cpu | cuda
+  whisper_compute_type: int8
+  language: en
+  pad_before: 0.12              # seconds muted before each word
+  pad_after: 0.15               # seconds muted after each word
+  merge_gap: 0.35               # join mutes closer together than this
+  workers: 1                    # scans running at the same time
+  # wordlist: /config/my-words.yaml   # start from hush/analysis/wordlists/default.yaml
+
+sources:
+  # A folder on the server, or a NAS share mounted with NFS/CIFS
+  - id: movies
+    type: local
+    name: Movies
+    paths: [/media/movies, /media/kids]
+
+  # SMB share read directly over the network (no mount needed)
+  - id: nas
+    type: smb
+    name: Living room NAS
+    server: 192.168.1.20
+    share: Video
+    path: Films                 # optional folder inside the share
+    username: hush
+    password: ${NAS_PASSWORD}
+
+  # DLNA / UPnP server (MiniDLNA, Serviio, Universal Media Server...)
+  # Use "Find servers on my network" in the app to get this address.
+  - id: dlna
+    type: dlna
+    location: http://192.168.1.20:8200/rootDesc.xml
+
+  # Jellyfin or Emby (Dashboard -> API Keys)
+  - id: jellyfin
+    type: jellyfin
+    name: Jellyfin
+    url: http://192.168.1.20:8096
+    api_key: ${JELLYFIN_API_KEY}
+    # username: family          # defaults to the first user
+
+  # Plex (token from Get Info -> View XML -> X-Plex-Token)
+  - id: plex
+    type: plex
+    name: Plex
+    url: http://192.168.1.20:32400
+    token: ${PLEX_TOKEN}
+
+  # Web folders (nginx/Apache/Caddy autoindex) and direct links, including HLS .m3u8
+  - id: web
+    type: http
+    name: Web
+    urls:
+      - name: Home server files
+        url: http://192.168.1.20:8080/media/
+    # allowed_hosts: [192.168.1.20]   # restrict which hosts this source may fetch

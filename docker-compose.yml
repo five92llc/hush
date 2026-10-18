@@ -1,0 +1,25 @@
+services:
+  hush:
+    build: .
+    container_name: hush
+    restart: unless-stopped
+    # Host networking lets "Find servers on my network" (DLNA/SSDP multicast)
+    # work. If you don't use DLNA discovery, swap it for: ports: ["8642:8642"]
+    network_mode: host
+    environment:
+      HUSH_PASSWORD: ${HUSH_PASSWORD:?set HUSH_PASSWORD in .env}
+      NAS_PASSWORD: ${NAS_PASSWORD:-}
+      JELLYFIN_API_KEY: ${JELLYFIN_API_KEY:-}
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+    volumes:
+      - ./config.yaml:/config/config.yaml:ro
+      - hush-data:/data
+      - /mnt/media:/media:ro          # local / mounted NAS folders, read-only
+    # NVIDIA GPU for fast Whisper scans and h264_nvenc (needs nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+
+volumes:
+  hush-data:

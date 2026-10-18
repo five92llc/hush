@@ -1,0 +1,2 @@
+# Audio scanning (recommended). Adds ~300 MB; models download on first scan.
+faster-whisper>=1.0

@@ -1,0 +1,228 @@
+# Hush default word list.
+#
+# Matching is done on whole words after lowercasing and stripping punctuation,
+# so "hell" never matches "hello" and "ass" never matches "class".
+#   word      exact word
+#   word*     word and anything starting with it (fuck* -> fucking, fucker)
+#   *word     anything ending with it (*fucker -> motherfucker)
+#   "a b c"   a phrase: consecutive words (each word may use *)
+#
+# Every detection is stored with its category. Categories can be switched on
+# and off in the player at any time without re-analyzing the movie.
+# Copy this file, edit it, and point `analysis.wordlist` at your copy.
+
+categories:
+  strong:
+    label: Strong profanity
+    default: true
+    words:
+      - fuck*
+      - "*fuck"
+      - "*fucker*"
+      - "*fucking"
+      - effing
+      - fck*
+      - fuk*
+      - shit*
+      - "*shit"
+      - bullshit*
+      - horseshit
+      - shite
+      - cunt*
+      - motherf*
+      - mofo
+      - cocksucker*
+      - asshole*
+      - arsehole*
+      - bitch*
+      - "*bitch"
+      - bastard*
+      - goddamn*
+      - goddam
+      - dickhead*
+      - prick*
+      - twat*
+      - wanker*
+      - piss
+      - pissed
+      - pissing
+      - "son of a bitch"
+    # Self-censored transcripts such as "f***" or "s**t" are always matched here.
+
+  mild:
+    label: Mild language
+    default: true
+    words:
+      - damn
+      - damned
+      - damnit
+      - dammit
+      - "damn it"
+      - hell
+      - "go to hell"
+      - ass
+      - asses
+      - jackass*
+      - dumbass*
+      - smartass*
+      - badass*
+      - arse
+      - crap*
+      - crappy
+      - bloody
+      - bugger*
+      - douche*
+      - screw
+      - "screw you"
+      - "pissed off"
+      - "freaking"
+      - frick*
+      - frig*
+
+  sexual:
+    label: Sexual terms
+    default: true
+    words:
+      - dick
+      - dicks
+      - cock
+      - cocks
+      - pussy
+      - pussies
+      - tits
+      - titties
+      - boobs
+      - whore*
+      - slut*
+      - hooker*
+      - blowjob*
+      - "blow job"
+      - handjob*
+      - jizz*
+      - cum
+      - cumming
+      - horny
+      - "jerk off"
+      - "jerking off"
+      - masturbat*
+      - orgasm*
+      - porn*
+      - dildo*
+      - boner*
+      - "get laid"
+      - "have sex"
+      - "had sex"
+      - "having sex"
+      - "sex with"
+
+  slurs:
+    label: Slurs
+    default: true
+    words:
+      - nigg*
+      - faggot*
+      - fag
+      - fags
+      - dyke*
+      - retard
+      - retarded
+      - retards
+      - spic*
+      - chink*
+      - kike*
+      - wetback*
+      - tranny
+      - trannies
+      - gook*
+      - coon
+      - coons
+      - beaner*
+      - towelhead*
+      - raghead*
+
+  blasphemy:
+    label: Taking the Lord's name in vain
+    default: true
+    # Only exclamations are listed, so prayers, sermons and Bible films are
+    # not muted by plain references to God or Jesus.
+    words:
+      - goddamn*
+      - goddam
+      - "god damn*"
+      - "god dammit"
+      - "oh my god"
+      - "oh my gosh"
+      - "oh god"
+      - omg
+      - "jesus christ"
+      - "jesus h christ"
+      - "oh jesus"
+      - "holy christ"
+      - "christ almighty"
+      - "for god's sake"
+      - "for christ's sake"
+      - "for christ sake"
+      - "swear to god"
+      - "good lord"
+      - "jeez"
+      - "geez"
+
+# Words that are never muted even if a pattern above would match them.
+allow:
+  - dickens
+  - dickinson
+  - dickson
+  - cockpit*
+  - cocktail*
+  - cockroach*
+  - cockatoo*
+  - cocker
+  - peacock*
+  - shitake
+  - shiitake
+  - assassin*
+  - assess*
+  - assist*
+  - assume*
+  - assumption*
+  - asset*
+  - assemble*
+  - assembly
+  - associat*
+  - assure*
+  - assault*
+  - passage
+  - bassist
+  - scrapbook*
+  - crapshoot
+  - hello
+  - shell*
+  - helluva
+  - spice
+  - spices
+  - spicy
+  - spick
+  - spicer
+  - pricked
+  - prickly
+  - pricking
+  - frigate*
+  - fright*
+  - frigid*
+  - frigidaire
+  - cumin
+  - cumulative
+  - cumbersome
+  - document*
+  - cucumber*
+  - coonhound*
+  - raccoon*
+  - cocoon*
+  - tycoon*
+  - pussycat
+  - shitzu
+  - screwdriver*
+  - screws
+  - screwed
+  - hooked
+  - bloodhound*
