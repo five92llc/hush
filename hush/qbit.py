@@ -7,6 +7,7 @@ when something finishes.
 from __future__ import annotations
 
 import logging
+import re
 import threading
 import time
 from urllib.parse import urlparse
@@ -135,7 +136,8 @@ class Qbit:
                 articles = sorted(feed.get("articles", []), key=lambda a: a.get("date", ""), reverse=True)[:15]
                 feeds.append({"name": name, "url": feed.get("url", ""), "title": feed.get("title") or name, "has_error": bool(feed.get("hasError")),
                               "loading": bool(feed.get("isLoading")), "last_build": feed.get("lastBuildDate", ""),
-                              "articles": [{"title": a.get("title", ""), "date": a.get("date", ""), "read": bool(a.get("isRead"))} for a in articles]})
+                              "articles": [{"id": a.get("id", ""), "title": a.get("title", ""), "date": a.get("date", ""), "read": bool(a.get("isRead")),
+                                            "url": a.get("torrentURL") or a.get("link") or ""} for a in articles]})
         rules = []
         r = self._call("GET", "rss/rules")
         if r.status_code == 200:
@@ -144,6 +146,40 @@ class Qbit:
                               "feeds": rule.get("affectedFeeds", []), "category": rule.get("assignedCategory", ""),
                               "last_match": rule.get("lastMatch", "")})
         return {"feeds": feeds, "rules": rules}
+
+    @staticmethod
+    def check_link(url: str) -> str:
+        url = (url or "").strip()
+        if not (url.startswith("magnet:?") or urlparse(url).scheme in ("http", "https")):
+            raise QbitError("That is not a magnet link or a .torrent address")
+        if len(url) > 4000:
+            raise QbitError("That link is too long")
+        return url
+
+    def add(self, url: str) -> None:
+        """Hand a link to qBittorrent; it decides where the download is saved, as it does for its own RSS rules."""
+        url = self.check_link(url)
+        r = self._call("POST", "torrents/add", data={"urls": url})
+        if r.status_code == 415:
+            raise QbitError("qBittorrent could not read that torrent")
+        if r.status_code >= 400 or r.text.strip() == "Fails.":
+            raise QbitError("qBittorrent did not take it. It may already have this download.")
+
+    def add_from_feed(self, feed: str, article_id: str) -> str:
+        """Add one item of a feed qBittorrent follows. The link is looked up here, not trusted from the page."""
+        for f in self.rss()["feeds"]:
+            if f["name"] != feed:
+                continue
+            for a in f["articles"]:
+                if a["id"] == article_id and a["url"]:
+                    self.add(a["url"])
+                    return a["title"]
+        raise QbitError("That feed item is no longer there")
+
+    @staticmethod
+    def btih(url: str) -> str:
+        m = re.search(r"xt=urn:btih:([0-9a-fA-F]{40})", url or "")
+        return m.group(1).lower() if m else ""
 
     def refresh_feed(self, path: str) -> None:
         self._call("POST", "rss/refreshItem", data={"itemPath": path})

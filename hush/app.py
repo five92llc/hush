@@ -705,7 +705,25 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/qbit/rss", dependencies=[need])
     def qbit_rss():
-        return _qb(qb.rss)
+        def go():
+            r = qb.rss()
+            have = {t["hash"].lower() for t in qb.torrents()}
+            for f in r["feeds"]:
+                for a in f["articles"]:
+                    a["in_client"] = bool(qb.btih(a["url"]) and qb.btih(a["url"]) in have)
+                    a.pop("url", None)                                    # the page never needs the link itself
+            return r
+        return _qb(go)
+
+    @app.post("/api/qbit/add", dependencies=[need])
+    def qbit_add(body: dict = Body(...)):
+        _qb(lambda: qb.add(str(body.get("url", ""))))
+        return {"ok": True}
+
+    @app.post("/api/qbit/rss/add", dependencies=[need])
+    def qbit_rss_add(body: dict = Body(...)):
+        title = _qb(lambda: qb.add_from_feed(str(body.get("feed", "")), str(body.get("id", ""))))
+        return {"ok": True, "title": title}
 
     @app.post("/api/qbit/rss/refresh", dependencies=[need])
     def qbit_rss_refresh(body: dict = Body(...)):

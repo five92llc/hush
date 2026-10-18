@@ -213,3 +213,36 @@ def test_qbit_reads_downloads_and_rss_and_notices_finished_ones(tmp_path):
     assert ("POST", "/api/v2/torrents/stop") in calls
     rss = qb.rss()
     assert rss["feeds"][0]["articles"][0]["title"] == "Show S01E02" and rss["rules"][0]["name"] == "Show"
+
+
+def test_qbit_adds_feed_items_by_id_and_checks_links(tmp_path):
+    from hush.db import DB
+    from hush.qbit import Qbit, QbitError
+    sent = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        p = req.url.path
+        if p == "/api/v2/auth/login":
+            return httpx.Response(200, text="Ok.")
+        if p == "/api/v2/rss/items":
+            return httpx.Response(200, json={"Feed": {"title": "F", "articles": [
+                {"id": "a1", "title": "Show S01E01", "date": "2026-10-18T10:00:00", "torrentURL": "magnet:?xt=urn:btih:" + "a" * 40}]}})
+        if p == "/api/v2/torrents/add":
+            sent.append(req.content.decode())
+            return httpx.Response(200, text="Ok.")
+        return httpx.Response(404)
+    qb = Qbit(DB(tmp_path / "q3.db"), transport=httpx.MockTransport(handler))
+    qb.update({"url": "http://qb:1", "username": "u", "password": "p"})
+    assert qb.add_from_feed("Feed", "a1") == "Show S01E01" and "urls=magnet" in sent[0]
+    assert Qbit.btih("magnet:?xt=urn:btih:" + "A" * 40) == "a" * 40
+    for bad in ("file:///etc/passwd", "ftp://x/y", "just words"):
+        try:
+            qb.add(bad)
+            assert False, bad
+        except QbitError:
+            pass
+    try:
+        qb.add_from_feed("Feed", "zzz")
+        assert False
+    except QbitError:
+        pass

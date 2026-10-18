@@ -886,6 +886,7 @@ const Catalog = {
     const eta = (s) => (s > 0 && s < 8640000 ? (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`) : "");
     const stateText = (t) => t.done ? (t.paused ? "Finished" : "Finished · sharing") : t.paused ? "Paused" : ({ downloading: "Downloading", stalledDL: "Waiting for sources", metaDL: "Getting details", queuedDL: "Queued", checkingDL: "Checking", error: "Error", missingFiles: "Files missing" })[t.state] || t.state;
 
+    const addWrap = h("div", { class: "dl-add" });
     const listBox = h("div", { class: "dl-list" }), rssBox = h("div", { class: "dl-rss" }), conn = h("div", { class: "dl-conn" });
     const act = async (hash, action) => { try { await api(`/api/qbit/torrents/${hash}/${action}`, { method: "POST" }); refreshList(); } catch (err) { toast(err.message); } };
 
@@ -898,6 +899,17 @@ const Catalog = {
         try { await api("/api/qbit/settings", { method: "PUT", body: { url: url.value, username: user.value, password: pass.value } }); toast("Saved"); this.open("downloads", null, { quiet: true }); }
         catch (err) { toast(err.message); }
       } }, url, user, pass, h("button", { class: "btn primary", type: "submit" }, "Save and connect"));
+    };
+
+    const addBox = () => {
+      const link = h("input", { type: "text", placeholder: "Paste a magnet link or .torrent address", "aria-label": "Link to add to qBittorrent", spellcheck: "false", autocomplete: "off" });
+      return h("form", { class: "row", onsubmit: async (e) => {
+        e.preventDefault();
+        const b = e.submitter; b.disabled = true;
+        try { await api("/api/qbit/add", { method: "POST", body: { url: link.value } }); toast("Sent to qBittorrent"); link.value = ""; refreshList(); }
+        catch (err) { toast(err.message); }
+        b.disabled = false;
+      } }, link, h("button", { class: "btn primary", type: "submit" }, "Add to qBittorrent"));
     };
 
     const refreshList = async () => {
@@ -913,10 +925,11 @@ const Catalog = {
           s.connected ? `Connected to qBittorrent ${s.version} at ${s.url}` : s.configured ? (s.error || "Not connected") : "Connect Hush to the qBittorrent you already run. Hush only watches its downloads and RSS rules; qBittorrent decides what is saved and where."),
         s.connected ? h("button", { class: "btn ghost", type: "button", onclick: () => { conn.querySelector("form")?.remove() || conn.append(form()); } }, "Change connection") : form());
       }
-      if (!s.connected) { listBox.replaceChildren(); rssBox.replaceChildren(); return; }
+      if (!s.connected) { listBox.replaceChildren(); rssBox.replaceChildren(); addWrap.replaceChildren(); return; }
       const listSig = JSON.stringify(s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed]));
       if (listSig === listBox.dataset.sig) return;
       listBox.dataset.sig = listSig;
+      if (!addWrap.firstChild) addWrap.append(addBox());                 // built once, so a link being pasted is never wiped
       listBox.replaceChildren(h("h2", {}, "Downloads"), ...(s.torrents.length ? s.torrents.map((t) => h("div", { class: "dl" },
         h("div", { class: "dl-top" }, h("strong", { class: "dl-name", title: t.name }, t.name),
           h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))),
@@ -935,16 +948,23 @@ const Catalog = {
             e.currentTarget.disabled = true; try { await api("/api/qbit/rss/refresh", { method: "POST", body: { name: f.name } }); toast("qBittorrent is checking the feed"); setTimeout(refreshRss, 4000); } catch (err) { toast(err.message); }
           } }, "Check now")),
           f.has_error ? h("p", { class: "error" }, "qBittorrent could not read this feed") : null,
-          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 8).map((a) => h("li", {}, a.title, a.date ? h("span", { class: "hint" }, ` · ${new Date(a.date).toLocaleDateString()}`) : null))))) : [h("p", { class: "hint" }, "No RSS feeds in qBittorrent yet.")]),
+          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 10).map((a) => h("li", {},
+            h("span", { class: "grow" }, a.title, a.date ? h("span", { class: "hint" }, ` · ${new Date(a.date).toLocaleDateString()}`) : null),
+            a.in_client ? h("span", { class: "hint" }, "In qBittorrent")
+              : h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
+                const b = e.currentTarget; b.disabled = true; b.textContent = "Adding…";
+                try { const r = await api("/api/qbit/rss/add", { method: "POST", body: { feed: f.name, id: a.id } }); toast(`Sent to qBittorrent: ${r.title}`); b.textContent = "Added"; refreshList(); }
+                catch (err) { toast(err.message); b.disabled = false; b.textContent = "Add"; }
+              } }, "Add")))))) : [h("p", { class: "hint" }, "No RSS feeds in qBittorrent yet.")]),
         r.rules.length ? h("h3", {}, "Download rules") : null,
         ...r.rules.map((u) => h("div", { class: "pref" }, h("div", {}, h("strong", {}, u.name), h("p", { class: "hint" }, [u.enabled ? "On" : "Off", u.must_contain && `matches "${u.must_contain}"`, u.last_match && `last match ${u.last_match}`].filter(Boolean).join(" · "))))));
     };
 
-    this.box().replaceChildren(h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Downloads"))), conn, listBox, rssBox);
+    this.box().replaceChildren(h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Downloads"))), conn, addWrap, listBox, rssBox);
     await refreshList(); refreshRss();
     this.dlTimer = setInterval(() => {                                 // keep the progress fresh while this page is open
       if (location.hash !== "#/downloads" || document.hidden) { if (location.hash !== "#/downloads") clearInterval(this.dlTimer); return; }
-      if (conn.contains(document.activeElement) && document.activeElement.matches("input")) return;     // someone is typing: leave the page alone
+      if (document.activeElement?.matches?.("input") && this.box().contains(document.activeElement)) return;     // someone is typing: leave the page alone
       refreshList();
     }, 5000);
   },

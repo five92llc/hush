@@ -663,3 +663,7 @@ html.tv { font-size: 150%; }
 .dl-actions { display: flex; gap: .4rem; }
 .dl-feed { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: .7rem .9rem; display: grid; gap: .4rem; }
 .dl-articles { margin: 0; padding-left: 1.1rem; display: grid; gap: .2rem; font-size: var(--s-1); }
+.dl-add { max-width: 52rem; margin-bottom: 1rem; }
+.dl-add .row input { flex: 1 1 14rem; }
+.dl-articles li { display: flex; align-items: center; gap: .6rem; list-style: none; margin-left: -1.1rem; }
+.dl-articles li .grow { flex: 1 1 auto; overflow-wrap: anywhere; }
