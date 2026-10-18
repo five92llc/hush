@@ -258,3 +258,37 @@ def test_library_version_changes_with_the_library(tmp_path):
     before = db.library_version()
     db.record_library("src", [("k1", "src", "a.mkv", "A")], 1.0)
     assert db.library_version() != before
+
+
+
+def test_my_list_follows_library_shows_and_remembers_status(env, monkeypatch):
+    c, db, keys = env
+    # nothing watched yet: the list is empty
+    assert c.get("/api/watchlist").json() == []
+    # watching an episode puts the show under Watching by itself, with the next episode to play
+    ep1 = media_key("lib", enc("ep1"))
+    db.save_progress("p1", ep1, "lib", enc("ep1"), "Ep 1", 95.0, 100.0)            # finished
+    items = c.get("/api/watchlist").json()
+    assert [(i["ref"], i["status"], i["auto"]) for i in items] == [("show:sh1", "watching", True)]
+    assert items[0]["progress"]["unwatched"] == 1 and items[0]["progress"]["next"]["episode"] == 2
+    # choosing a status keeps it
+    assert c.post("/api/watchlist", json={"show_key": "sh1", "status": "dropped"}).status_code == 200
+    assert [(i["status"], i["auto"]) for i in c.get("/api/watchlist").json()] == [("dropped", False)]
+    assert c.get("/api/library/shows/sh1").json()["list_status"] == "dropped"
+    # a show that is not in the library is followed by its TVmaze id
+    from hush import mylist
+    monkeypatch.setattr(mylist, "show_info", lambda tid: {"title": "Elsewhere", "year": 2026, "network": "HBO", "status": "Running", "poster_url": None, "imdb": None})
+    monkeypatch.setattr(mylist, "next_airing", lambda tid: {"next": {"season": 1, "episode": 3, "title": "Three", "airs_at": 2e9}, "status": "Running"})
+    assert c.post("/api/watchlist", json={"tvmaze_id": "123", "status": "planned"}).status_code == 200
+    ext = [i for i in c.get("/api/watchlist").json() if i["ref"] == "tm:123"][0]
+    assert ext["title"] == "Elsewhere" and not ext["in_library"] and ext["airing"]["episode"] == 3
+    assert c.delete("/api/watchlist?ref=tm:123").status_code == 200
+    assert all(i["ref"] != "tm:123" for i in c.get("/api/watchlist").json())
+
+
+def test_kids_cannot_follow_outside_shows(env):
+    c, db, keys = env
+    kid = make_kid(c)
+    as_profile(c, kid["id"])
+    assert c.post("/api/watchlist", json={"tvmaze_id": "123", "status": "planned"}).status_code == 403
+    assert c.get("/api/watchlist/search?q=anything").json() == []

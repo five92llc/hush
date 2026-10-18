@@ -211,3 +211,4 @@ Run the tests with `pip install pytest && pytest`.
 - **Backup sources.** If a channel stops answering, Hush tries another working channel with the same name.
 - **Fast zapping.** Channels are scanned briefly, neighbouring channels are prepared in advance, and probe results are remembered across restarts.
 - **Updating.** `./update.sh` on the server pulls the latest code from GitHub and restarts Hush.
+- **My List.** Each profile has its own list of shows and movies, with a status (Watching, Plan to watch, Completed, Dropped). Shows you start watching join it automatically. Use the My List menu on any show or movie, or search under My List to follow a show that is not in your library yet (adults only). Each card shows the next episode to play and when the next new one airs, and Home gets an "Up next on My List" row.

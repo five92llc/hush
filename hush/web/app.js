@@ -844,6 +844,7 @@ const Catalog = {
       else if (view === "home") await this.home();
       else if (view === "folders") await this.folders();
       else if (view === "live") await this.live();
+      else if (view === "mylist") await this.mylist();
       else if (view === "movies") await this.grid("movies");
       else if (view === "shows") await this.grid("shows");
       else if (view === "show") await this.show(id);
@@ -866,7 +867,7 @@ const Catalog = {
       if (!this.idle()) return;                                  // try again on the next beat; never yank the page from under someone
       this.version = v;
       const [view, id] = location.hash.replace(/^#\/?/, "").split("/");
-      if (["home", "movies", "shows", "show", "title", "live", "folders"].includes(view)) this.open(view, id, { quiet: true });
+      if (["home", "movies", "shows", "show", "title", "live", "folders", "mylist"].includes(view)) this.open(view, id, { quiet: true });
     };
     setInterval(check, 15000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
@@ -874,6 +875,87 @@ const Catalog = {
   idle() {
     if (document.querySelector("dialog[open]") || $("#library").hidden || !$("#player").hidden && !Player.mini) return false;
     return !document.activeElement?.matches?.("input, textarea, select");
+  },
+
+  /** A status picker for a show or movie: puts it on My List, changes its status, or takes it off. */
+  listControl(target, current, onChange) {
+    const labels = { watching: "Watching", planned: "Plan to watch", completed: "Completed", dropped: "Dropped" };
+    return h("select", { class: "list-status", "aria-label": "My List", onchange: async (e) => {
+      const v = e.target.value;
+      try {
+        if (!v) { if (target.ref) await api(`/api/watchlist?ref=${encodeURIComponent(target.ref)}`, { method: "DELETE" }); }
+        else await api("/api/watchlist", { method: "POST", body: { ...target, status: v } });
+        toast(v ? `${labels[v]}` : "Removed from My List");
+        onChange?.(v);
+      } catch (err) { toast(err.message); }
+    } }, h("option", { value: "" }, current ? "Remove from My List" : "＋ My List"),
+      ...Object.entries(labels).map(([k, t]) => h("option", { value: k, selected: k === current }, t)));
+  },
+
+  async mylist() {
+    this.cameFrom = "#/mylist";
+    document.title = "My List – Hush";
+    const st = this.listState ||= { filter: "all" };
+    const items = await api("/api/watchlist");
+    const names = { watching: "Watching", planned: "Plan to watch", completed: "Completed", dropped: "Dropped" };
+    const counts = { all: items.length };
+    for (const k of Object.keys(names)) counts[k] = items.filter((i) => i.status === k).length;
+    const rank = (i) => (i.progress?.unwatched ? 0 : i.airing ? 1 : 2);
+    const shown = items.filter((i) => st.filter === "all" || i.status === st.filter)
+      .sort((a, b) => Object.keys(names).indexOf(a.status) - Object.keys(names).indexOf(b.status) || rank(a) - rank(b) || (a.title || "").localeCompare(b.title || ""));
+
+    const chips = h("div", { class: "letters", role: "group", "aria-label": "Show" }, ...["all", ...Object.keys(names)].map((k) =>
+      h("button", { class: "lt", type: "button", "aria-pressed": String(st.filter === k), onclick: () => { st.filter = k; this.open("mylist", null, { quiet: true }); } },
+        `${k === "all" ? "All" : names[k]} ${counts[k]}`)));
+
+    const card = (i) => {
+      const href = i.kind === "movie" ? `#/title/${i.media_key}` : i.show_key ? `#/show/${i.show_key}` : null;
+      const nx = i.progress?.next;
+      const lines = [];
+      if (i.kind === "movie") lines.push(i.watched ? "Watched" : i.position ? `Resume ${fmt(i.position)}` : "");
+      else if (i.in_library) lines.push(nx ? `Next: S${nx.season}E${nx.episode}${nx.title ? ` · ${nx.title}` : ""}` : i.progress?.episodes ? "All caught up" : "No episodes yet");
+      else lines.push([i.network, i.show_status].filter(Boolean).join(" · "), "Not in your library");
+      if (i.airing) lines.push(`${i.in_library ? "New" : "Next"}: S${i.airing.season}E${i.airing.episode} · ${when(i.airing.airs_at)}`);
+      const art = h("div", { class: "art" }, i.art_url ? h("img", { src: thumb(i.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, i.title));
+      const playHref = i.kind === "movie" ? `#/p/${i.source_id}/${i.item_id}` : nx ? `#/p/${nx.source_id}/${nx.item_id}` : null;
+      const target = i.show_key ? { show_key: i.show_key } : i.media_key ? { media_key: i.media_key } : { ref: i.ref };
+      return h("div", { class: "card ml" },
+        href ? h("a", { href }, art) : art,
+        h("span", { class: "name" }, i.title), ...lines.filter(Boolean).map((t) => h("span", { class: "sub" }, t)),
+        h("div", { class: "ml-actions" },
+          playHref ? h("a", { class: "btn subtle", href: playHref, onclick: () => { Queue.set([i.kind === "movie" ? { src: i.source_id, item: i.item_id, title: i.title } : { src: nx.source_id, item: nx.item_id, title: nx.title }]); } }, nx?.position || i.position ? "Resume" : "Play") : null,
+          this.listControl({ ...target }, i.status, () => this.open("mylist", null, { quiet: true }))));
+    };
+
+    const found = h("div", { class: "found" });
+    const search = h("input", { class: "search", type: "search", placeholder: "Find a show to follow", "aria-label": "Find a show to follow", autocomplete: "off" });
+    let timer;
+    search.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const q = search.value.trim();
+        if (q.length < 2) { found.replaceChildren(); return; }
+        try {
+          const rs = await api(`/api/watchlist/search?q=${encodeURIComponent(q)}`);
+          found.replaceChildren(...(rs.length ? rs.map((r) => h("div", { class: "found-row" },
+            h("div", {}, h("strong", {}, r.title), r.year ? ` (${r.year})` : "", h("div", { class: "hint" }, [r.network, r.status].filter(Boolean).join(" · "))),
+            items.some((i) => i.ref === `tm:${r.tvmaze_id}`) ? h("span", { class: "hint" }, "On your list")
+              : h("button", { class: "btn subtle", type: "button", onclick: async () => {
+                try { await api("/api/watchlist", { method: "POST", body: { tvmaze_id: r.tvmaze_id, status: "planned" } }); toast(`${r.title} added`); search.value = ""; this.open("mylist", null, { quiet: true }); }
+                catch (err) { toast(err.message); }
+              } }, "Follow"))) : [h("p", { class: "hint" }, "Nothing found")]));
+        } catch (err) { found.replaceChildren(h("p", { class: "error" }, err.message)); }
+      }, 350);
+    });
+
+    this.box().replaceChildren(
+      h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "My List"),
+        h("p", { class: "hint" }, "Shows and movies you follow, what to watch next, and when new episodes air."))),
+      ...[isKids() ? null : h("div", { class: "ml-search" }, search, found),
+        items.length ? chips : null,
+        items.length ? h("div", { class: "grid" }, ...shown.map(card))
+          : h("div", { class: "empty" }, h("h3", {}, "Your list is empty"),
+            h("p", {}, "Shows you start watching appear here by themselves. Use the box above to follow a show you are interested in, or the My List menu on any show or movie."))].filter(Boolean));
   },
 
   /** The programme-guide part of the playlist manager: sources, status and a refresh button. */
@@ -1069,9 +1151,10 @@ const Catalog = {
     this.cameFrom = "#/home";
     document.title = "Home – Hush";
     const get = (p, f = (x) => x) => api(p).then(f).catch(() => []);
-    const [cont, recent, favs, movies, shows, soon] = await Promise.all([
+    const [cont, recent, favs, movies, shows, soon, mine] = await Promise.all([
       get("/api/progress/recent?limit=12"), get("/api/live/channels?recent=true&limit=12", (r) => r.channels),
-      get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows"), get("/api/library/upcoming")]);
+      get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows"), get("/api/library/upcoming"), get("/api/watchlist")]);
+    const upNext = mine.filter((i) => i.status === "watching" && i.progress?.next && !i.progress.next.position);
     const chan = (list) => (c) => h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => {
       Queue.set(list.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups }))); Queue.loadMore = null;
     } }, h("div", { class: "logo" }, c.logo_url ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))),
@@ -1087,6 +1170,10 @@ const Catalog = {
           it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null),
         h("span", { class: "name" }, it.title),
         h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))))),
+      this.shelf("Up next on My List", "#/mylist", upNext.slice(0, 16).map((i) => h("a", { class: "card wide", href: `#/p/${i.progress.next.source_id}/${i.progress.next.item_id}`,
+        onclick: () => Queue.set([{ src: i.progress.next.source_id, item: i.progress.next.item_id, title: i.progress.next.title }]) },
+        h("div", { class: "art" }, i.art_url ? h("img", { src: thumb(i.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, i.title)),
+        h("span", { class: "name" }, i.title), h("span", { class: "sub" }, `S${i.progress.next.season}E${i.progress.next.episode}${i.progress.next.title ? ` · ${i.progress.next.title}` : ""}`)))),
       this.shelf("Coming up", null, soon.slice(0, 16).map((u) => h("a", { class: "card", href: `#/show/${u.show_key}` },
         h("div", { class: "art" }, u.art_url ? h("img", { src: thumb(u.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, u.show_title)),
         h("span", { class: "name" }, u.show_title), h("span", { class: "sub" }, `S${u.season}E${u.episode} · ${when(u.airs_at)}`)))),
@@ -1236,7 +1323,7 @@ const Catalog = {
   },
 
   async show(key) {
-    const { show, episodes, upcoming = [] } = await api(`/api/library/shows/${key}`);
+    const { show, episodes, upcoming = [], list_status = null } = await api(`/api/library/shows/${key}`);
     const seasons = {};
     for (const e of episodes) (seasons[e.season ?? 0] ||= []).push(e);
     this.cameFrom = "#/shows";
@@ -1248,7 +1335,8 @@ const Catalog = {
         h("div", {}, h("h1", {}, show.title, show.year ? ` (${show.year})` : ""),
           h("div", { class: "facts" }, ...[show.genres?.join(", "), show.rating ? `★ ${show.rating.toFixed(1)}` : "", plural(episodes.length, "episode")].filter(Boolean).map((t) => h("span", {}, t))),
           show.overview ? h("p", { class: "overview" }, show.overview) : null,
-          h("div", { class: "actions" }, h("button", { class: "btn subtle", type: "button", onclick: () => this.scanAll(episodes) }, "Scan all episodes")))),
+          h("div", { class: "actions" }, this.listControl({ show_key: key }, list_status, () => this.open("show", key, { quiet: true })),
+            h("button", { class: "btn subtle admin-only", type: "button", onclick: () => this.scanAll(episodes) }, "Scan all episodes")))),
       upcoming.length ? h("section", { class: "season" }, h("h3", {}, "Coming up"),
         h("ul", { class: "eps" }, ...upcoming.slice(0, 8).map((u) => h("li", { class: "ep" },
           h("div", {}, h("div", { class: "ep-title" }, `S${u.season}E${u.episode}${u.title ? ` · ${u.title}` : ""}`, h("span", { class: "badge", style: "margin-left:.5rem" }, when(u.airs_at))),
@@ -1289,6 +1377,7 @@ const Catalog = {
           m.overview ? h("p", { class: "overview" }, m.overview) : h("p", { class: "hint" }, "No summary yet."),
           h("div", { class: "actions" },
             h("a", { class: "btn primary", href: `#/p/${m.source_id}/${m.item_id}` }, m.position && !m.watched ? `Resume from ${fmt(m.position)}` : "Play"),
+            m.kind === "movie" ? this.listControl({ media_key: key }, m.list_status, () => this.open("title", key, { quiet: true })) : null,
             h("button", { class: "btn ghost", type: "button", onclick: async () => {
               try {
                 await api(`/api/progress/${key}/watched`, { method: "POST", body: { watched: !m.watched, source_id: m.source_id, item_id: m.item_id, title: m.title } });
@@ -2358,7 +2447,7 @@ const TV = {
     if (this.on) this.focusSoon(200);
   },
   navCurrent(view) {
-    const group = { home: "home", movies: "movies", title: Catalog.cameFrom?.replace("#/", "") || "movies", shows: "shows", show: "shows", live: "live", b: "folders", folders: "folders" }[view];
+    const group = { home: "home", movies: "movies", title: Catalog.cameFrom?.replace("#/", "") || "movies", shows: "shows", show: "shows", live: "live", b: "folders", folders: "folders", mylist: "mylist" }[view];
     $$("#tv-nav a").forEach((a) => a.setAttribute("aria-current", String(a.hash === `#/${group}`)));
   },
 
@@ -2656,7 +2745,7 @@ async function route() {
     return;
   }
   $("#library").hidden = false;
-  const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles"].includes(view);
+  const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles", "mylist"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;
   $$("#rail-links a").forEach((a) => { if (!inCatalog) a.removeAttribute("aria-current"); });
   if (inCatalog) { Catalog.open(view, src); return; }

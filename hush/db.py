@@ -163,6 +163,19 @@ CREATE TABLE IF NOT EXISTS programmes (
     descr       TEXT
 );
 CREATE INDEX IF NOT EXISTS programmes_chan ON programmes(tvg_id, start);
+CREATE TABLE IF NOT EXISTS watchlist (
+    profile_id  TEXT NOT NULL,
+    ref         TEXT NOT NULL,       -- show:<show_key> | movie:<media_key> | tm:<tvmaze id> for a show not in the library
+    kind        TEXT NOT NULL,       -- show | movie
+    title       TEXT,
+    year        INTEGER,
+    art_key     TEXT,                -- art file for a show that is not in the library
+    extra       TEXT,                -- JSON: ids, network, ...
+    status      TEXT NOT NULL,       -- watching | planned | completed | dropped
+    added_at    REAL NOT NULL,
+    updated_at  REAL NOT NULL,
+    PRIMARY KEY (profile_id, ref)
+);
 CREATE TABLE IF NOT EXISTS upcoming (
     show_key    TEXT NOT NULL,
     season      INTEGER NOT NULL,
@@ -601,7 +614,7 @@ class DB:
                    (pid, name, int(kids), color, avatar or "", json.dumps(settings), pos, time.time()))
 
     def delete_profile(self, pid: str) -> None:
-        for sql in ("DELETE FROM progress WHERE profile_id=?", "DELETE FROM channel_marks WHERE profile_id=?",
+        for sql in ("DELETE FROM progress WHERE profile_id=?", "DELETE FROM channel_marks WHERE profile_id=?", "DELETE FROM watchlist WHERE profile_id=?",
                     "DELETE FROM profiles WHERE id=?"):
             self._exec(sql, (pid,))
 
@@ -615,6 +628,29 @@ class DB:
     def save_playlist(self, pid: str, name: str, url: str) -> None:
         self._exec("INSERT INTO playlists(id,name,url) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url",
                    (pid, name, url))
+
+    # ---- my list ---------------------------------------------------------------------------
+    def list_watch(self, profile_id: str) -> list[dict]:
+        rows = self._all("SELECT * FROM watchlist WHERE profile_id=? ORDER BY updated_at DESC", (profile_id,))
+        for r in rows:
+            r["extra"] = json.loads(r["extra"]) if r.get("extra") else {}
+        return rows
+
+    def get_watch(self, profile_id: str, ref: str) -> dict | None:
+        r = self._one("SELECT * FROM watchlist WHERE profile_id=? AND ref=?", (profile_id, ref))
+        if r:
+            r["extra"] = json.loads(r["extra"]) if r.get("extra") else {}
+        return r
+
+    def save_watch(self, profile_id: str, ref: str, kind: str, status: str, title: str = "", year: int | None = None,
+                   art_key: str = "", extra: dict | None = None) -> None:
+        now = time.time()
+        self._exec("INSERT INTO watchlist(profile_id,ref,kind,title,year,art_key,extra,status,added_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?) "
+                   "ON CONFLICT(profile_id,ref) DO UPDATE SET status=excluded.status, updated_at=excluded.updated_at",
+                   (profile_id, ref, kind, title, year, art_key, json.dumps(extra or {}), status, now, now))
+
+    def delete_watch(self, profile_id: str, ref: str) -> None:
+        self._exec("DELETE FROM watchlist WHERE profile_id=? AND ref=?", (profile_id, ref))
 
     def replace_upcoming(self, show_key: str, rows: list[tuple]) -> None:
         with self._lock:

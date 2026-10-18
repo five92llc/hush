@@ -12,12 +12,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, epg, hw, media, profiles as rules, stream
+from . import discover, epg, hw, media, mylist, profiles as rules, stream
 from .hls import HLSError, HLSManager
 from .live import LiveTV
 from .remote import RemoteHub
@@ -26,7 +27,7 @@ from .auth import COOKIE, SESSION_TTL, Auth
 from .config import Config, load_config
 from .db import DB
 from .sources import Registry, SourceError, discover_dlna, media_key
-from .library import transcript as tr
+from .library import art, transcript as tr
 from .library.rename import RenameError, Renamer
 from .library.service import MetadataService
 from .notify import Notifier
@@ -629,6 +630,106 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                  "title": r["title"], "airs_at": r["airs_at"], "overview": r["overview"], "runtime": r["runtime"],
                  "art_url": f"/api/art/{r['show_key']}.jpg" if r.get("show_art") else None} for r in rows]
 
+    # ---- my list -----------------------------------------------------------------
+    def _watch_items(prof: dict) -> list[dict]:
+        """Everything this profile follows: what they added, plus shows they have started watching."""
+        shows = {s["show_key"]: s for s in library_shows(prof)}                 # only shows this profile may see
+        rows = {r["ref"]: r for r in db.list_watch(prof["id"])}
+        for key, s in shows.items():                                              # started watching: counts as Watching until told otherwise
+            if f"show:{key}" not in rows and (s.get("watched") or 0) > 0:
+                rows[f"show:{key}"] = {"ref": f"show:{key}", "kind": "show", "status": "watching", "auto": True, "updated_at": 0, "extra": {}}
+        items = []
+        for ref, r in rows.items():
+            item = {"ref": ref, "kind": r["kind"], "status": r["status"], "auto": bool(r.get("auto")), "updated_at": r["updated_at"]}
+            if ref.startswith("show:"):
+                key = ref[5:]
+                s = shows.get(key)
+                if not s:
+                    continue
+                prog = mylist.library_progress(db.episodes_of(key, prof["id"]))
+                up = db.list_upcoming(key, limit=1)
+                item.update(title=s["title"], year=s.get("year"), art_url=s.get("art_url"), in_library=True, show_key=key, progress=prog,
+                            airing=({"season": up[0]["season"], "episode": up[0]["episode"], "title": up[0]["title"], "airs_at": up[0]["airs_at"]} if up else None))
+            elif ref.startswith("movie:"):
+                m = db.get_meta(ref[6:])
+                if not m or not title_ok(prof, ref[6:]):
+                    continue
+                prog = db.get_progress(prof["id"], m["media_key"])
+                item.update(title=m["title"], year=m.get("year"), art_url=f"/api/art/{m['media_key']}.jpg" if m.get("art") else None, in_library=True,
+                            media_key=m["media_key"], source_id=m["source_id"], item_id=m["item_id"],
+                            watched=bool(prog and prog["finished"]), position=(prog or {}).get("position", 0))
+            elif ref.startswith("tm:") and not prof["kids"]:
+                info = mylist.next_airing(ref[3:])
+                item.update(title=r["title"], year=r["year"], in_library=False, tvmaze_id=ref[3:], network=r["extra"].get("network", ""),
+                            art_url=f"/api/art/{r['art_key']}.jpg" if r.get("art_key") and (library.art_dir / f"{r['art_key']}.jpg").exists() else None,
+                            airing=info["next"], show_status=info["status"])
+            else:
+                continue
+            items.append(item)
+        return items
+
+    @app.get("/api/watchlist", dependencies=[need])
+    def watchlist(prof: dict = Depends(get_profile)):
+        return _watch_items(prof)
+
+    @app.get("/api/watchlist/search", dependencies=[need])
+    def watchlist_search(q: str, prof: dict = Depends(get_profile)):
+        if prof["kids"] or len(q.strip()) < 2:
+            return []
+        try:
+            return mylist.search_shows(q.strip())
+        except httpx.HTTPError:
+            raise HTTPException(502, "Could not reach TVmaze")
+
+    @app.post("/api/watchlist", dependencies=[need])
+    def watchlist_set(body: dict = Body(...), prof: dict = Depends(get_profile)):
+        status = str(body.get("status", "planned"))
+        if status not in mylist.STATUSES:
+            raise HTTPException(400, "Unknown status")
+        if body.get("tvmaze_id"):                              # a show that is not in the library
+            if prof["kids"]:
+                raise HTTPException(403, "Ask a grown-up to add shows")
+            tid = str(body["tvmaze_id"])
+            if not tid.isdigit():
+                raise HTTPException(400, "Bad show")
+            ref = f"tm:{tid}"
+            if not db.get_watch(prof["id"], ref):
+                try:
+                    info = mylist.show_info(tid)
+                except httpx.HTTPError:
+                    raise HTTPException(502, "Could not reach TVmaze")
+                key = mylist.art_key(ref)
+                if info["poster_url"]:
+                    art.from_url(cfg.ffmpeg, info["poster_url"], library.art_dir / f"{key}.jpg")
+                db.save_watch(prof["id"], ref, "show", status, info["title"], info["year"], key, {"network": info["network"]})
+                return {"ok": True, "ref": ref}
+        elif body.get("show_key"):
+            ref = f"show:{body['show_key']}"
+            show = db.get_show(str(body["show_key"]))
+            if not show:
+                raise HTTPException(404)
+            db.save_watch(prof["id"], ref, "show", status, show["title"], show.get("year"))
+            return {"ok": True, "ref": ref}
+        elif body.get("media_key"):
+            ref = f"movie:{body['media_key']}"
+            m = db.get_meta(str(body["media_key"]))
+            if not m:
+                raise HTTPException(404)
+            db.save_watch(prof["id"], ref, "movie", status, m["title"], m.get("year"))
+            return {"ok": True, "ref": ref}
+        else:
+            ref = str(body.get("ref", ""))
+            if not db.get_watch(prof["id"], ref):
+                raise HTTPException(404)
+        w = db.get_watch(prof["id"], ref)
+        db.save_watch(prof["id"], ref, w["kind"], status, w["title"], w["year"], w.get("art_key") or "", w["extra"])
+        return {"ok": True, "ref": ref}
+
+    @app.delete("/api/watchlist", dependencies=[need])
+    def watchlist_remove(ref: str, prof: dict = Depends(get_profile)):
+        db.delete_watch(prof["id"], ref)
+        return {"ok": True}
+
     @app.get("/api/library/upcoming", dependencies=[need])
     def library_upcoming(prof: dict = Depends(get_profile)):
         """Episodes of the shows in the library that have not aired yet, soonest first."""
@@ -644,7 +745,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if prof["kids"] and not eps:
             raise HTTPException(404)
         show["art_url"] = f"/api/art/{show_key}.jpg" if show.get("art") else None
-        return {"show": show, "episodes": [_card(e) for e in eps], "upcoming": _upc(db.list_upcoming(show_key))}
+        w = db.get_watch(prof["id"], f"show:{show_key}")
+        return {"show": show, "episodes": [_card(e) for e in eps], "upcoming": _upc(db.list_upcoming(show_key)),
+                "list_status": w["status"] if w else None}
 
     @app.get("/api/library/title/{key}", dependencies=[need])
     def library_title(key: str, prof: dict = Depends(get_profile)):
@@ -654,6 +757,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         m["scanned"] = bool(db.get_filter(key))
         pr = db.get_progress(prof["id"], key) or {}
         m["position"], m["duration"], m["watched"] = pr.get("position"), pr.get("duration"), bool(pr.get("finished"))
+        w = db.get_watch(prof["id"], f"movie:{key}")
+        m["list_status"] = w["status"] if w else None
         return _card(m)
 
     thumb_lock = threading.Lock()
