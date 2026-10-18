@@ -148,6 +148,13 @@ CREATE TABLE IF NOT EXISTS sources (
     id          TEXT PRIMARY KEY,
     data        TEXT NOT NULL        -- JSON source definition
 );
+CREATE TABLE IF NOT EXISTS probes (
+    source_id   TEXT NOT NULL,
+    item_id     TEXT NOT NULL,
+    data        TEXT NOT NULL,       -- JSON of what ffprobe found, so a channel starts fast after a restart
+    updated_at  REAL NOT NULL,
+    PRIMARY KEY (source_id, item_id)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -381,6 +388,19 @@ class DB:
             " (SELECT COALESCE(MAX(updated_at),0) FROM meta) c, (SELECT COALESCE(MAX(updated_at),0) FROM shows) d,"
             " (SELECT COUNT(*) FROM filters) e, (SELECT COUNT(*) FROM channels) f, (SELECT COUNT(*) FROM playlists) g")
         return ".".join(str(r[k]) for k in "abcdefg")
+
+    def get_probe(self, source_id: str, item_id: str, max_age: float) -> dict | None:
+        r = self._one("SELECT data, updated_at FROM probes WHERE source_id=? AND item_id=?", (source_id, item_id))
+        if not r or time.time() - r["updated_at"] > max_age:
+            return None
+        try:
+            return json.loads(r["data"])
+        except ValueError:
+            return None
+
+    def save_probe(self, source_id: str, item_id: str, data: dict) -> None:
+        self._exec("INSERT OR REPLACE INTO probes(source_id,item_id,data,updated_at) VALUES(?,?,?,?)",
+                   (source_id, item_id, json.dumps(data), time.time()))
 
     def delete_old_jobs(self, before: float) -> int:
         return self._exec("DELETE FROM jobs WHERE status IN ('done','error','cancelled') "

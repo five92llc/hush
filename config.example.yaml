@@ -8,7 +8,7 @@ data_dir: /data                 # database, cached transcripts, Whisper models
 # public_url: https://hush.example.com   # set when behind a reverse proxy, used for VLC/TV links
 
 # Video encoding for files the browser can't play directly (HEVC, MPEG-2, DivX...).
-video_encoder: libx264          # or h264_nvenc (NVIDIA), h264_qsv (Intel), h264_vaapi
+video_encoder: auto             # auto picks a GPU when it finds one; or libx264, h264_nvenc, h264_qsv, h264_vaapi
 # hwaccel: cuda                 # decode acceleration passed to ffmpeg -hwaccel
 
 analysis:

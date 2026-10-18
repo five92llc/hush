@@ -56,6 +56,13 @@ const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /
    unless the page claims them, so the app handles them itself and hides the pointer. */
 const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|Android.*\bTV\b/i;
 const IS_TV_DEVICE = TVUA.test(UA);
+/** What video this screen can play without the server re-encoding it: 0 none, 1 HEVC, 2 HEVC 10-bit. (Safari gets HLS instead.) */
+const HEVC = (() => {
+  try {
+    const v = document.createElement("video"), ok = (t) => !!v.canPlayType && v.canPlayType(`video/mp4; codecs="${t}"`) === "probably";
+    return IS_WEBKIT ? 0 : ok("hvc1.2.4.L93.B0") ? 2 : ok("hvc1.1.6.L93.B0") ? 1 : 0;
+  } catch { return 0; }
+})();
 /** TV remotes often report keys only by their old numeric code (key is empty or "Unidentified"): translate them. */
 const KEYCODE_NAMES = { 37: "ArrowLeft", 38: "ArrowUp", 39: "ArrowRight", 40: "ArrowDown", 13: "Enter", 27: "Escape", 8: "Backspace",
   461: "GoBack", 10009: "GoBack", 10182: "GoBack", 415: "MediaPlay", 19: "MediaPause", 413: "MediaStop", 417: "MediaFastForward",
@@ -1442,7 +1449,7 @@ const Player = {
     if (keepMini) this.minimize();
     let info;
     try {
-      info = await api(`/api/media/${sourceId}/${itemId}`, { signal: abort.signal });
+      info = await api(`/api/media/${sourceId}/${itemId}?hevc=${HEVC}`, { signal: abort.signal });
     } catch (err) {
       if (token !== this.openToken) return;                       // replaced by another channel: nothing to report
       this.report(false); this.message(err.message, true); return;

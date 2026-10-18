@@ -1,6 +1,7 @@
 """Hush HTTP API + web UI."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 import re
@@ -16,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, media, profiles as rules, stream
+from . import discover, hw, media, profiles as rules, stream
 from .hls import HLSError, HLSManager
 from .live import LiveTV
 from .remote import RemoteHub
@@ -215,8 +216,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if hit:
             return hit
         ref = resolve(source_id, item_id)
+        remote = bool(ref.url) and not ref.path
+        if remote and (saved := db.get_probe(source_id, item_id, 7 * 86400)):       # channels and links: remembered across restarts
+            result = cache.put(key, media.ProbeResult.from_saved(saved))
+            if result.duration is None:
+                ref.live = True
+            return result
         try:
             result = cache.put(key, media.probe(cfg.ffprobe, ref, source_id, item_id))
+            if remote:
+                db.save_probe(source_id, item_id, dataclasses.asdict(result))
             if result.duration is None and ref.url and not ref.live:
                 ref.live = True          # a stream with no length (IPTV channel): no seeking, scanning or filtering
             return result
@@ -268,7 +277,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/config", dependencies=[need])
     def config_info():
-        return {"engines": analyzer.engines(), "categories": analyzer.wordlist.categories_info(),
+        return {"encoder": hw.encoder_for(cfg), "engines": analyzer.engines(), "categories": analyzer.wordlist.categories_info(),
                 "source_types": ["local", "smb", "ftp", "sftp", "http", "dlna", "jellyfin", "plex"]}
 
     # ---- sources --------------------------------------------------------
@@ -321,7 +330,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     # ---- media ----------------------------------------------------------
     @app.get("/api/media/{source_id}/{item_id}", dependencies=[need])
-    def media_info(source_id: str, item_id: str, audio: int | None = None, prof: dict = Depends(get_profile)):
+    def media_info(source_id: str, item_id: str, audio: int | None = None, hevc: int = 0, prof: dict = Depends(get_profile)):
         ref = resolve(source_id, item_id)
         p = probe(source_id, item_id)
         key = media_key(source_id, item_id)
@@ -330,7 +339,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         resume = ({"position": prog["position"], "finished": bool(prog["finished"])}
                   if prog and not ref.live else None)
         return {"title": ref.title, "kind": "video" if p.video else "audio", "name": ref.name,
-                "live": ref.live, "resume": resume, "media_key": key, "probe": p.to_dict(), "mode": media.choose_mode(ref, p, audio),
+                "live": ref.live, "resume": resume, "media_key": key, "probe": p.to_dict(), "mode": media.choose_mode(ref, p, audio, hevc),
                 "has_filter": bool(f), "job": db.active_job_for(key)}
 
     @app.get("/api/raw/{source_id}/{item_id}", dependencies=[need])
@@ -354,7 +363,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         mode = mode if mode in ("remux", "transcode", "audio") else media.choose_mode(ref, p, audio)
         if mode == "direct":
             mode = "audio" if not p.video else "remux"
-        cmd, mime = stream.build_ffmpeg_cmd(cfg, ref, source_id, item_id, mode, max(0.0, start), audio)
+        cmd, mime = stream.build_ffmpeg_cmd(cfg, ref, source_id, item_id, mode, max(0.0, start), audio,
+                                            vcodec=p.video[0].codec if p.video else None)
         return await stream.ffmpeg_response(request, cmd, mime)
 
     @app.get("/api/hls/start/{source_id}/{item_id}", dependencies=[need])
@@ -372,7 +382,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         try:
             sid = hls.create(lambda d: stream.build_ffmpeg_cmd(
                 cfg, ref, source_id, item_id, mode, 0.0 if ref.live else max(0.0, start), audio,
-                mute_ranges=ranges, container="hls", hls_dir=d)[0], owner=tab[:40])
+                mute_ranges=ranges, container="hls", hls_dir=d, vcodec=p.video[0].codec if p.video else None)[0], owner=tab[:40])
         except HLSError as exc:
             raise HTTPException(502, str(exc))
         return RedirectResponse(f"/api/hls/{sid}/index.m3u8", status_code=307)

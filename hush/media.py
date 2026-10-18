@@ -83,6 +83,11 @@ class ProbeResult:
     audio: list[Stream] = field(default_factory=list)
     subtitles: list[Stream] = field(default_factory=list)
 
+    @classmethod
+    def from_saved(cls, d: dict) -> "ProbeResult":
+        mk = lambda ss: [Stream(**s) for s in ss]  # noqa: E731
+        return cls(d["duration"], tuple(d["format_names"]), mk(d["video"]), mk(d["audio"]), mk(d["subtitles"]))
+
     def to_dict(self) -> dict[str, Any]:
         f = lambda ss: [{"index": s.index, "codec": s.codec, "language": s.language,  # noqa: E731
                           "label": s.label(), "default": s.default} for s in ss]
@@ -141,10 +146,12 @@ def _probe(ffprobe: str, ref: MediaRef, source_id: str, item_id: str, timeout: i
     return res
 
 
-def choose_mode(ref: MediaRef, p: ProbeResult, audio_index: int | None = None) -> str:
+def choose_mode(ref: MediaRef, p: ProbeResult, audio_index: int | None = None, hevc: int = 0) -> str:
+    """``hevc`` is what the screen can play itself: 0 nothing, 1 HEVC Main, 2 also 10-bit (Main 10)."""
     vcodec = p.video[0].codec if p.video else None
+    pix = (p.video[0].pix_fmt or "yuv420p") if p.video else "yuv420p"
     # Browsers decode 8-bit 4:2:0 only. 10-bit and 4:2:2 H.264/VP9/AV1 must be re-encoded.
-    eight_bit = not p.video or (p.video[0].pix_fmt or "yuv420p") in ("yuv420p", "yuvj420p")
+    eight_bit = not p.video or pix in ("yuv420p", "yuvj420p")
     a = next((s for s in p.audio if s.index == audio_index), p.audio[0] if p.audio else None)
     acodec = a.codec if a else None
     a_ok = acodec is None or acodec in BROWSER_AUDIO or (acodec.startswith("pcm_") and ref.ext == ".wav")
@@ -160,6 +167,8 @@ def choose_mode(ref: MediaRef, p: ProbeResult, audio_index: int | None = None) -
         return "direct"
     if vcodec in ("h264", "vp9", "av1") and eight_bit:  # all three are valid in fragmented MP4
         return "remux"
+    if vcodec in ("hevc", "h265") and (hevc >= 2 or (hevc == 1 and eight_bit)) and pix in ("yuv420p", "yuv420p10le"):
+        return "remux"                                   # this screen decodes HEVC itself: copy it, no re-encode
     return "transcode"
 
 

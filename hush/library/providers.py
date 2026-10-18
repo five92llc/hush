@@ -1,6 +1,7 @@
 """Where movie and show details come from.
 
 * TMDB   - best data; needs a free API key (themoviedb.org/settings/api)
+* Cinemeta - posters, summaries and episodes for movies and shows, no key (the catalogue Stremio uses)
 * Wikipedia - movies, no key
 * TVmaze - shows and episodes, no key
 """
@@ -19,7 +20,9 @@ TMDB = "https://api.themoviedb.org/3"
 TMDB_IMG = "https://image.tmdb.org/t/p/w500"
 TVMAZE = "https://api.tvmaze.com"
 # Posters are only ever fetched from these hosts.
-IMAGE_HOSTS = ("image.tmdb.org", "upload.wikimedia.org", "static.tvmaze.com")
+CINEMETA = "https://v3-cinemeta.strem.io"
+IMAGE_HOSTS = ("image.tmdb.org", "upload.wikimedia.org", "static.tvmaze.com",
+               "m.media-amazon.com", "images.metahub.space", "episodes.metahub.space")
 
 
 def polite_get(client: httpx.Client, url: str, retries: int = 3, **kw) -> httpx.Response:
@@ -236,6 +239,120 @@ class TVmazeProvider:
                 for e in r.json() if e.get("number") is not None}
 
 
+class CinemetaProvider:
+    """Movies and shows without a key. IMDb-sourced posters, summaries, ratings and per-episode stills."""
+    name = "cinemeta"
+
+    def __init__(self, client: httpx.Client | None = None):
+        self.http = client or httpx.Client(timeout=15, headers=UA)
+
+    def _shape(self, m: dict) -> dict:
+        rt = re.search(r"\d+", str(m.get("runtime") or ""))
+        try:
+            rating = float(m.get("imdbRating")) if m.get("imdbRating") else None
+        except ValueError:
+            rating = None
+        iid = m.get("imdb_id") or m.get("id") or ""
+        return {"provider": "cinemeta", "id": iid, "title": m.get("name", ""), "year": _year(str(m.get("year") or m.get("releaseInfo") or "")),
+                "overview": shorten(m.get("description") or m.get("overview") or ""), "genres": m.get("genres") or [],
+                "rating": rating, "runtime": int(rt.group()) if rt else None,
+                "poster_url": (m.get("poster") or "").replace("/poster/small/", "/poster/medium/") or None,
+                "ids": {"imdb": iid} if iid.startswith("tt") else {}}
+
+    def _search(self, kind: str, title: str) -> list[dict]:
+        r = polite_get(self.http, f"{CINEMETA}/catalog/{kind}/top/search={quote(title, safe='')}.json")
+        if r.status_code != 200:
+            return []
+        return [self._shape(m) for m in r.json().get("metas", [])[:8]]
+
+    def _detail(self, kind: str, iid: str) -> dict:
+        r = polite_get(self.http, f"{CINEMETA}/meta/{kind}/{iid}.json")
+        r.raise_for_status()
+        return self._shape(r.json().get("meta") or {})
+
+    def search_movies(self, title: str, year: int | None) -> list[dict]:
+        return self._search("movie", title)
+
+    def movie(self, title: str, year: int | None) -> dict | None:
+        hit = best(self.search_movies(title, year), title, year)
+        return {**hit, **{k: v for k, v in self._detail("movie", hit["id"]).items() if v}} if hit else None
+
+    def movie_detail(self, mid: str) -> dict:
+        return self._detail("movie", mid)
+
+    def search_shows(self, title: str, year: int | None) -> list[dict]:
+        return self._search("series", title)
+
+    def show(self, title: str, year: int | None) -> dict | None:
+        hit = best(self.search_shows(title, year), title, year)
+        return {**hit, **{k: v for k, v in self._detail("series", hit["id"]).items() if v}} if hit else None
+
+    def show_detail(self, sid: str) -> dict:
+        return self._detail("series", sid)
+
+    def episodes(self, sid: str, season: int) -> dict[tuple[int, int], dict]:
+        r = polite_get(self.http, f"{CINEMETA}/meta/series/{sid}.json")
+        if r.status_code != 200:
+            return {}
+        return {(v["season"], v["episode"]): {"title": v.get("name") or v.get("title") or "", "overview": v.get("overview") or v.get("description") or "",
+                                              "still_url": v.get("thumbnail")}
+                for v in (r.json().get("meta") or {}).get("videos", []) if v.get("season") == season and v.get("episode") is not None}
+
+
+class Chain:
+    """Several providers behind one interface: the first with an answer wins, later ones fill in a missing poster."""
+
+    def __init__(self, *providers):
+        self.providers = providers
+        self.name = providers[0].name
+
+    def _owner(self, pid: str):
+        return next((p for p in self.providers if (p.name == "cinemeta") == str(pid).startswith("tt")), self.providers[0])
+
+    def _find(self, method: str, title: str, year: int | None) -> dict | None:
+        hit = None
+        for p in self.providers:
+            try:
+                got = getattr(p, method)(title, year)
+            except Exception:  # noqa: BLE001 - one source being down must not stop the others
+                continue
+            if got and not hit:
+                hit = got
+            if hit and hit.get("poster_url"):
+                break
+            if got and hit is not got and got.get("poster_url"):
+                hit = {**hit, "poster_url": got["poster_url"]}
+                break
+        return hit
+
+    def movie(self, title, year): return self._find("movie", title, year)
+    def show(self, title, year): return self._find("show", title, year)
+
+    def search_movies(self, title, year):
+        out = []
+        for p in self.providers:
+            try:
+                out += p.search_movies(title, year)
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    def search_shows(self, title, year):
+        out = []
+        for p in self.providers:
+            try:
+                out += p.search_shows(title, year)
+            except Exception:  # noqa: BLE001
+                pass
+        return out
+
+    def movie_detail(self, mid):
+        return self._owner(mid).movie_detail(mid) if hasattr(self._owner(mid), "movie_detail") else {}
+
+    def show_detail(self, sid): return self._owner(sid).show_detail(sid)
+    def episodes(self, sid, season): return self._owner(sid).episodes(sid, season)
+
+
 def pick_providers(setting: dict):
     """(movie provider, show provider) for the saved settings; (None, None) when switched off."""
     mode = (setting or {}).get("provider", "auto")
@@ -245,4 +362,4 @@ def pick_providers(setting: dict):
     if key and mode in ("auto", "tmdb"):
         t = TMDBProvider(key, (setting or {}).get("language", "en-US"))
         return t, t
-    return WikipediaProvider(), TVmazeProvider()
+    return Chain(CinemetaProvider(), WikipediaProvider()), Chain(TVmazeProvider(), CinemetaProvider())

@@ -12,6 +12,7 @@ from fastapi import Request
 from fastapi.responses import Response, StreamingResponse
 from starlette.concurrency import run_in_threadpool
 
+from . import hw
 from .media import FFMPEG_SEEK_BACKOFF, ffmpeg_input
 from .sources.base import MediaRef
 
@@ -139,13 +140,16 @@ def _hls_output(ref: MediaRef, folder) -> list[str]:
 def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str,
                      start: float = 0.0, audio_index: int | None = None,
                      mute_ranges: list[dict] | None = None, container: str = "mp4",
-                     hls_dir=None) -> tuple[list[str], str]:
+                     hls_dir=None, vcodec: str | None = None) -> tuple[list[str], str]:
     """Return (argv, mime) for a live stream of this item."""
     cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
     if ref.live:
         start, mute_ranges = 0.0, None   # live links cannot seek or be filtered
+    enc = hw.encoder_for(cfg)
     if cfg.hwaccel and mode == "transcode":
         cmd += ["-hwaccel", cfg.hwaccel]
+    if mode == "transcode" and enc["encoder"].endswith("vaapi"):
+        cmd += ["-vaapi_device", enc["device"]]
     if start > 0:
         if mode == "remux":
             # ``start`` is a keyframe from media.keyframe_before(). Stream copy
@@ -172,12 +176,21 @@ def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str
     cmd += ["-map", "0:v:0", "-map", f"0:{audio_index}?" if audio_index is not None else "0:a:0?", "-sn", "-dn"]
     if mode == "remux":
         cmd += ["-c:v", "copy"]
+        if vcodec in ("hevc", "h265"):
+            cmd += ["-tag:v", "hvc1"]        # the tag browsers and TVs need to accept HEVC in MP4
     else:
-        cmd += ["-c:v", cfg.video_encoder]
-        if cfg.video_encoder == "libx264":
+        e, scale = enc["encoder"], "scale='min(1920,iw)':-2"
+        cmd += ["-c:v", e]
+        if e == "libx264":
             cmd += ["-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
                     "-profile:v", "high", "-g", "48", *(["-tune", "zerolatency"] if ref.live else [])]
-        cmd += ["-vf", "scale='min(1920,iw)':-2"]
+        elif e == "h264_nvenc":
+            cmd += ["-preset", "p4", "-cq", "23", "-pix_fmt", "yuv420p", "-profile:v", "high", "-g", "48",
+                    *(["-tune", "ll"] if ref.live else [])]
+        elif e.endswith("vaapi"):
+            cmd += ["-qp", "23", "-g", "48"]
+            scale += ",format=nv12,hwupload"
+        cmd += ["-vf", scale]
     if afilter:
         cmd += ["-af", afilter]
     cmd += ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
