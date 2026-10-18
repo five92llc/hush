@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 import httpx
 
+from . import epg
 from .sources import playlist
 from .sources.base import SourceError, enc
 from .sources.http import check_url_allowed
@@ -42,7 +43,12 @@ class LiveTV:
         pid = playlist_id(url)
         self.db.save_playlist(pid, (name or "").strip() or urlparse(url).path.rsplit("/", 1)[-1] or url, url)
         self.sync(pid)
+        self.guide_async()
         return self.db.get_playlist(pid)
+
+    def guide_async(self) -> None:
+        """Fetch the programme guide in the background; it can be large."""
+        threading.Thread(target=lambda: epg.refresh(self.db, self.db.epg_urls()), name="epg", daemon=True).start()
 
     def import_sources(self) -> int:
         """Playlists already saved under Add a source → Web folder or links become Live TV playlists."""
@@ -79,9 +85,10 @@ class LiveTV:
                 seen.add(url)
                 groups = [g.strip() for g in re.split(r"[;|]", it["group"]) if g.strip()]
                 rows.append((chan_key(url), it["title"] or urlparse(url).netloc, ";" + ";".join(groups) + ";" if groups else "",
-                             it.get("logo") or "", url, enc(url)))
+                             it.get("logo") or "", url, enc(url), it.get("tvg_id") or ""))
             n = self.db.replace_channels(pid, rows)
             self.db.playlist_status(pid, n, None)
+            self.db.set_playlist_epg(pid, playlist.epg_urls(text))
             return n
         except (SourceError, httpx.HTTPError) as exc:
             self.db.playlist_status(pid, None, str(exc)[:200])
@@ -100,7 +107,9 @@ class LiveTV:
                 total += self.sync(p["id"])
             except (SourceError, KeyError):
                 failed += 1
-        return f"{total} channels from {len(pls)} playlist{'s' if len(pls) != 1 else ''}" + (f", {failed} could not be read" if failed else "")
+        guide = epg.refresh(self.db, self.db.epg_urls())
+        return (f"{total} channels from {len(pls)} playlist{'s' if len(pls) != 1 else ''}" + (f", {failed} could not be read" if failed else "")
+                + (f", {guide} programmes in the guide" if guide else ""))
 
     def _download(self, url: str) -> str:
         data = b""

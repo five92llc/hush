@@ -645,13 +645,35 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         m["position"], m["duration"], m["watched"] = pr.get("position"), pr.get("duration"), bool(pr.get("finished"))
         return _card(m)
 
+    thumb_lock = threading.Lock()
+
+    def thumb_of(src: Path, w: int, kind: str) -> Path:
+        """A smaller copy of an image for grids (cards need ~300 px, not the full poster); made once, then reused."""
+        w = min((160, 240, 320, 480), key=lambda x: abs(x - w))
+        dst = cfg.data_dir / "art" / "thumbs" / f"{src.stem}-{w}.{kind}"
+        if dst.exists() and dst.stat().st_mtime >= src.stat().st_mtime:
+            return dst
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.stem + ".tmp." + kind)
+        args = ["-q:v", "5"] if kind == "jpg" else []
+        with thumb_lock:
+            r = subprocess.run([cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(src), "-frames:v", "1",
+                                "-vf", f"scale='min({w},iw)':-2", *args, str(tmp)], capture_output=True, timeout=30)
+        if r.returncode != 0 or not tmp.exists() or tmp.stat().st_size == 0:
+            tmp.unlink(missing_ok=True)
+            return src
+        tmp.replace(dst)
+        return dst
+
     @app.get("/api/art/{name}.jpg", dependencies=[need])
-    def art_file(name: str):
+    def art_file(name: str, w: int = 0):
         if not name.isalnum():
             raise HTTPException(404)
         f = library.art_dir / f"{name}.jpg"
         if not f.is_file():
             raise HTTPException(404)
+        if w:
+            f = thumb_of(f, w, "jpg")
         return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/api/transcript/{key}.{fmt}", dependencies=[need])
@@ -970,18 +992,72 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 "total": db.count_channels(q, group, favorites, hide_dead, letter.upper(), recent, pid),
                 "letters": db.letter_counts(q, group, favorites, hide_dead, pid), "stats": db.channel_stats(pid)}
 
+    @app.get("/api/live/epg", dependencies=[need])
+    def live_epg(keys: str = ""):
+        """What is on now and next, for up to 80 channels at once."""
+        return db.epg_now_next([k for k in keys.split(",") if k.isalnum()][:80])
+
     @app.get("/api/live/groups", dependencies=[need])
     def live_groups():
         return db.channel_groups()
 
     @app.get("/api/live/logo/{key}", dependencies=[need])
-    def live_logo(key: str):
+    def live_logo(key: str, w: int = 0):
         if not key.isalnum():
             raise HTTPException(404)
         f = livetv.logo_path(key)
         if not f:
             raise HTTPException(404)
+        if w:
+            f = thumb_of(f, w, "png")
         return FileResponse(f, media_type="image/png", headers={"Cache-Control": "private, max-age=604800"})
+
+    snap_slots = threading.Semaphore(2)
+
+    @app.get("/api/live/snapshot/{key}.jpg", dependencies=[need])
+    def live_snapshot(key: str):
+        """One frame from a channel, for a quick look before tuning in. Kept for a few minutes; at most two at a time."""
+        ch = db.get_channel(key) if key.isalnum() else None
+        if not ch:
+            raise HTTPException(404)
+        dst = cfg.data_dir / "art" / "snaps" / f"{key}.jpg"
+        headers = {"Cache-Control": "private, max-age=300"}
+        if dst.exists() and time.time() - dst.stat().st_mtime < 600:
+            return FileResponse(dst, media_type="image/jpeg", headers=headers)
+        if not snap_slots.acquire(blocking=False):
+            raise HTTPException(503, "Busy")
+        try:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            ref = resolve("url", ch["item_id"])
+            cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-fflags", "+nobuffer",
+                   "-analyzeduration", "1500000", "-probesize", "1500000", *media.ffmpeg_input(ref, "url", ch["item_id"]),
+                   "-frames:v", "1", "-vf", "scale=320:-2", "-q:v", "6", str(dst)]
+            try:
+                subprocess.run(cmd, capture_output=True, timeout=12)
+            except subprocess.TimeoutExpired:
+                dst.unlink(missing_ok=True)
+        finally:
+            snap_slots.release()
+        if not dst.exists() or dst.stat().st_size == 0:
+            raise HTTPException(404)
+        return FileResponse(dst, media_type="image/jpeg", headers=headers)
+
+    @app.get("/api/live/alternates/{key}", dependencies=[need])
+    def live_alternates(key: str):
+        """Other working channels with the same name (another source of the same channel), for when one stops playing."""
+        ch = db.get_channel(key) if key.isalnum() else None
+        if not ch:
+            raise HTTPException(404)
+        def norm(n: str) -> str:
+            n = re.sub(r"[\[(].*?[\])]", " ", n.lower())
+            n = re.sub(r"\b(hd|fhd|uhd|sd|4k|hevc|h265|h264|1080p?|720p?|backup|alt)\b", " ", n)
+            return re.sub(r"[^a-z0-9]+", "", n)
+        want = norm(ch["name"])
+        if len(want) < 3:
+            return []
+        rows = db._all("SELECT chan_key, name, item_id FROM channels WHERE failures<2 AND chan_key!=? AND name LIKE ?",
+                       (key, f"%{ch['name'].strip()[:3]}%"))
+        return [{"key": r["chan_key"], "item_id": r["item_id"], "name": r["name"]} for r in rows if norm(r["name"]) == want][:5]
 
     @app.post("/api/live/channels/{key}/favorite", dependencies=[need])
     def live_favorite(key: str, body: dict = Body(...), prof: dict = Depends(get_profile)):
@@ -1017,7 +1093,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/live/playlists/{pid}/refresh", dependencies=[need])
     def live_playlist_refresh(pid: str):
         try:
-            return {"channels": livetv.sync(pid)}
+            n = livetv.sync(pid)
+            livetv.guide_async()
+            return {"channels": n}
         except KeyError:
             raise HTTPException(404)
 

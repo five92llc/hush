@@ -69,3 +69,28 @@ def test_cinemeta_finds_a_poster_and_episodes():
     assert hit["poster_url"].endswith("/poster/medium/tt1/img") and hit["runtime"] == 141 and hit["ids"] == {"imdb": "tt1"}
     assert prov.episodes("tt2", 1)[(1, 2)]["title"] == "Two"
     assert Chain(prov)._owner("tt1") is prov
+
+
+def test_guide_keeps_only_wanted_channels_and_finds_now_and_next(tmp_path):
+    import io, time
+    from datetime import datetime, timedelta, timezone
+    from hush import epg
+    from hush.db import DB
+    now = datetime.now(timezone.utc)
+    f = lambda d: d.strftime("%Y%m%d%H%M%S +0000")  # noqa: E731
+    xml = (f'<tv><channel id="a"/><programme start="{f(now - timedelta(minutes=30))}" stop="{f(now + timedelta(minutes=30))}" channel="a">'
+           f'<title>News</title></programme><programme start="{f(now + timedelta(minutes=30))}" stop="{f(now + timedelta(hours=1))}" channel="a">'
+           f'<title>Weather</title></programme><programme start="{f(now)}" stop="{f(now + timedelta(hours=1))}" channel="zzz"><title>Other</title></programme></tv>')
+    rows = epg.parse(io.BytesIO(xml.encode()), {"a"})
+    assert [r[3] for r in rows] == ["News", "Weather"]
+    db = DB(tmp_path / "g.db")
+    db.replace_channels("pl", [("k1", "One", ";", "", "http://x/1", "id1", "a")])
+    db.replace_programmes(rows)
+    got = db.epg_now_next(["k1"])["k1"]
+    assert got["now"]["title"] == "News" and got["next"]["title"] == "Weather"
+
+
+def test_playlist_header_advertises_its_guide():
+    from hush.sources import playlist
+    assert playlist.epg_urls('#EXTM3U url-tvg="https://e.com/g.xml.gz,https://e.com/h.xml"\n#EXTINF:-1,A\nhttp://x') == [
+        "https://e.com/g.xml.gz", "https://e.com/h.xml"]

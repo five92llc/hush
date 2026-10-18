@@ -16,6 +16,10 @@ const h = (tag, attrs = {}, ...kids) => {
   return el;
 };
 
+/** Grids use a smaller copy of an image (the server makes and keeps it): the cards load much faster on a TV. */
+const thumb = (url, w = 320) => (url ? `${url}${url.includes("?") ? "&" : "?"}w=${w}` : url);
+const hm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+
 const ICONS = {
   dir: '<path d="M3 6a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   video: '<path d="M4 5h16v14H4zM6 7v2h2V7zm0 4v2h2v-2zm0 4v2h2v-2zm10-8v2h2V7zm0 4v2h2v-2zm0 4v2h2v-2zM10 7v10h4V7z"/>',
@@ -687,6 +691,17 @@ const Queue = {
   /* ---------- Live TV, like a remote: channel up/down, number keys, last channel ---------- */
   curKey: null, lastKey: null, loadMore: null, digits: "", digitTimer: null, bannerTimer: null,
 
+  epg: {},
+  /** "Now: … · Next: …" for a channel, when the programme guide knows it (kept for a minute). */
+  async guideLine(key) {
+    let e = this.epg[key];
+    if (!e || Date.now() - e.at > 60000) {
+      try { e = this.epg[key] = { at: Date.now(), data: (await api(`/api/live/epg?keys=${key}`))[key] || {} }; } catch { return ""; }
+    }
+    const { now, next } = e.data;
+    return now ? `Now: ${now.title} (until ${hm(now.stop)})${next ? ` · Next: ${next.title}` : ""}` : "";
+  },
+
   /** Get the neighbouring channels ready, so channel up/down starts quickly. */
   warm() {
     const items = [this.pos + 1, this.pos - 1].map((i) => this.list[i]).filter((c) => c?.chan)
@@ -702,6 +717,7 @@ const Queue = {
     $("#cb-sub").textContent = [...splitTags(c.title).tags, ...(c.groups || []).slice(0, 2)].join(" · ");
     const logo = $("#cb-logo");
     logo.hidden = !c.logo; if (c.logo) logo.src = c.logo;
+    this.guideLine(c.chan).then((line) => { if (line && (this.list[at]?.chan === c.chan)) $("#cb-sub").textContent = line; });
     const b = $("#chan-banner"); b.hidden = false;
     clearTimeout(this.bannerTimer); this.bannerTimer = setTimeout(() => { b.hidden = true; }, 4500);
   },
@@ -848,10 +864,22 @@ const Catalog = {
           star.setAttribute("aria-pressed", String(c.favorite)); star.textContent = c.favorite ? "★" : "☆";
           try { await api(`/api/live/channels/${c.key}/favorite`, { method: "POST", body: { favorite: c.favorite } }); } catch (err) { toast(err.message); }
         } }, c.favorite ? "★" : "☆");
-      return h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => setQueue() },
+      let peek = null, snap = null;                                // a quiet look at what is on, after resting on the card for a moment
+      const stopPeek = () => { clearTimeout(peek); snap?.remove(); snap = null; };
+      const startPeek = (e) => {
+        stopPeek();
+        const logo = e.currentTarget.querySelector(".logo");
+        peek = setTimeout(() => {
+          if (!logo || Player.chan === c.key) return;
+          snap = h("img", { class: "snap", src: `/api/live/snapshot/${c.key}.jpg`, alt: "", onerror: () => stopPeek() });
+          logo.append(snap);
+        }, 900);
+      };
+      return h("a", { class: "chan", "data-key": c.key, href: `#/p/url/${c.item_id}`, onclick: () => { stopPeek(); setQueue(); },
+          onmouseenter: startPeek, onfocus: startPeek, onmouseleave: stopPeek, onblur: stopPeek },
         n != null ? h("span", { class: "num" }, n + 1) : null,
         h("div", { class: "logo" }, c.logo_url
-          ? h("img", { src: c.logo_url, alt: "", loading: "lazy", onerror: (e) => { e.target.replaceWith(h("span", { class: "noart" }, initials(c.name))); } })
+          ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy", onerror: (e) => { e.target.replaceWith(h("span", { class: "noart" }, initials(c.name))); } })
           : h("span", { class: "noart" }, initials(c.name))),
         star, h("span", { class: "name", title: c.name }, splitTags(c.name).title),
         h("span", { class: "sub" }, [...splitTags(c.name).tags, ...c.groups.slice(0, 1)].join(" · ")));
@@ -866,6 +894,12 @@ const Catalog = {
       loaded = loaded.concat(r.channels);
       grid.append(...r.channels.map((c, i) => card(c, first + i)));
       toQueue();
+      api(`/api/live/epg?keys=${r.channels.slice(0, 80).map((c) => c.key).join(",")}`).then((g) => {   // what is on now, when a guide is known
+        for (const [k, v] of Object.entries(g)) {
+          const sub = grid.querySelector(`[data-key="${k}"] .sub`);
+          if (sub && v.now) sub.textContent = `Now: ${v.now.title}`;
+        }
+      }).catch(() => {});
       lb.set(new Set(Object.keys(r.letters)), st.letter);
       showRecent();
       more.hidden = loaded.length >= total;
@@ -976,16 +1010,16 @@ const Catalog = {
       get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows")]);
     const chan = (list) => (c) => h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => {
       Queue.set(list.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups }))); Queue.loadMore = null;
-    } }, h("div", { class: "logo" }, c.logo_url ? h("img", { src: c.logo_url, alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))),
+    } }, h("div", { class: "logo" }, c.logo_url ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))),
       h("span", { class: "name" }, splitTags(c.name).title));
     const poster = (isShow, list) => (m) => h("a", { class: "card", href: isShow ? `#/show/${m.show_key}` : `#/title/${m.media_key}`,
       onclick: () => { if (!isShow) Queue.set(list.map((x) => ({ src: x.source_id, item: x.item_id, title: x.title }))); } },
-      h("div", { class: "art" }, m.art_url ? h("img", { src: m.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, m.title)),
+      h("div", { class: "art" }, m.art_url ? h("img", { src: thumb(m.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, m.title)),
       h("span", { class: "name" }, m.title), h("span", { class: "sub" }, isShow ? plural(m.episodes, "episode") : (m.year || "")));
     movies.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title))); shows.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title)));
     const rows = [
       this.shelf("Continue watching", null, cont.map((it) => h("a", { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
-        h("div", { class: "art" }, it.art_url ? h("img", { src: it.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
+        h("div", { class: "art" }, it.art_url ? h("img", { src: thumb(it.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
           it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null),
         h("span", { class: "name" }, it.title),
         h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))))),
@@ -1088,7 +1122,7 @@ const Catalog = {
     const grid = h("div", { class: "grid shelf" });
     for (const it of items) {
       const card = h("a", { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
-        h("div", { class: "art" }, it.art_url ? h("img", { src: it.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
+        h("div", { class: "art" }, it.art_url ? h("img", { src: thumb(it.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
           it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null,
           h("button", { class: "x", type: "button", title: "Remove from Continue watching", "aria-label": `Remove ${it.title}`, onclick: async (e) => {
             e.preventDefault(); e.stopPropagation();
@@ -1117,7 +1151,7 @@ const Catalog = {
       const shown = items.filter((m) => (!f || m.title.toLowerCase().includes(f)) && (!sel[kind] || letterOf(m.title, true) === sel[kind]));
       if (!isShows) Queue.set(shown.map((m) => ({ src: m.source_id, item: m.item_id, title: m.title })));
       list.replaceChildren(...shown.map((m) => h("a", { class: "card", href: isShows ? `#/show/${m.show_key}` : `#/title/${m.media_key}` },
-        h("div", { class: "art" }, m.art_url ? h("img", { src: m.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, m.title),
+        h("div", { class: "art" }, m.art_url ? h("img", { src: thumb(m.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, m.title),
           (isShows ? m.scanned && m.scanned === m.episodes : m.scanned) ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", "")) : null,
           (isShows ? m.episodes && m.watched >= m.episodes : m.watched) ? h("span", { class: "tick" }, "✓ Watched") : null,
           !isShows && !m.watched && m.position && m.duration ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round((m.position / m.duration) * 100)}%` })) : null),
@@ -1151,7 +1185,7 @@ const Catalog = {
       ...Object.entries(seasons).map(([n, eps]) => h("section", { class: "season" },
         h("h3", {}, n === "0" ? "Specials" : `Season ${n}`),
         h("ul", { class: "eps" }, ...eps.map((e) => h("li", { class: "ep" },
-          h("a", { class: "thumb", href: `#/title/${e.media_key}` }, e.art_url ? h("img", { src: e.art_url, alt: "", loading: "lazy" }) : null),
+          h("a", { class: "thumb", href: `#/title/${e.media_key}` }, e.art_url ? h("img", { src: thumb(e.art_url, 240), alt: "", loading: "lazy" }) : null),
           h("div", {}, h("div", { class: "ep-title" }, h("a", { href: `#/title/${e.media_key}` }, `E${e.episode}${e.title ? ` · ${e.title}` : ""}`),
             e.watched ? h("span", { class: "hint", style: "margin-left:.5rem" }, "✓ Watched") : e.position ? h("span", { class: "hint", style: "margin-left:.5rem" }, `Resume ${fmt(e.position)}`) : null,
             e.scanned ? h("span", { class: "badge", style: "margin-left:.5rem", title: "Language filter is ready" }, icon("hush", ""), "Filter ready") : null),
@@ -1439,6 +1473,8 @@ const Player = {
     this.openAbort?.abort(); const abort = this.openAbort = new AbortController();
     Queue.sync(sourceId, itemId);
     this.chan = Queue.list[Queue.pos]?.chan || null; this.reported = null;
+    if (!opts.alt || !this.altTried) this.altTried = new Set();
+    if (this.chan) this.altTried.add(this.chan);
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
     $("#guide-btn").hidden = !this.chan; guide.close();
@@ -1452,7 +1488,9 @@ const Player = {
       info = await api(`/api/media/${sourceId}/${itemId}?hevc=${HEVC}`, { signal: abort.signal });
     } catch (err) {
       if (token !== this.openToken) return;                       // replaced by another channel: nothing to report
-      this.report(false); this.message(err.message, true); return;
+      this.report(false);
+      if (this.chan && await this.tryAlternate()) return;
+      this.message(err.message, true); return;
     }
     if (token !== this.openToken) return;
     this.info = info;
@@ -1738,6 +1776,20 @@ const Player = {
   },
 
   /** Tell the server whether a Live TV channel played, so dead ones can be hidden. */
+  /** A channel that will not play: try another source of the same channel, if the playlists have one. */
+  async tryAlternate() {
+    try {
+      const list = await api(`/api/live/alternates/${this.chan}`);
+      const next = list.find((a) => !this.altTried.has(a.key));
+      if (!next) return false;
+      const cur = Queue.list[Queue.pos];
+      Queue.list[Queue.pos] = { ...cur, item: next.item_id, chan: next.key };
+      this.message("That source did not answer. Trying another…");
+      this.open("url", next.item_id, { alt: true, mini: this.mini });
+      return true;
+    } catch { return false; }
+  },
+
   report(ok) {
     if (!this.chan || this.reported === ok) return;
     this.reported = ok;
@@ -2056,6 +2108,10 @@ video.addEventListener("error", () => {
     return;
   }
   Player.report(false);
+  if (Player.chan) {
+    Player.tryAlternate().then((ok) => { if (!ok) Player.message("This channel is not answering. Try another one.", true); });
+    return;
+  }
   const code = video.error?.code ? ` (error ${video.error.code})` : "";
   const safari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
   Player.message(safari && Player.mode !== "direct"
@@ -2520,7 +2576,14 @@ async function route() {
   }
   if (!$("#player").hidden && !Player.mini) { if (Player.keepPlaying()) Player.minimize(); else Player.close(false); }
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
-  if (view === "settings") { $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon(); return; }
+  if (view === "settings") {
+    $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
+    const e = S.config?.encoder;
+    $("#enc-info").textContent = !e ? "Unknown"
+      : e.encoder === "libx264" ? "The processor (CPU) re-encodes video when a screen can't play a file as it is. No GPU was found; with one, set video_encoder: auto."
+      : `${e.gpu || e.encoder} re-encodes video when needed (${e.encoder}).`;
+    return;
+  }
   $("#library").hidden = false;
   const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;

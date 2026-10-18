@@ -155,6 +155,14 @@ CREATE TABLE IF NOT EXISTS probes (
     updated_at  REAL NOT NULL,
     PRIMARY KEY (source_id, item_id)
 );
+CREATE TABLE IF NOT EXISTS programmes (
+    tvg_id      TEXT NOT NULL,
+    start       REAL NOT NULL,
+    stop        REAL NOT NULL,
+    title       TEXT,
+    descr       TEXT
+);
+CREATE INDEX IF NOT EXISTS programmes_chan ON programmes(tvg_id, start);
 CREATE TABLE IF NOT EXISTS settings (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -242,6 +250,10 @@ class DB:
             c.execute("ALTER TABLE filters ADD COLUMN flags TEXT")
         for media_key, data in c.execute("SELECT media_key, data FROM filters WHERE flags IS NULL").fetchall():
             c.execute("UPDATE filters SET flags=? WHERE media_key=?", (json.dumps(_flag_counts(data)), media_key))
+        if "tvg_id" not in self._columns("channels"):
+            c.execute("ALTER TABLE channels ADD COLUMN tvg_id TEXT")
+        if "epg_url" not in self._columns("playlists"):
+            c.execute("ALTER TABLE playlists ADD COLUMN epg_url TEXT")
         for table in ("meta", "shows"):
             if "cert" not in self._columns(table):
                 c.execute(f"ALTER TABLE {table} ADD COLUMN cert TEXT")
@@ -580,6 +592,38 @@ class DB:
         self._exec("INSERT INTO playlists(id,name,url) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url",
                    (pid, name, url))
 
+    def set_playlist_epg(self, pid: str, urls: list[str]) -> None:
+        self._exec("UPDATE playlists SET epg_url=? WHERE id=?", (",".join(urls), pid))
+
+    def epg_urls(self) -> list[str]:
+        return [u for r in self._all("SELECT epg_url FROM playlists WHERE epg_url IS NOT NULL AND epg_url != ''")
+                for u in r["epg_url"].split(",") if u]
+
+    def replace_programmes(self, rows: list[tuple]) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM programmes")
+            self._conn.executemany("INSERT INTO programmes(tvg_id,start,stop,title,descr) VALUES(?,?,?,?,?)", rows)
+            self._conn.commit()
+
+    def epg_now_next(self, keys: list[str], now: float | None = None) -> dict[str, dict]:
+        """{chan_key: {"now": {...}, "next": {...}}} for the channels that have guide data."""
+        now = now or time.time()
+        if not keys:
+            return {}
+        marks = ",".join("?" * len(keys))
+        rows = self._all(
+            f"SELECT c.chan_key k, p.title, p.descr, p.start, p.stop FROM channels c JOIN programmes p ON p.tvg_id=c.tvg_id "
+            f"WHERE c.chan_key IN ({marks}) AND p.stop>? ORDER BY p.start", (*keys, now))
+        out: dict[str, dict] = {}
+        for r in rows:
+            slot = out.setdefault(r["k"], {})
+            item = {"title": r["title"], "desc": r["descr"], "start": r["start"], "stop": r["stop"]}
+            if "now" not in slot and r["start"] <= now:
+                slot["now"] = item
+            elif "next" not in slot and r["start"] > now:
+                slot["next"] = item
+        return out
+
     def playlist_status(self, pid: str, count: int | None, error: str | None) -> None:
         self._exec("UPDATE playlists SET channels=COALESCE(?,channels), updated_at=?, error=? WHERE id=?",
                    (count, time.time(), error, pid))
@@ -596,9 +640,10 @@ class DB:
             keep = {r[0]: r[1] for r in c.execute("SELECT chan_key, failures FROM channels WHERE playlist=?", (pid,))}
             c.execute("DELETE FROM channels WHERE playlist=?", (pid,))
             c.executemany(
-                "INSERT OR REPLACE INTO channels(chan_key,playlist,name,letter,grp,logo,url,item_id,position,failures) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?)",
-                [(k, pid, n, letter_of(n), g, lg, u, i, pos, keep.get(k, 0)) for pos, (k, n, g, lg, u, i) in enumerate(rows)])
+                "INSERT OR REPLACE INTO channels(chan_key,playlist,name,letter,grp,logo,url,item_id,position,failures,tvg_id) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                [(r[0], pid, r[1], letter_of(r[1]), r[2], r[3], r[4], r[5], pos, keep.get(r[0], 0), r[6] if len(r) > 6 else "")
+                 for pos, r in enumerate(rows)])
             c.commit()
         return len(rows)
 

@@ -22,6 +22,16 @@ def is_hls(text: str) -> bool:
     return any(line.startswith("#EXT-X-") for line in text.splitlines())
 
 
+def epg_urls(text: str) -> list[str]:
+    """Programme-guide addresses an IPTV list advertises on its first line (url-tvg / x-tvg-url)."""
+    for raw in text.lstrip("\ufeff").splitlines()[:5]:
+        if raw.strip().upper().startswith("#EXTM3U"):
+            attrs = dict(_ATTR.findall(raw))
+            val = attrs.get("url-tvg") or attrs.get("x-tvg-url") or ""
+            return [u.strip() for u in val.split(",") if u.strip().lower().startswith(("http://", "https://"))]
+    return []
+
+
 def parse(text: str, base: str | None = None) -> list[dict]:
     """Return [{title, url, group}] in file order. Relative entries are joined to ``base``."""
     text = text.lstrip("﻿")
