@@ -507,7 +507,7 @@ html.tv { font-size: 150%; }
   background: var(--dusk); border: 2px solid transparent; font-family: var(--body); cursor: pointer; }
 .tv .tv-nav a[aria-current="true"] { background: var(--hush-soft); border-color: var(--hush); }
 .tv .tv-nav button { margin-left: auto; background: transparent; color: var(--linen-dim); }
-.tv .topbar-actions .btn:not(#tv-toggle):not(.profile-chip) { display: none; }
+.tv .topbar-actions .btn:not(.profile-chip) { display: none; }
 .tv .profile-chip { font-size: var(--s0); border-color: var(--line); }
 .tv .profile-chip .avatar { width: 2.2rem; height: 2.2rem; }
 .tv #tv-toggle { border-color: var(--hush); }
@@ -626,3 +626,13 @@ html.tv { font-size: 150%; }
 .no-flex-gap .mini-bar > * + * { margin-left: .1rem; }
 .no-flex-gap .entry > * + * { margin-left: .75rem; }
 .no-flex-gap .card, .no-flex-gap .chan { margin-bottom: .45rem; }
+
+/* ---- settings ---- */
+.prefs h1 { margin-bottom: 1rem; }
+.prefs-card { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: .9rem 1.1rem; margin-bottom: 1rem; }
+.prefs-card h2 { font-size: var(--s1); margin: 0 0 .4rem; }
+.pref { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem 0; border-top: 1px solid var(--dusk-2); flex-wrap: wrap; }
+.prefs-card h2 + .pref { border-top: 0; }
+.pref > div { flex: 1 1 14rem; }
+.pref p { margin: .15rem 0 0; }
+.pref .btn { flex: none; }

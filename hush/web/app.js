@@ -384,6 +384,10 @@ function jobText(j) {
   if (j.status === "queued") return "Waiting to start";
   return `${j.stage[0].toUpperCase()}${j.stage.slice(1)}, ${Math.round(j.progress * 100)}%`;
 }
+$("#pl-settings-btn").addEventListener("click", () => {
+  Catalog.liveState = { q: "", group: "", favorites: false, hideDead: true, letter: "", ...(Catalog.liveState || {}), panel: true };
+  go("#/live");
+});
 $("#jobs-btn").addEventListener("click", () => { $("#jobs-dialog").showModal(); Jobs.render(); Jobs.poll(); });
 $$("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 
@@ -1659,7 +1663,7 @@ const Player = {
     const p = $("#player"); p.classList.remove("mini", "playing-keep");
     Object.assign(p.style, { left: "", top: "", width: "", right: "", bottom: "" });
     $("#mini-slot").hidden = true;
-    $("#library").hidden = true; $("#tasks").hidden = true; document.body.style.overflow = "hidden";
+    $("#library").hidden = true; $("#tasks").hidden = true; $("#prefs").hidden = true; document.body.style.overflow = "hidden";
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
     if (this.chan) { $("#guide-btn").hidden = false; Queue.banner(); }
@@ -2182,7 +2186,7 @@ const TV = {
     if (!$("#guide").hidden) return [$("#guide")];
     if (!$("#panel").hidden) return [$("#panel")];
     if (!$("#player").hidden && !Player.mini) return [$("#controls")];
-    const r = [...document.querySelectorAll(".topbar, #tv-nav, #library:not([hidden]), #tasks:not([hidden])")];
+    const r = [...document.querySelectorAll(".topbar, #tv-nav, #library:not([hidden]), #tasks:not([hidden]), #prefs:not([hidden])")];
     if (Player.mini) r.push($("#player"));
     return r;
   },
@@ -2192,7 +2196,7 @@ const TV = {
   },
   focusFirst() {
     const roots = this.roots();
-    const main = roots.filter((r) => r.matches?.("#library, #tasks, dialog, .guide, .panel, #controls"));
+    const main = roots.filter((r) => r.matches?.("#library, #tasks, #prefs, dialog, .guide, .panel, #controls"));
     const list = this.focusables(main.length ? main : roots);
     const target = list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
     target?.focus({ preventScroll: true });
@@ -2446,7 +2450,7 @@ async function route() {
   TV.navCurrent(view);
   if (!view) { go("#/home"); return; }                       // Home is where everyone lands
   if (isKids() && (["b", "tasks", "folders", "profiles"].includes(view) || (view === "live" && !S.profile?.settings?.allow_live))) { go("#/home"); return; }
-  $("#tasks").hidden = view !== "tasks";
+  $("#tasks").hidden = view !== "tasks"; $("#prefs").hidden = view !== "settings";
   if (view !== "p") S.libraryHash = location.hash || "#/";
   if (view === "p" && src && id) {
     if (Player.mini && src === Player.src && id === Player.item) Player.expand();   // "open the player" from the mini player
@@ -2455,6 +2459,7 @@ async function route() {
   }
   if (!$("#player").hidden && !Player.mini) { if (Player.keepPlaying()) Player.minimize(); else Player.close(false); }
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
+  if (view === "settings") { $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon(); return; }
   $("#library").hidden = false;
   const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;

@@ -53,10 +53,7 @@
       <button id="jobs-btn" class="btn ghost admin-only" type="button" aria-haspopup="dialog">
         <span id="jobs-dot" class="dot" hidden></span><span id="jobs-label">Scans</span>
       </button>
-      <button id="remote-btn" class="btn ghost admin-only" type="button" aria-haspopup="dialog" title="Control this screen from your phone">Phone remote</button>
-      <button id="tv-toggle" class="btn ghost" type="button" aria-pressed="false" title="Big screen mode: bigger, made for a remote control">Big screen</button>
-      <a id="tasks-link" class="btn ghost admin-only" href="#/tasks">Tasks</a>
-      <button id="password-btn" class="btn ghost admin-only" type="button" aria-haspopup="dialog">Password</button>
+      <a id="settings-link" class="btn ghost" href="#/settings">Settings</a>
       <button id="logout-btn" class="btn ghost" type="button" hidden>Sign out</button>
     </div>
   </header>
@@ -68,6 +65,7 @@
     <a href="#/shows">TV shows</a>
     <a href="#/live" class="live-link">Live TV</a>
     <a href="#/folders" class="admin-only">Folders</a>
+    <a href="#/settings">Settings</a>
     <button id="tv-exit" class="btn ghost" type="button">Exit big screen</button>
   </nav>
 
@@ -80,10 +78,8 @@
         <a href="#/movies">Movies</a>
         <a href="#/shows">TV shows</a>
         <a href="#/live" class="live-link">Live TV</a>
-        <a href="#/profiles" class="admin-only">Profiles</a>
       </nav>
       <ul id="source-list" class="source-list admin-only"></ul>
-      <button id="add-source-btn" class="btn subtle wide admin-only" type="button">Add a source</button>
       <form id="url-form" class="url-form admin-only">
         <label for="url-input">Play a link</label>
         <div class="row">
@@ -104,6 +100,37 @@
       <div id="folder-letters"></div>
       <ul id="entries" class="entries" aria-live="polite"></ul>
       <div id="browser-empty" class="empty" hidden></div>
+    </div>
+  </section>
+
+  <!-- Settings -->
+  <section id="prefs" class="tasks prefs" hidden>
+    <h1>Settings</h1>
+    <div class="prefs-card">
+      <h2>Display</h2>
+      <div class="pref"><div><strong>Big screen mode</strong><p class="hint">Bigger and made for a remote control. A TV starts in it automatically.</p></div>
+        <button id="tv-toggle" class="btn subtle" type="button" aria-pressed="false">Big screen</button></div>
+      <div class="pref admin-only"><div><strong>Phone remote</strong><p class="hint">Control this screen from your phone.</p></div>
+        <button id="remote-btn" class="btn subtle" type="button" aria-haspopup="dialog">Phone remote</button></div>
+    </div>
+    <div class="prefs-card admin-only">
+      <h2>Library</h2>
+      <div class="pref"><div><strong>Sources</strong><p class="hint">Folders and network shares Hush looks through.</p></div>
+        <button id="add-source-btn" class="btn subtle" type="button">Add a source</button></div>
+      <div class="pref"><div><strong>Live TV playlists</strong><p class="hint">Add or manage your .m3u and .m3u8 channel lists.</p></div>
+        <button id="pl-settings-btn" class="btn subtle" type="button">Playlists</button></div>
+      <div class="pref"><div><strong>Background tasks</strong><p class="hint">Library refresh, metadata, artwork and transcripts.</p></div>
+        <a id="tasks-link" class="btn subtle" href="#/tasks">Tasks</a></div>
+    </div>
+    <div class="prefs-card admin-only">
+      <h2>People</h2>
+      <div class="pref"><div><strong>Profiles</strong><p class="hint">Names, avatars and kids rules.</p></div>
+        <a class="btn subtle" href="#/profiles">Manage profiles</a></div>
+    </div>
+    <div class="prefs-card admin-only">
+      <h2>Security</h2>
+      <div class="pref"><div><strong>Password</strong><p class="hint">Change the password used to sign in to Hush.</p></div>
+        <button id="password-btn" class="btn subtle" type="button" aria-haspopup="dialog">Change password</button></div>
     </div>
   </section>
 
