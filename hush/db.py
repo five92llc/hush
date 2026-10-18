@@ -374,6 +374,14 @@ class DB:
                             "ON f.media_key=l.media_key")["n"]
         return {"titles": total, "scanned": scanned}
 
+    def library_version(self) -> str:
+        """A cheap fingerprint of everything the library pages show; it changes when a scan, refresh or rename does."""
+        r = self._one(
+            "SELECT (SELECT COUNT(*) FROM library_items) a, (SELECT COUNT(*) FROM meta) b,"
+            " (SELECT COALESCE(MAX(updated_at),0) FROM meta) c, (SELECT COALESCE(MAX(updated_at),0) FROM shows) d,"
+            " (SELECT COUNT(*) FROM filters) e, (SELECT COUNT(*) FROM channels) f, (SELECT COUNT(*) FROM playlists) g")
+        return ".".join(str(r[k]) for k in "abcdefg")
+
     def delete_old_jobs(self, before: float) -> int:
         return self._exec("DELETE FROM jobs WHERE status IN ('done','error','cancelled') "
                           "AND updated_at<?", (before,)).rowcount

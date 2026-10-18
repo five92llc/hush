@@ -565,6 +565,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         m["watched"] = bool(m.get("watched"))
         return m
 
+    @app.get("/api/library/version", dependencies=[need])
+    def library_version():
+        return {"version": db.library_version()}
+
     @app.get("/api/library/movies", dependencies=[need])
     def library_movies(prof: dict = Depends(get_profile)):
         return [_card(m) for m in db.list_movies(prof["id"]) if not prof["kids"] or rules.approved(prof, m)]

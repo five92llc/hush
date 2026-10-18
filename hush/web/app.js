@@ -765,11 +765,12 @@ const artBox = (url, label, cls = "art") => h("div", { class: cls }, url
 
 const Catalog = {
   box: () => $("#catalog-view"),
-  async open(view, id) {
+  async open(view, id, opts = {}) {
     if (view !== "live") Queue.loadMore = null;
     $$("#rail-links a").forEach((a) => a.setAttribute("aria-current", String(
       a.hash === `#/${view}` || (view === "show" && a.hash === "#/shows") || (view === "title" && a.hash === (this.cameFrom || "#/movies")))));
-    this.box().replaceChildren(h("p", { class: "hint" }, "Loading…"));
+    const scroll = window.scrollY;
+    if (!opts.quiet) this.box().replaceChildren(h("p", { class: "hint" }, "Loading…"));   // a quiet refresh keeps the old page until the new one is ready
     try {
       if (view === "profiles") await this.profilesPage();
       else if (view === "home") await this.home();
@@ -779,7 +780,32 @@ const Catalog = {
       else if (view === "shows") await this.grid("shows");
       else if (view === "show") await this.show(id);
       else await this.title(id);
-    } catch (err) { this.box().replaceChildren(h("p", { class: "error" }, err.message)); }
+    } catch (err) { if (!opts.quiet) this.box().replaceChildren(h("p", { class: "error" }, err.message)); }
+    if (opts.quiet) window.scrollTo(0, scroll);
+  },
+
+  /** The library follows the server: when a scan, refresh or rename changes it, the open page redraws itself. */
+  version: null, watching: false,
+  watch() {
+    if (this.watching) return;
+    this.watching = true;
+    const check = async () => {
+      if (document.hidden || $("#app").hidden) return;
+      let v;
+      try { v = (await api("/api/library/version")).version; } catch { return; }
+      if (this.version === null) { this.version = v; return; }
+      if (v === this.version) return;
+      if (!this.idle()) return;                                  // try again on the next beat; never yank the page from under someone
+      this.version = v;
+      const [view, id] = location.hash.replace(/^#\/?/, "").split("/");
+      if (["home", "movies", "shows", "show", "title", "live", "folders"].includes(view)) this.open(view, id, { quiet: true });
+    };
+    setInterval(check, 15000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) check(); });
+  },
+  idle() {
+    if (document.querySelector("dialog[open]") || $("#library").hidden || !$("#player").hidden && !Player.mini) return false;
+    return !document.activeElement?.matches?.("input, textarea, select");
   },
 
   /* ---------- Live TV: channels from IPTV playlists ---------- */
@@ -2495,6 +2521,7 @@ async function start() {
   route();
   Jobs.poll();
   Remote.start();
+  Catalog.watch();
 }
 
 (async () => {

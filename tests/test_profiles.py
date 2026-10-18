@@ -250,3 +250,11 @@ def test_picture_column_is_added_to_older_databases(tmp_path):
     assert db.get_profile("p1")["avatar"] is None or db.get_profile("p1")["avatar"] == ""
     db.save_profile("p1", "Main", False, "#A99CF0", {}, "owl")
     assert db.get_profile("p1")["avatar"] == "owl"
+
+
+def test_library_version_changes_with_the_library(tmp_path):
+    from hush.db import DB
+    db = DB(tmp_path / "v.db")
+    before = db.library_version()
+    db.record_library("src", [("k1", "src", "a.mkv", "A")], 1.0)
+    assert db.library_version() != before
