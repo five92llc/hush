@@ -636,3 +636,5 @@ html.tv { font-size: 150%; }
 .pref > div { flex: 1 1 14rem; }
 .pref p { margin: .15rem 0 0; }
 .pref .btn { flex: none; }
+
+.player.mini { contain: layout paint; }

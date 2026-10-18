@@ -93,9 +93,28 @@ class ProbeResult:
 TEXT_SUB_CODECS = {"subrip", "ass", "ssa", "webvtt", "mov_text", "text"}
 
 
+QUICK_PROBE = ["-analyzeduration", "2000000", "-probesize", "2000000"]
+
+
 def probe(ffprobe: str, ref: MediaRef, source_id: str, item_id: str, timeout: int = 60) -> ProbeResult:
+    # A channel or link is probed briefly (2 s / 2 MB) so changing channel is fast; if that finds
+    # nothing usable the full-length probe runs as a fallback.
+    quick = bool(ref.url) and not ref.path
+    try:
+        res = _probe(ffprobe, ref, source_id, item_id, timeout=20 if quick else timeout, quick=quick)
+        if quick and not res.video and not res.audio:
+            res = _probe(ffprobe, ref, source_id, item_id, timeout=timeout)
+        return res
+    except RuntimeError:
+        if not quick:
+            raise
+        return _probe(ffprobe, ref, source_id, item_id, timeout=timeout)
+
+
+def _probe(ffprobe: str, ref: MediaRef, source_id: str, item_id: str, timeout: int, quick: bool = False) -> ProbeResult:
+    inp = ffmpeg_input(ref, source_id, item_id)
     cmd = [ffprobe, "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
-           *ffmpeg_input(ref, source_id, item_id)]
+           *(QUICK_PROBE if quick else []), *inp]
     try:
         out = subprocess.run(cmd, capture_output=True, timeout=timeout, check=True).stdout
     except subprocess.CalledProcessError as exc:

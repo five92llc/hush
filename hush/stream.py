@@ -127,7 +127,7 @@ def mute_filter(ranges: list[dict], offset: float = 0.0) -> str | None:
 
 def _hls_output(ref: MediaRef, folder) -> list[str]:
     """Segment and playlist options. A live source gets a sliding window; anything else a growing list."""
-    out = ["-f", "hls", "-hls_time", "4", "-hls_segment_type", "mpegts",
+    out = ["-f", "hls", "-hls_time", "2" if ref.live else "4", "-hls_segment_type", "mpegts",
            "-hls_segment_filename", str(folder / "seg%05d.ts")]
     if ref.live:
         out += ["-hls_list_size", "6", "-hls_flags", "delete_segments+independent_segments"]
@@ -154,6 +154,8 @@ def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str
             cmd += ["-noaccurate_seek", "-ss", f"{start + FFMPEG_SEEK_BACKOFF + 0.01:.3f}"]
         else:
             cmd += ["-ss", f"{start:.3f}"]
+    if ref.live:                       # start a channel as soon as the first frames arrive
+        cmd += ["-fflags", "+nobuffer+discardcorrupt", "-analyzeduration", "1500000", "-probesize", "1500000"]
     cmd += ffmpeg_input(ref, source_id, item_id)
 
     afilter = mute_filter(mute_ranges, start) if mute_ranges else None
@@ -174,7 +176,7 @@ def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str
         cmd += ["-c:v", cfg.video_encoder]
         if cfg.video_encoder == "libx264":
             cmd += ["-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
-                    "-profile:v", "high", "-g", "48"]
+                    "-profile:v", "high", "-g", "48", *(["-tune", "zerolatency"] if ref.live else [])]
         cmd += ["-vf", "scale='min(1920,iw)':-2"]
     if afilter:
         cmd += ["-af", afilter]

@@ -680,10 +680,17 @@ const Queue = {
   /* ---------- Live TV, like a remote: channel up/down, number keys, last channel ---------- */
   curKey: null, lastKey: null, loadMore: null, digits: "", digitTimer: null, bannerTimer: null,
 
-  banner() {
-    const c = this.list[this.pos];
+  /** Get the neighbouring channels ready, so channel up/down starts quickly. */
+  warm() {
+    const items = [this.pos + 1, this.pos - 1].map((i) => this.list[i]).filter((c) => c?.chan)
+      .map((c) => ({ src: c.src, item: c.item }));
+    if (items.length) api("/api/live/warm", { method: "POST", body: { items } }).catch(() => {});
+  },
+
+  banner(at = this.pos) {
+    const c = this.list[at];
     if (!c?.chan) return;
-    $("#cb-num").textContent = this.pos + 1;
+    $("#cb-num").textContent = at + 1;
     $("#cb-name").textContent = splitTags(c.title).title;
     $("#cb-sub").textContent = [...splitTags(c.title).tags, ...(c.groups || []).slice(0, 2)].join(" · ");
     const logo = $("#cb-logo");
@@ -701,10 +708,13 @@ const Queue = {
   async zap(dir) {
     const n = this.list.length;
     if (n < 2) return;
-    let i = this.pos + dir;
-    if (i < 0) i = n - 1;
-    else if (i >= n && !(this.loadMore && await this.loadMore())) i = 0;     // past the last channel: next page, or wrap
-    this.history.push(this.pos); this.go(i);
+    let i = (this.zapTo ?? this.pos) + dir;
+    if (i < 0) i = this.list.length - 1;
+    else if (i >= this.list.length && !(this.loadMore && await this.loadMore())) i = 0;   // past the last channel: next page, or wrap
+    // Several presses in a row only load the channel you land on: show it now, tune in once you stop.
+    this.zapTo = i; this.banner(i);
+    clearTimeout(this.zapTimer);
+    this.zapTimer = setTimeout(() => { const t = this.zapTo; this.zapTo = null; this.history.push(this.pos); this.go(t); }, 280);
   },
   recall() {
     const i = this.list.findIndex((x) => x.chan && x.chan === this.lastKey);
@@ -1418,6 +1428,8 @@ const Player = {
     this.close(false);
     if (keepMini) $("#library").hidden = libraryWasHidden;
     this.src = sourceId; this.item = itemId; this.triedTranscode = false;
+    const token = this.openToken = (this.openToken || 0) + 1;      // a newer open makes this one stale
+    this.openAbort?.abort(); const abort = this.openAbort = new AbortController();
     Queue.sync(sourceId, itemId);
     this.chan = Queue.list[Queue.pos]?.chan || null; this.reported = null;
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
@@ -1428,10 +1440,15 @@ const Player = {
     if (!keepMini) { $("#library").hidden = true; document.body.style.overflow = "hidden"; }
     this.message("Opening…");
     if (keepMini) this.minimize();
+    let info;
     try {
-      this.info = await api(`/api/media/${sourceId}/${itemId}`);
-    } catch (err) { this.report(false); this.message(err.message, true); return; }
-    const info = this.info;
+      info = await api(`/api/media/${sourceId}/${itemId}`, { signal: abort.signal });
+    } catch (err) {
+      if (token !== this.openToken) return;                       // replaced by another channel: nothing to report
+      this.report(false); this.message(err.message, true); return;
+    }
+    if (token !== this.openToken) return;
+    this.info = info;
     if (this.mini) this.miniTitle();
     this.duration = info.probe.duration || 0;
     this.mode = info.mode;
@@ -1452,7 +1469,9 @@ const Player = {
     if (autoplay()) {          // a browser may refuse to start with sound until the person has pressed play once
       video.play().catch(() => this.message("Press play to start"));
     }
+    if (this.chan) Queue.warm();
     await this.loadFilter();
+    if (token !== this.openToken) return;
     this.job = info.job;
     if (this.job) Jobs.poll();
     this.renderPanel();
@@ -1740,6 +1759,7 @@ const Player = {
   },
 
   frame() {
+    if (this.mini) return;                       // the little player has no timeline or captions to draw
     const t = this.now(), d = this.duration || 1;
     $("#t-now").textContent = fmt(t);
     $("#tl-played").style.width = `${Math.min(100, (t / d) * 100)}%`;

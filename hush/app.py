@@ -5,6 +5,7 @@ import json
 import logging
 import re
 import subprocess
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -564,6 +565,26 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         m["scanned"] = bool(m.get("scanned"))
         m["watched"] = bool(m.get("watched"))
         return m
+
+    warming: set[tuple[str, str]] = set()
+
+    @app.post("/api/live/warm", dependencies=[need])
+    def live_warm(body: dict = Body(...)):
+        """Look at the neighbouring channels ahead of time so zapping to them starts quickly."""
+        items = [(str(i.get("src", "")), str(i.get("item", ""))) for i in (body.get("items") or [])[:3]]
+
+        def work(src: str, item: str) -> None:
+            try:
+                probe(src, item)
+            except Exception:  # noqa: BLE001 - a channel that does not answer is simply not warmed
+                pass
+            finally:
+                warming.discard((src, item))
+        for src, item in items:
+            if src == "url" and (src, item) not in warming and not cache.get(("probe", src, item)):
+                warming.add((src, item))
+                threading.Thread(target=work, args=(src, item), daemon=True).start()
+        return {"ok": True}
 
     @app.get("/api/library/version", dependencies=[need])
     def library_version():
