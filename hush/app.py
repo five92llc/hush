@@ -26,6 +26,7 @@ from .analysis.jobs import Analyzer
 from .auth import COOKIE, SESSION_TTL, Auth
 from .config import Config, load_config
 from .db import DB
+from .qbit import Qbit, QbitError
 from .sources import Registry, SourceError, discover_dlna, media_key
 from .library import art, transcript as tr
 from .library.rename import RenameError, Renamer
@@ -96,6 +97,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     renamer.cache_dir, renamer.art_dir = cfg.cache_dir, library.art_dir
     tasks = TaskManager(cfg, db, registry, analyzer, library, livetv)
     notifier = Notifier(db)
+
+    def downloads_finished(names: list[str]) -> None:
+        notifier.event("download", "Download finished", ", ".join(names[:3]) + (f" and {len(names) - 3} more" if len(names) > 3 else ""))
+        threading.Timer(30, tasks.refresh_all).start()           # give the files a moment to settle, then add them to the library
+    qb = Qbit(db, downloads_finished)
     analyzer.on_event = notifier.event
     cache = Cache()
 
@@ -109,6 +115,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def _start():
         analyzer.start()
         tasks.start()
+        qb.watch()
         if not auth.enabled:
             log.warning("No password set: anyone on your network can use Hush. "
                         "Set `password:` in config.yaml or HUSH_PASSWORD.")
@@ -154,7 +161,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return rules.approved(prof, {"cert": row.get("cert"), "show_cert": show_cert, "flags": row.get("flags"), "scanned": row.get("scanned")})
 
     KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
-                    "/api/notifications", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
+                    "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
                     "/api/browse", "/api/live/playlists", "/api/transcript")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
@@ -667,6 +674,43 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 continue
             items.append(item)
         return items
+
+    # ---- qBittorrent ------------------------------------------------------------------
+    def _qb(fn):
+        try:
+            return fn()
+        except QbitError as exc:
+            raise HTTPException(502, str(exc))
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, f"qBittorrent: {exc}")
+
+    @app.get("/api/qbit", dependencies=[need])
+    def qbit_status():
+        s = qb.public()
+        if not s["configured"]:
+            return {**s, "connected": False}
+        try:
+            return {**s, "connected": True, "version": qb.version(), "torrents": qb.torrents()}
+        except (QbitError, httpx.HTTPError) as exc:
+            return {**s, "connected": False, "error": str(exc)}
+
+    @app.put("/api/qbit/settings", dependencies=[need])
+    def qbit_settings(body: dict = Body(...)):
+        return _qb(lambda: qb.update(body))
+
+    @app.post("/api/qbit/torrents/{h}/{action}", dependencies=[need])
+    def qbit_action(h: str, action: str):
+        _qb(lambda: qb.act(h, action))
+        return {"ok": True}
+
+    @app.get("/api/qbit/rss", dependencies=[need])
+    def qbit_rss():
+        return _qb(qb.rss)
+
+    @app.post("/api/qbit/rss/refresh", dependencies=[need])
+    def qbit_rss_refresh(body: dict = Body(...)):
+        _qb(lambda: qb.refresh_feed(str(body.get("name", ""))))
+        return {"ok": True}
 
     @app.get("/api/watchlist", dependencies=[need])
     def watchlist(prof: dict = Depends(get_profile)):

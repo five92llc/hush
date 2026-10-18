@@ -142,3 +142,54 @@ def test_upcoming_episodes_are_kept_for_library_shows(tmp_path):
     got = db.list_upcoming()
     assert "1 upcoming" in msg and [g["title"] for g in got] == ["Soon"] and got[0]["overview"] == "Next one"
     assert db.get_show("sk")["ids"]["tvmaze"] == "77"
+
+
+def fake_qbit(torrents, calls):
+    def handler(req: httpx.Request) -> httpx.Response:
+        calls.append((req.method, req.url.path))
+        p = req.url.path
+        if p == "/api/v2/auth/login":
+            ok = b"username=u" in req.content and b"password=pw" in req.content
+            return httpx.Response(200, text="Ok." if ok else "Fails.")
+        if p == "/api/v2/app/version":
+            return httpx.Response(200, text="v5.0.0")
+        if p == "/api/v2/torrents/info":
+            return httpx.Response(200, json=torrents)
+        if p == "/api/v2/torrents/stop":
+            return httpx.Response(200)
+        if p == "/api/v2/torrents/pause":
+            return httpx.Response(404)
+        if p == "/api/v2/rss/items":
+            return httpx.Response(200, json={"ShowRSS": {"url": "https://x/feed", "title": "My shows", "articles": [
+                {"title": "Show S01E02", "date": "2026-10-18T10:00:00"}, {"title": "Show S01E01", "date": "2026-10-11T10:00:00"}]}})
+        if p == "/api/v2/rss/rules":
+            return httpx.Response(200, json={"Show": {"enabled": True, "mustContain": "Show", "affectedFeeds": ["https://x/feed"], "lastMatch": "x"}})
+        return httpx.Response(404)
+    return httpx.MockTransport(handler)
+
+
+def test_qbit_reads_downloads_and_rss_and_notices_finished_ones(tmp_path):
+    from hush.db import DB
+    from hush.qbit import Qbit, QbitError
+    db = DB(tmp_path / "q.db")
+    torrents = [{"hash": "aa", "name": "One", "progress": 1, "state": "stalledUP", "size": 10},
+                {"hash": "bb", "name": "Two", "progress": 0.4, "state": "downloading", "size": 10, "dlspeed": 5}]
+    calls, finished = [], []
+    qb = Qbit(db, finished.extend, transport=fake_qbit(torrents, calls))
+    qb.update({"url": "http://qb:8080/", "username": "u", "password": "wrong"})
+    try:
+        qb.version()
+        assert False, "a wrong password must be refused"
+    except QbitError:
+        pass
+    qb.update({"password": "pw"})
+    assert qb.version() == "v5.0.0" and qb.public()["has_password"] and "password" not in qb.public()
+    got = qb.torrents()
+    assert [(t["name"], t["done"]) for t in got] == [("One", True), ("Two", False)]
+    assert qb.check_finished() == []                       # first look: already-finished downloads are not news
+    torrents[1].update(progress=1, state="uploading")
+    assert qb.check_finished() == ["Two"] and finished == ["Two"]
+    qb.act("bb", "pause")                                  # falls back from stop to pause on older versions, or stops on 5
+    assert ("POST", "/api/v2/torrents/stop") in calls
+    rss = qb.rss()
+    assert rss["feeds"][0]["articles"][0]["title"] == "Show S01E02" and rss["rules"][0]["name"] == "Show"

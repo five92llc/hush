@@ -845,6 +845,7 @@ const Catalog = {
       else if (view === "folders") await this.folders();
       else if (view === "live") await this.live();
       else if (view === "mylist") await this.mylist();
+      else if (view === "downloads") await this.downloads();
       else if (view === "movies") await this.grid("movies");
       else if (view === "shows") await this.grid("shows");
       else if (view === "show") await this.show(id);
@@ -875,6 +876,68 @@ const Catalog = {
   idle() {
     if (document.querySelector("dialog[open]") || $("#library").hidden || !$("#player").hidden && !Player.mini) return false;
     return !document.activeElement?.matches?.("input, textarea, select");
+  },
+
+  /** Downloads: a window onto your qBittorrent (its downloads and its RSS downloader). */
+  async downloads() {
+    document.title = "Downloads – Hush";
+    clearInterval(this.dlTimer);
+    const speed = (b) => (b ? `${fmtSize(b)}/s` : "");
+    const eta = (s) => (s > 0 && s < 8640000 ? (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.max(1, Math.round(s / 60))} min`) : "");
+    const stateText = (t) => t.done ? (t.paused ? "Finished" : "Finished · sharing") : t.paused ? "Paused" : ({ downloading: "Downloading", stalledDL: "Waiting for sources", metaDL: "Getting details", queuedDL: "Queued", checkingDL: "Checking", error: "Error", missingFiles: "Files missing" })[t.state] || t.state;
+
+    const listBox = h("div", { class: "dl-list" }), rssBox = h("div", { class: "dl-rss" }), conn = h("div", { class: "dl-conn" });
+    const act = async (hash, action) => { try { await api(`/api/qbit/torrents/${hash}/${action}`, { method: "POST" }); refreshList(); } catch (err) { toast(err.message); } };
+
+    const form = () => {
+      const url = h("input", { type: "text", placeholder: "http://192.168.100.50:8080", "aria-label": "qBittorrent address", spellcheck: "false", value: this.qbPublic?.url || "" });
+      const user = h("input", { type: "text", placeholder: "User name", "aria-label": "qBittorrent user name", autocomplete: "off", value: this.qbPublic?.username || "" });
+      const pass = h("input", { type: "password", placeholder: this.qbPublic?.has_password ? "Password (saved)" : "Password", "aria-label": "qBittorrent password", autocomplete: "off" });
+      return h("form", { class: "row", onsubmit: async (e) => {
+        e.preventDefault();
+        try { await api("/api/qbit/settings", { method: "PUT", body: { url: url.value, username: user.value, password: pass.value } }); toast("Saved"); this.open("downloads", null, { quiet: true }); }
+        catch (err) { toast(err.message); }
+      } }, url, user, pass, h("button", { class: "btn primary", type: "submit" }, "Save and connect"));
+    };
+
+    const refreshList = async () => {
+      let s;
+      try { s = await api("/api/qbit"); } catch (err) { listBox.replaceChildren(h("p", { class: "error" }, err.message)); return; }
+      this.qbPublic = s;
+      conn.replaceChildren(
+        h("p", { class: s.connected ? "hint" : s.configured ? "error" : "hint" },
+          s.connected ? `Connected to qBittorrent ${s.version} at ${s.url}` : s.configured ? (s.error || "Not connected") : "Connect Hush to the qBittorrent you already run. Hush only watches its downloads and RSS rules; qBittorrent decides what is saved and where."),
+        s.connected ? h("button", { class: "btn ghost", type: "button", onclick: () => { conn.querySelector("form")?.remove() || conn.append(form()); } }, "Change connection") : form());
+      if (!s.connected) { listBox.replaceChildren(); rssBox.replaceChildren(); return; }
+      listBox.replaceChildren(h("h2", {}, "Downloads"), ...(s.torrents.length ? s.torrents.map((t) => h("div", { class: "dl" },
+        h("div", { class: "dl-top" }, h("strong", { class: "dl-name", title: t.name }, t.name),
+          h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))),
+        h("div", { class: "pbar big" }, h("i", { style: `width:${Math.round(t.progress * 100)}%` })),
+        h("div", { class: "dl-actions" },
+          t.paused ? h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "resume") }, "Resume") : h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "pause") }, "Pause"),
+          h("button", { class: "btn ghost", type: "button", title: "Takes it off the list; the files stay", onclick: () => { if (confirm(`Remove "${t.name}" from qBittorrent's list? The files are kept.`)) act(t.hash, "remove"); } }, "Remove")))) : [h("p", { class: "hint" }, "Nothing downloading right now.")]));
+    };
+
+    const refreshRss = async () => {
+      let r;
+      try { r = await api("/api/qbit/rss"); } catch { rssBox.replaceChildren(); return; }
+      rssBox.replaceChildren(h("h2", {}, "RSS downloader"),
+        ...(r.feeds.length ? r.feeds.map((f) => h("section", { class: "dl-feed" },
+          h("div", { class: "dl-top" }, h("strong", {}, f.title || f.name), h("button", { class: "btn ghost", type: "button", onclick: async (e) => {
+            e.currentTarget.disabled = true; try { await api("/api/qbit/rss/refresh", { method: "POST", body: { name: f.name } }); toast("qBittorrent is checking the feed"); setTimeout(refreshRss, 4000); } catch (err) { toast(err.message); }
+          } }, "Check now")),
+          f.has_error ? h("p", { class: "error" }, "qBittorrent could not read this feed") : null,
+          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 8).map((a) => h("li", {}, a.title, a.date ? h("span", { class: "hint" }, ` · ${new Date(a.date).toLocaleDateString()}`) : null))))) : [h("p", { class: "hint" }, "No RSS feeds in qBittorrent yet.")]),
+        r.rules.length ? h("h3", {}, "Download rules") : null,
+        ...r.rules.map((u) => h("div", { class: "pref" }, h("div", {}, h("strong", {}, u.name), h("p", { class: "hint" }, [u.enabled ? "On" : "Off", u.must_contain && `matches "${u.must_contain}"`, u.last_match && `last match ${u.last_match}`].filter(Boolean).join(" · "))))));
+    };
+
+    this.box().replaceChildren(h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Downloads"))), conn, listBox, rssBox);
+    await refreshList(); refreshRss();
+    this.dlTimer = setInterval(() => {                                 // keep the progress fresh while this page is open
+      if (location.hash !== "#/downloads" || document.hidden) { if (location.hash !== "#/downloads") clearInterval(this.dlTimer); return; }
+      refreshList();
+    }, 5000);
   },
 
   /** A status picker for a show or movie: puts it on My List, changes its status, or takes it off. */
@@ -2726,7 +2789,7 @@ async function route() {
   const [view, src, id] = [parts[0], parts[1], parts.slice(2).join("/")];
   TV.navCurrent(view);
   if (!view) { go("#/home"); return; }                       // Home is where everyone lands
-  if (isKids() && (["b", "tasks", "folders", "profiles"].includes(view) || (view === "live" && !S.profile?.settings?.allow_live))) { go("#/home"); return; }
+  if (isKids() && (["b", "tasks", "folders", "profiles", "downloads"].includes(view) || (view === "live" && !S.profile?.settings?.allow_live))) { go("#/home"); return; }
   $("#tasks").hidden = view !== "tasks"; $("#prefs").hidden = view !== "settings";
   if (view !== "p") S.libraryHash = location.hash || "#/";
   if (view === "p" && src && id) {
@@ -2745,7 +2808,7 @@ async function route() {
     return;
   }
   $("#library").hidden = false;
-  const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles", "mylist"].includes(view);
+  const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles", "mylist", "downloads"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;
   $$("#rail-links a").forEach((a) => { if (!inCatalog) a.removeAttribute("aria-current"); });
   if (inCatalog) { Catalog.open(view, src); return; }

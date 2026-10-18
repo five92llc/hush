@@ -650,3 +650,16 @@ html.tv { font-size: 150%; }
 .ml-actions { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .4rem; }
 .ml-actions .btn, .list-status { font-size: var(--s-1); }
 .list-status { background: var(--dusk); color: var(--linen); border: 1px solid var(--line); border-radius: var(--r-md); padding: .45rem .6rem; font-family: var(--body); }
+
+/* ---- downloads ---- */
+.dl-conn { margin: .75rem 0 1rem; display: grid; gap: .5rem; max-width: 52rem; }
+.dl-conn .row input { flex: 1 1 11rem; }
+.dl-list, .dl-rss { max-width: 52rem; display: grid; gap: .6rem; margin-bottom: 1.5rem; }
+.dl { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: .7rem .9rem; display: grid; gap: .4rem; }
+.dl-top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+.dl-name { overflow-wrap: anywhere; flex: 1 1 18rem; }
+.pbar.big { position: relative; height: 6px; background: var(--dusk-2); border-radius: 3px; overflow: hidden; }
+.pbar.big i { display: block; height: 100%; background: var(--lamp); }
+.dl-actions { display: flex; gap: .4rem; }
+.dl-feed { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: .7rem .9rem; display: grid; gap: .4rem; }
+.dl-articles { margin: 0; padding-left: 1.1rem; display: grid; gap: .2rem; font-size: var(--s-1); }
