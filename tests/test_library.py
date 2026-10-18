@@ -380,3 +380,68 @@ def test_ratings_are_backfilled_from_nfo_files_once(lib_service):
     assert svc.backfill_certs() == 1
     assert next(m for m in db.list_movies("p1") if m["title"] == "Backrooms")["cert"] == "Rated PG-13"
     assert svc.backfill_certs() == 0                                               # done once
+
+
+def test_local_pictures_are_found_next_to_movies_and_shows(tmp_path):
+    from hush.library.parse import local_episode_thumb, local_fanart, local_poster, local_show_fanart, local_show_poster
+    movie = tmp_path / "Film (2020)" / "Film (2020).mkv"
+    movie.parent.mkdir()
+    movie.write_bytes(b"x")
+    assert local_poster(movie) is None and local_fanart(movie) is None
+    (movie.parent / "poster.jpg").write_bytes(b"p")
+    (movie.parent / "Film (2020)-fanart.png").write_bytes(b"f")
+    assert local_poster(movie).name == "poster.jpg" and local_fanart(movie).name == "Film (2020)-fanart.png"
+    ep = tmp_path / "Show" / "Season 1" / "Show S01E01.mkv"
+    ep.parent.mkdir(parents=True)
+    ep.write_bytes(b"x")
+    (tmp_path / "Show" / "folder.jpg").write_bytes(b"p")
+    (tmp_path / "Show" / "fanart.jpg").write_bytes(b"f")
+    (ep.parent / "Show S01E01-thumb.jpg").write_bytes(b"t")
+    assert local_show_poster(ep).name == "folder.jpg" and local_show_fanart(ep).name == "fanart.jpg"
+    assert local_episode_thumb(ep).name == "Show S01E01-thumb.jpg"
+    flat = tmp_path / "Flat" / "Flat S01E01.mkv"                      # episodes straight in the show folder
+    flat.parent.mkdir()
+    (flat.parent / "poster.jpg").write_bytes(b"p")
+    assert local_show_poster(flat).name == "poster.jpg"
+
+
+def test_library_uses_local_pictures_and_picks_up_changes(tmp_path, monkeypatch):
+    import os
+    import time as t
+    from hush.config import Config
+    from hush.db import DB
+    from hush.library import art
+    from hush.library.service import MetadataService
+    from hush.sources import Registry
+    from hush.sources import media_key
+    root = tmp_path / "movies"
+    folder = root / "Film (2020)"
+    folder.mkdir(parents=True)
+    (folder / "Film (2020).mkv").write_bytes(b"x")
+    (folder / "poster.jpg").write_bytes(b"p")
+    (folder / "fanart.jpg").write_bytes(b"f")
+    cfg = Config(data_dir=tmp_path / "d", sources=[{"id": "movies", "type": "local", "name": "Movies", "path": str(root)}])
+    cfg.data_dir.mkdir()
+    db = DB(cfg.db_path)
+    reg = Registry(cfg.sources, db)
+    from hush.analysis.walk import walk
+    (entry,) = list(walk(reg.get("movies")))
+    item = entry.id
+    key = media_key("movies", item)
+    db.save_meta({"media_key": key, "source_id": "movies", "item_id": item, "kind": "movie", "title": "Film", "year": 2020, "provider": "name", "art": 1, "art_src": "online"})
+    made = []
+
+    def fake_scale(ffmpeg, src, dst, extra_in=None, width=art.WIDTH):
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        dst.write_bytes(b"img")
+        made.append((os.path.basename(src), width))
+        return True
+    monkeypatch.setattr(art, "_scale", fake_scale)
+    lib = MetadataService(cfg, db, reg)
+    assert lib.sync_local_art() == {"posters": 1, "fanart": 1}
+    m = db.get_meta(key)
+    assert m["art_src"] == "local" and m["fanart"] == 1 and ("fanart.jpg", art.FANART_WIDTH) in made
+    assert lib.sync_local_art() == {"posters": 0, "fanart": 0}          # nothing changed: nothing redone
+    later = t.time() + 60
+    os.utime(folder / "poster.jpg", (later, later))                      # the file was replaced
+    assert lib.sync_local_art()["posters"] == 1

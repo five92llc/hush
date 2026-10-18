@@ -580,6 +580,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def _card(m: dict) -> dict:
         m = dict(m)
         m["art_url"] = f"/api/art/{m['media_key']}.jpg" if m.get("art") else None
+        m["fanart_url"] = f"/api/fanart/{m['media_key']}.jpg" if m.get("fanart") else None
         m["scanned"] = bool(m.get("scanned"))
         m["watched"] = bool(m.get("watched"))
         return m
@@ -822,6 +823,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if prof["kids"] and not eps:
             raise HTTPException(404)
         show["art_url"] = f"/api/art/{show_key}.jpg" if show.get("art") else None
+        show["fanart_url"] = f"/api/fanart/{show_key}.jpg" if show.get("fanart") else None
         w = db.get_watch(prof["id"], f"show:{show_key}")
         return {"show": show, "episodes": [_card(e) for e in eps], "upcoming": _upc(db.list_upcoming(show_key)),
                 "list_status": w["status"] if w else None}
@@ -867,6 +869,13 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(404)
         if w:
             f = thumb_of(f, w, "jpg")
+        return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+
+    @app.get("/api/fanart/{name}.jpg", dependencies=[need])
+    def fanart_file(name: str):
+        f = art.fanart_path(library.art_dir, name) if name.isalnum() else None
+        if not f or not f.is_file():
+            raise HTTPException(404)
         return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
     @app.get("/api/transcript/{key}.{fmt}", dependencies=[need])

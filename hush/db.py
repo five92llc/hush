@@ -280,6 +280,10 @@ class DB:
         if "epg_url" not in self._columns("playlists"):
             c.execute("ALTER TABLE playlists ADD COLUMN epg_url TEXT")
         for table in ("meta", "shows"):
+            for col, kind in (("fanart", "INTEGER DEFAULT 0"), ("art_src", "TEXT")):
+                if col not in self._columns(table):
+                    c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {kind}")
+        for table in ("meta", "shows"):
             if "cert" not in self._columns(table):
                 c.execute(f"ALTER TABLE {table} ADD COLUMN cert TEXT")
 
@@ -470,8 +474,9 @@ class DB:
 
     def save_meta(self, m: dict) -> None:
         cols = ["media_key", "source_id", "item_id", "kind", "title", "year", "show_key", "season",
-                "episode", "overview", "genres", "rating", "runtime", "art", "ids", "provider", "cert", "locked"]
+                "episode", "overview", "genres", "rating", "runtime", "art", "ids", "provider", "cert", "locked", "fanart", "art_src"]
         row = {c: m.get(c) for c in cols}
+        row["fanart"] = int(bool(m.get("fanart")))
         row["genres"] = json.dumps(m.get("genres") or [])
         row["ids"] = json.dumps(m.get("ids") or {})
         row["art"] = int(bool(m.get("art")))
@@ -483,14 +488,21 @@ class DB:
         return self._decode(self._one("SELECT * FROM shows WHERE show_key=?", (show_key,)))
 
     def save_show(self, s: dict) -> None:
-        cols = ["show_key", "title", "year", "overview", "genres", "rating", "art", "ids", "provider", "cert", "locked"]
+        cols = ["show_key", "title", "year", "overview", "genres", "rating", "art", "ids", "provider", "cert", "locked", "fanart", "art_src"]
         row = {c: s.get(c) for c in cols}
+        row["fanart"] = int(bool(s.get("fanart")))
         row["genres"] = json.dumps(s.get("genres") or [])
         row["ids"] = json.dumps(s.get("ids") or {})
         row["art"] = int(bool(s.get("art")))
         row["locked"] = int(bool(s.get("locked")))
         self._exec(f"INSERT OR REPLACE INTO shows({','.join(cols)},updated_at) VALUES({','.join('?' * len(cols))},?)",
                    (*row.values(), time.time()))
+
+    def set_art(self, table: str, key_col: str, key: str, **fields) -> None:
+        """Update just the picture flags of one title or show (art, fanart, art_src)."""
+        assert table in ("meta", "shows") and key_col in ("media_key", "show_key") and set(fields) <= {"art", "fanart", "art_src"}
+        sets = ",".join(f"{k}=?" for k in fields)
+        self._exec(f"UPDATE {table} SET {sets} WHERE {key_col}=?", (*fields.values(), key))
 
     def library_without_meta(self, limit: int = 100000) -> list[dict]:
         return self._all("SELECT l.* FROM library_items l LEFT JOIN meta m ON m.media_key=l.media_key "

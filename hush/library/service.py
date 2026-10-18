@@ -10,7 +10,8 @@ import httpx
 
 from .. import media
 from . import art
-from .parse import local_poster, nfo_for, parse_name, show_nfo_for
+from .parse import (local_episode_thumb, local_fanart, local_poster, local_show_fanart, local_show_poster, nfo_for, parse_name,
+                    show_nfo_for)
 from .providers import norm, pick_providers
 
 log = logging.getLogger("hush.library")
@@ -63,13 +64,14 @@ class MetadataService:
         return "The free sources (Wikipedia and TVmaze) answered"
 
     # ---- one title -----------------------------------------------------------------
-    def _fetch_art(self, key: str, local: Path | None, url: str | None, video_args, duration) -> bool:
+    def _fetch_art(self, key: str, local: Path | None, url: str | None, video_args, duration) -> str:
+        """Make the card picture. Returns where it came from: local (a file next to the video), online, video, or "" for none."""
         dst = art.art_path(self.art_dir, key)
         if local and art.from_file(self.cfg.ffmpeg, local, dst):
-            return True
+            return "local"
         if url and art.from_url(self.cfg.ffmpeg, url, dst):
-            return True
-        return bool(video_args) and art.from_video(self.cfg.ffmpeg, video_args, duration, dst)
+            return "online"
+        return "video" if (video_args and art.from_video(self.cfg.ffmpeg, video_args, duration, dst)) else ""
 
     def enrich(self, row: dict, providers=None, cache: dict | None = None) -> dict:
         """Work out and save the details for one library_items row."""
@@ -90,7 +92,8 @@ class MetadataService:
         nfo = nfo_for(path) if path else {}
         m = {"media_key": key, "source_id": sid, "item_id": iid, "kind": parsed["kind"], "title": parsed["title"],
              "year": parsed["year"], "season": parsed["season"], "episode": parsed["episode"],
-             "overview": "", "genres": [], "rating": None, "runtime": None, "ids": {}, "provider": "name", "art": 0}
+             "overview": "", "genres": [], "rating": None, "runtime": None, "ids": {}, "provider": "name", "art": 0,
+             "fanart": (old or {}).get("fanart"), "art_src": (old or {}).get("art_src")}
         poster_url = None
         try:
             if parsed["kind"] == "movie":
@@ -103,14 +106,15 @@ class MetadataService:
         video_args = None
         duration = None
         if not art.art_path(self.art_dir, key).exists() or not (old and old.get("art")):
-            local = local_poster(path) if (path and parsed["kind"] == "movie") else None
+            local = (local_poster(path) if parsed["kind"] == "movie" else local_episode_thumb(path)) if path else None
             try:
                 if not local and not poster_url:
                     video_args = media.ffmpeg_input(ref, sid, iid)
                     duration = media.probe(self.cfg.ffprobe, ref, sid, iid, timeout=45).duration
             except Exception as exc:  # noqa: BLE001
                 log.info("no thumbnail source for %s: %s", ref.name, exc)
-            m["art"] = self._fetch_art(key, local, poster_url, video_args, duration)
+            m["art_src"] = self._fetch_art(key, local, poster_url, video_args, duration)
+            m["art"] = bool(m["art_src"])
         else:
             m["art"] = 1
         self.db.save_meta(m)
@@ -193,6 +197,7 @@ class MetadataService:
         if not art.art_path(self.art_dir, show["show_key"]).exists():
             show["art"] = bool(hit.get("poster_url") and art.from_url(
                 self.cfg.ffmpeg, hit["poster_url"], art.art_path(self.art_dir, show["show_key"])))
+            show["art_src"] = "online" if show["art"] else show.get("art_src")
         self.db.save_show(show)
 
     # ---- the whole library ---------------------------------------------------------------
@@ -211,6 +216,53 @@ class MetadataService:
                     full["art"] = 1
                     self.db.save_show(full)
                     break
+
+    # ---- pictures that already sit in the movie and show folders ---------------------------------
+    def _newer(self, src: Path, dst: Path) -> bool:
+        return not dst.exists() or src.stat().st_mtime > dst.stat().st_mtime
+
+    def sync_local_art(self) -> dict:
+        """Use the posters, backgrounds and episode pictures found next to the files (poster.jpg, fanart.jpg,
+        <name>-thumb.jpg...). They win over downloaded artwork and are picked up again when the file changes."""
+        ff = self.cfg.ffmpeg
+        done = {"posters": 0, "fanart": 0}
+        first_path: dict[str, Path] = {}
+        for m in self.db._all("SELECT media_key, source_id, item_id, kind, show_key, locked, art, art_src, fanart FROM meta"):
+            try:
+                ref = self.registry.get(m["source_id"]).resolve(m["item_id"])
+            except Exception:  # noqa: BLE001 - a source that is offline is simply skipped this time
+                continue
+            if not ref.path:
+                continue
+            path = Path(ref.path)
+            if m["kind"] == "episode" and m["show_key"]:
+                first_path.setdefault(m["show_key"], path)
+            dst = art.art_path(self.art_dir, m["media_key"])
+            src = (local_poster(path) if m["kind"] == "movie" else local_episode_thumb(path))
+            if src and not m["locked"] and (m["art_src"] != "local" or self._newer(src, dst)) and art.from_file(ff, src, dst):
+                self.db.set_art("meta", "media_key", m["media_key"], art=1, art_src="local")
+                done["posters"] += 1
+            if m["kind"] == "movie":
+                fan = local_fanart(path)
+                fdst = art.fanart_path(self.art_dir, m["media_key"])
+                if fan and self._newer(fan, fdst) and art.from_file(ff, fan, fdst, width=art.FANART_WIDTH):
+                    self.db.set_art("meta", "media_key", m["media_key"], fanart=1)
+                    done["fanart"] += 1
+        for key, path in first_path.items():
+            show = self.db.get_show(key)
+            if not show:
+                continue
+            dst = art.art_path(self.art_dir, key)
+            src = local_show_poster(path)
+            if src and not show.get("locked") and (show.get("art_src") != "local" or self._newer(src, dst)) and art.from_file(ff, src, dst):
+                self.db.set_art("shows", "show_key", key, art=1, art_src="local")
+                done["posters"] += 1
+            fan = local_show_fanart(path)
+            fdst = art.fanart_path(self.art_dir, key)
+            if fan and self._newer(fan, fdst) and art.from_file(ff, fan, fdst, width=art.FANART_WIDTH):
+                self.db.set_art("shows", "show_key", key, fanart=1)
+                done["fanart"] += 1
+        return done
 
     def backfill_certs(self) -> int:
         """Titles saved before ratings were read get theirs from the .nfo files next to them (once)."""
@@ -259,6 +311,11 @@ class MetadataService:
                 failed += 1
                 log.warning("details failed for %s: %s", r.get("title"), exc)
         self.finish_shows()
+        try:
+            self.last_local = self.sync_local_art()
+        except Exception as exc:  # noqa: BLE001 - pictures are a bonus; never fail the whole pass over them
+            log.warning("local artwork: %s", exc)
+            self.last_local = {}
         return {"processed": done, "failed": failed}
 
     # ---- fixing a wrong match by hand ---------------------------------------------------------

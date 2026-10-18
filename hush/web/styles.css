@@ -667,3 +667,9 @@ html.tv { font-size: 150%; }
 .dl-add .row input { flex: 1 1 14rem; }
 .dl-articles li { display: flex; align-items: center; gap: .6rem; list-style: none; margin-left: -1.1rem; }
 .dl-articles li .grow { flex: 1 1 auto; overflow-wrap: anywhere; }
+
+/* ---- fanart: a show or movie's background picture behind the top of its page ---- */
+.catalog.has-fanart { position: relative; }
+.catalog.has-fanart::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 24rem; z-index: 0; pointer-events: none;
+  background-image: linear-gradient(to bottom, rgba(25, 26, 44, .35), var(--ink) 96%), var(--fanart); background-size: cover; background-position: center top; }
+.catalog.has-fanart > * { position: relative; z-index: 1; }

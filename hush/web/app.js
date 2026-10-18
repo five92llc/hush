@@ -833,8 +833,16 @@ const artBox = (url, label, cls = "art") => h("div", { class: cls }, url
 
 const Catalog = {
   box: () => $("#catalog-view"),
+  /** A show or movie's background picture, faded in behind the top of the page. Cleared on every other page. */
+  backdrop(url) {
+    const b = this.box();
+    b.classList.toggle("has-fanart", !!url);
+    if (url) b.style.setProperty("--fanart", `url("${url}")`); else b.style.removeProperty("--fanart");
+  },
+
   async open(view, id, opts = {}) {
     if (view !== "live") Queue.loadMore = null;
+    if (!opts.quiet || !["show", "title"].includes(view)) this.backdrop(null);
     $$("#rail-links a").forEach((a) => a.setAttribute("aria-current", String(
       a.hash === `#/${view}` || (view === "show" && a.hash === "#/shows") || (view === "title" && a.hash === (this.cameFrom || "#/movies")))));
     const scroll = window.scrollY;
@@ -1451,6 +1459,7 @@ const Catalog = {
     this.cameFrom = "#/shows";
     Queue.set(episodes.map((e) => ({ src: e.source_id, item: e.item_id, title: e.title || "" })));
     document.title = `${show.title} – Hush`;
+    this.backdrop(show.fanart_url);
     this.box().replaceChildren(
       h("a", { class: "backlink", href: "#/shows" }, "← TV shows"),
       h("div", { class: "detail" }, artBox(show.art_url, show.title),
@@ -1488,6 +1497,7 @@ const Catalog = {
     const show = m.show_key ? (await api(`/api/library/shows/${m.show_key}`)).show : null;
     const caps = await api(`/api/captions/${m.source_id}/${m.item_id}`).catch(() => ({ tracks: [], transcript: false }));
     document.title = `${show ? show.title + " – " : ""}${m.title} – Hush`;
+    this.backdrop(m.fanart_url || show?.fanart_url);
     const heading = show ? `${show.title} · S${String(m.season).padStart(2, "0")}E${String(m.episode).padStart(2, "0")}` : `${m.title}${m.year ? ` (${m.year})` : ""}`;
     const mask = h("input", { type: "checkbox" });
     const tlink = (fmt, label) => h("a", { class: "btn ghost", href: "#", onclick: (e) => { e.preventDefault(); location.href = `/api/transcript/${key}.${fmt}${mask.checked ? "?censor=1" : ""}`; } }, label);

@@ -16,11 +16,18 @@ def art_path(art_dir: Path, key: str) -> Path:
     return art_dir / f"{key}.jpg"
 
 
-def _scale(ffmpeg: str, src: str, dst: Path, extra_in: list[str] | None = None) -> bool:
+FANART_WIDTH = 1280
+
+
+def fanart_path(art_dir: Path, key: str) -> Path:
+    return art_dir / "fanart" / f"{key}.jpg"
+
+
+def _scale(ffmpeg: str, src: str, dst: Path, extra_in: list[str] | None = None, width: int = WIDTH) -> bool:
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(".tmp.jpg")
     cmd = [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", *(extra_in or []), "-i", src,
-           "-frames:v", "1", "-vf", f"scale='min({WIDTH},iw)':-2", "-q:v", "4", str(tmp)]
+           "-frames:v", "1", "-vf", f"scale='min({width},iw)':-2", "-q:v", "4", str(tmp)]
     try:
         subprocess.run(cmd, capture_output=True, timeout=90, check=True)
     except (subprocess.SubprocessError, OSError):
@@ -33,8 +40,8 @@ def _scale(ffmpeg: str, src: str, dst: Path, extra_in: list[str] | None = None) 
     return True
 
 
-def from_file(ffmpeg: str, image: Path, dst: Path) -> bool:
-    return _scale(ffmpeg, str(image), dst)
+def from_file(ffmpeg: str, image: Path, dst: Path, width: int = WIDTH) -> bool:
+    return _scale(ffmpeg, str(image), dst, width=width)
 
 
 def from_url(ffmpeg: str, url: str, dst: Path, client: httpx.Client | None = None) -> bool:

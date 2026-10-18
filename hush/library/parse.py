@@ -127,6 +127,46 @@ def show_nfo_for(video: Path) -> dict:
 
 
 POSTER_NAMES = ("poster", "folder", "cover", "movie", "thumb")
+FANART_NAMES = ("fanart", "backdrop", "background", "art")
+IMG_EXT = (".jpg", ".jpeg", ".png", ".webp")
+_SEASON_DIR = re.compile(r"^(season|series|staffel|saison|s)[ ._-]*\d{1,2}$|^specials?$", re.I)
+
+
+def _find(folders, names) -> Path | None:
+    """The first image among these folders with one of these names (any common picture extension)."""
+    for folder in folders:
+        for n in names:
+            for ext in IMG_EXT:
+                p = folder / f"{n}{ext}"
+                if p.is_file():
+                    return p
+    return None
+
+
+def show_folders(video: Path) -> list[Path]:
+    """Folders that can hold a show's own artwork: the show folder, whether or not episodes sit in Season folders."""
+    parent = video.parent
+    return [parent.parent, parent] if _SEASON_DIR.match(parent.name) else [parent, parent.parent]
+
+
+def local_fanart(video: Path) -> Path | None:
+    """A background picture next to a movie (Kodi/Plex/Jellyfin naming: fanart.jpg, <name>-fanart.jpg, backdrop...)."""
+    stem = video.stem
+    return _find([video.parent], [f"{stem}-fanart", f"{stem}-backdrop", f"{stem}-background", *FANART_NAMES])
+
+
+def local_episode_thumb(video: Path) -> Path | None:
+    """An episode's own picture: <name>-thumb.jpg, <name>.jpg or <name>-landscape.jpg next to the video."""
+    stem = video.stem
+    return _find([video.parent], [f"{stem}-thumb", stem, f"{stem}-landscape"])
+
+
+def local_show_poster(video: Path) -> Path | None:
+    return _find(show_folders(video), ("poster", "folder", "cover", "show"))
+
+
+def local_show_fanart(video: Path) -> Path | None:
+    return _find(show_folders(video), FANART_NAMES)
 
 
 def local_poster(video: Path) -> Path | None:
