@@ -2009,7 +2009,15 @@ video.addEventListener("error", () => {
     ? `Safari can't play Hush's live streams yet${code}. Open this page in Chrome, Firefox or Edge, or use "Watch on another player".`
     : `This file couldn't be played${code}. Check that the server can still reach it.`, true);
 });
-(function loop() { if (!$("#player").hidden) Player.frame(); requestAnimationFrame(loop); })();
+// The playhead and captions only need ~10 updates a second; doing it every frame starves a TV's CPU while it decodes video.
+(function loop() {
+  let last = 0;
+  const tick = (now) => {
+    if (now - last >= 100 && !$("#player").hidden && !document.hidden) { last = now; Player.frame(); }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+})();
 
 $("#back10").addEventListener("click", () => Player.seek(Player.now() - 10));
 $("#fwd10").addEventListener("click", () => Player.seek(Player.now() + 10));
@@ -2156,8 +2164,8 @@ const TV = {
   init() {
     this.on = store.get("tv", null) ?? TVUA.test(navigator.userAgent);   // a smart TV starts in big screen mode by itself
     this.apply();
-    new MutationObserver(() => { clearTimeout(this.obsTimer); this.obsTimer = setTimeout(() => this.focusSoon(0), 350); })
-      .observe($("#app"), { childList: true, subtree: true });
+    const watch = new MutationObserver(() => { clearTimeout(this.obsTimer); this.obsTimer = setTimeout(() => this.focusSoon(0), 350); });
+    ["#catalog-view", "#browser-view", "#tasks", "#prefs"].forEach((id) => watch.observe($(id), { childList: true, subtree: true }));   // not the player, which changes every second
   },
   set(on) {
     this.on = on; store.set("tv", on); this.apply();
