@@ -855,13 +855,19 @@ const Catalog = {
       e.currentTarget.textContent = st.favorites ? "★ Favorites only" : "☆ Favorites"; fetchPage(true);
     } }, st.favorites ? "★ Favorites only" : "☆ Favorites");
     const dead = h("label", {}, h("input", { type: "checkbox", checked: st.hideDead, onchange: (e) => { st.hideDead = e.target.checked; fetchPage(true); } }), "Hide channels that don't play");
-    const plBtn = h("button", { class: "btn ghost", type: "button", onclick: () => { st.panel = !st.panel; panel.hidden = !st.panel; } }, "＋ Add / manage playlists");
+    const plBtn = h("button", { class: "btn ghost", type: "button", onclick: () => setPanel(!st.panel) });
+    const setPanel = (on) => {                                   // the playlist manager folds away; the choice is remembered
+      st.panel = on; panel.hidden = !on;
+      plBtn.textContent = `Playlists ${on ? "▴" : "▾"}`; plBtn.setAttribute("aria-expanded", String(on));
+    };
     tools.append(search, sel, favBtn, dead, plBtn);
 
     const reloadAll = () => this.open("live");
     const addName = h("input", { type: "text", placeholder: "Name (optional)", "aria-label": "Playlist name" });
     const addUrl = h("input", { type: "text", placeholder: "https://…/channels.m3u", "aria-label": "Playlist address", spellcheck: "false" });
     panel.append(
+      h("div", { class: "row", style: "justify-content:space-between;align-items:center" }, h("strong", {}, "Playlists"),
+        h("button", { class: "btn ghost", type: "button", onclick: () => { setPanel(false); plBtn.focus(); } }, "Collapse ▴")),
       h("p", { class: "hint" }, "Playlists are .m3u or .m3u8 lists of channels. Hush reads them once, keeps the channels here with their logos and groups, and refreshes them every day."),
       playlists.length ? h("ul", {}, ...playlists.map((p) => h("li", {},
         h("span", { class: "grow" }, h("strong", {}, p.name), " ", h("span", { class: p.error ? "error" : "hint" }, p.error ? p.error : `${plural(p.channels, "channel")}`)),
@@ -889,11 +895,11 @@ const Catalog = {
     head.append(h("div", {}, h("h1", {}, "Live TV"), summary));
     const empty = h("div", { class: "empty", hidden: true }, h("h3", {}, "No channels yet"),
       h("p", {}, "Add an IPTV playlist (.m3u or .m3u8) and its channels appear here with their logos, sorted into groups."),
-      h("button", { class: "btn primary", type: "button", onclick: () => { st.panel = true; panel.hidden = false; panel.scrollIntoView({ block: "nearest" }); } }, "Add a playlist"));
+      h("button", { class: "btn primary", type: "button", onclick: () => { setPanel(true); panel.scrollIntoView({ block: "nearest" }); } }, "Add a playlist"));
     this.box().replaceChildren(head, tools, lb.el, panel, recentBox, grid, h("div", { class: "row", style: "margin-top:1.25rem" }, more), empty);
     await fetchPage(true);
     empty.hidden = stats.total > 0;
-    if (!stats.total) { st.panel = true; panel.hidden = false; }
+    setPanel(st.panel || !stats.total);
   },
 
   empty(what) {
