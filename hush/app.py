@@ -1137,6 +1137,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return {"ok": True}
 
     # ---- background tasks ---------------------------------------------------
+    @app.post("/api/library/refresh", dependencies=[need])
+    def library_refresh():
+        """The Refresh button: look through every source, add new titles and artwork, update upcoming episodes."""
+        return {"started": tasks.refresh_all()}
+
+    @app.get("/api/library/refresh", dependencies=[need])
+    def library_refresh_status():
+        return {"running": tasks.refreshing, "result": tasks.refresh_result}
+
     @app.get("/api/tasks", dependencies=[need])
     def tasks_list():
         return tasks.list()

@@ -114,6 +114,36 @@ class TaskManager:
         threading.Thread(target=self._execute, args=(tid,), name=f"task-{tid}", daemon=True).start()
         return True
 
+    # ---- refresh everything now (the Refresh button) ------------------------------
+    refreshing = False
+    refresh_result = ""
+
+    def refresh_all(self) -> bool:
+        """Look through every source, fill in new titles and artwork, and update the upcoming episodes. False if already running."""
+        with self._lock:
+            if self.refreshing:
+                return False
+            self.refreshing = True
+        threading.Thread(target=self._refresh_all, name="refresh-all", daemon=True).start()
+        return True
+
+    def _refresh_all(self) -> None:
+        try:
+            ids = [s["id"] for s in self.registry.list() if "error" not in s]
+            scan_new = bool(self._state()["refresh"].get("scan_new", True))
+            summary, _ = self._index(ids, scan_new)
+            parts = [summary]
+            if self.library:
+                r = self.library.process_library()
+                parts.append(f"{r['processed']} titles filled in")
+            parts.append(upcoming.refresh(self.db))
+            self.refresh_result = " · ".join(parts)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("refresh failed")
+            self.refresh_result = f"Refresh failed: {str(exc)[:200]}"
+        finally:
+            self.refreshing = False
+
     # ---- scheduler ---------------------------------------------------------------
     def start(self) -> None:
         threading.Thread(target=self._loop, name="tasks", daemon=True).start()

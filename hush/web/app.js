@@ -404,6 +404,32 @@ function jobText(j) {
   if (j.status === "queued") return "Waiting to start";
   return `${j.stage[0].toUpperCase()}${j.stage.slice(1)}, ${Math.round(j.progress * 100)}%`;
 }
+/** The Refresh button: starts a full look through the sources and follows it until it is done. */
+const Refresh = {
+  async start() {
+    try {
+      const r = await api("/api/library/refresh", { method: "POST" });
+      toast(r.started ? "Looking for new titles…" : "A refresh is already running");
+    } catch (err) { toast(err.message); return; }
+    this.follow();
+  },
+  follow() {
+    const set = (busy) => ["#refresh-btn", "#refresh-btn2"].forEach((id) => { const b = $(id); b.disabled = busy; b.textContent = busy ? "Refreshing…" : (id === "#refresh-btn" ? "↻ Refresh" : "Refresh now"); });
+    set(true);
+    const poll = async () => {
+      try {
+        const s = await api("/api/library/refresh");
+        if (s.running) { setTimeout(poll, 3000); return; }
+        set(false); toast(s.result || "Library is up to date");
+        Catalog.version = null;                                   // draw the page again now with whatever changed
+        const [view, id] = location.hash.replace(/^#\/?/, "").split("/");
+        if (["home", "movies", "shows", "show", "title", "live", "folders"].includes(view)) Catalog.open(view, id, { quiet: true });
+      } catch { set(false); }
+    };
+    setTimeout(poll, 2000);
+  },
+};
+["#refresh-btn", "#refresh-btn2"].forEach((id) => $(id).addEventListener("click", () => Refresh.start()));
 $("#pl-settings-btn").addEventListener("click", () => {
   Catalog.liveState = { q: "", group: "", favorites: false, hideDead: true, letter: "", ...(Catalog.liveState || {}), panel: true };
   go("#/live");
