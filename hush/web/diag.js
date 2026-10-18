@@ -27,6 +27,7 @@
   }
   window.addEventListener("error", function (e) {
     if (!e.message) return;                                   // a failed image or script load, not a script error
+    if (/^ResizeObserver loop/.test(e.message)) { e.stopImmediatePropagation(); return; }   // a harmless browser notice, not a fault
     report({ kind: "error", message: String(e.message).slice(0, 300), file: String(e.filename || "").split("/").pop(), line: e.lineno, col: e.colno,
       stack: String((e.error && e.error.stack) || "").slice(0, 700) });
     banner(String(e.message).slice(0, 160));
