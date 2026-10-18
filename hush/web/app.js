@@ -901,12 +901,30 @@ const Catalog = {
       } }, url, user, pass, h("button", { class: "btn primary", type: "submit" }, "Save and connect"));
     };
 
+    // Where new downloads go: qBittorrent's own choice, one of its categories, or a folder you type.
+    let cats = { categories: [], default_path: "" };
+    const dest = store.get("qbit_dest", { kind: "", value: "" });
+    const destBody = () => (dest.kind === "category" && dest.value ? { category: dest.value } : dest.kind === "path" && dest.value.trim() ? { save_path: dest.value.trim() } : {});
+    const destBox = () => {
+      const pathIn = h("input", { type: "text", placeholder: cats.default_path ? `Folder on the qBittorrent machine, e.g. ${cats.default_path}` : "Folder on the qBittorrent machine", "aria-label": "Download folder",
+        value: dest.kind === "path" ? dest.value : "", spellcheck: "false", oninput: (e) => { dest.value = e.target.value; store.set("qbit_dest", dest); } });
+      pathIn.hidden = dest.kind !== "path";
+      const sel = h("select", { "aria-label": "Save new downloads to", onchange: (e) => {
+        const v = e.target.value;
+        if (v.startsWith("c:")) { dest.kind = "category"; dest.value = v.slice(2); } else if (v === "path") { dest.kind = "path"; dest.value = pathIn.value; } else { dest.kind = ""; dest.value = ""; }
+        pathIn.hidden = dest.kind !== "path"; store.set("qbit_dest", dest);
+      } }, h("option", { value: "" }, `qBittorrent decides${cats.default_path ? ` (${cats.default_path})` : ""}`),
+        ...cats.categories.map((c) => h("option", { value: `c:${c.name}`, selected: dest.kind === "category" && dest.value === c.name }, `Category: ${c.name}${c.save_path ? ` → ${c.save_path}` : ""}`)),
+        h("option", { value: "path", selected: dest.kind === "path" }, "A folder I choose…"));
+      return h("div", { class: "row" }, h("label", { class: "hint", style: "align-self:center" }, "Save to"), sel, pathIn);
+    };
+
     const addBox = () => {
       const link = h("input", { type: "text", placeholder: "Paste a magnet link or .torrent address", "aria-label": "Link to add to qBittorrent", spellcheck: "false", autocomplete: "off" });
       return h("form", { class: "row", onsubmit: async (e) => {
         e.preventDefault();
         const b = e.submitter; b.disabled = true;
-        try { await api("/api/qbit/add", { method: "POST", body: { url: link.value } }); toast("Sent to qBittorrent"); link.value = ""; refreshList(); }
+        try { await api("/api/qbit/add", { method: "POST", body: { url: link.value, ...destBody() } }); toast("Sent to qBittorrent"); link.value = ""; refreshList(); }
         catch (err) { toast(err.message); }
         b.disabled = false;
       } }, link, h("button", { class: "btn primary", type: "submit" }, "Add to qBittorrent"));
@@ -926,16 +944,28 @@ const Catalog = {
         s.connected ? h("button", { class: "btn ghost", type: "button", onclick: () => { conn.querySelector("form")?.remove() || conn.append(form()); } }, "Change connection") : form());
       }
       if (!s.connected) { listBox.replaceChildren(); rssBox.replaceChildren(); addWrap.replaceChildren(); return; }
-      const listSig = JSON.stringify(s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed]));
+      const listSig = JSON.stringify(s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed, t.category, t.save_path]));
       if (listSig === listBox.dataset.sig) return;
       listBox.dataset.sig = listSig;
-      if (!addWrap.firstChild) addWrap.append(addBox());                 // built once, so a link being pasted is never wiped
+      if (!addWrap.firstChild) {                                         // built once, so a link being pasted is never wiped
+        try { cats = await api("/api/qbit/categories"); } catch { /* categories are optional */ }
+        addWrap.append(destBox(), addBox());
+      }
       listBox.replaceChildren(h("h2", {}, "Downloads"), ...(s.torrents.length ? s.torrents.map((t) => h("div", { class: "dl" },
         h("div", { class: "dl-top" }, h("strong", { class: "dl-name", title: t.name }, t.name),
           h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))),
+        t.save_path ? h("div", { class: "hint", title: "Where qBittorrent saves it" }, t.save_path) : null,
         h("div", { class: "pbar big" }, h("i", { style: `width:${Math.round(t.progress * 100)}%` })),
         h("div", { class: "dl-actions" },
           t.paused ? h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "resume") }, "Resume") : h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "pause") }, "Pause"),
+          cats.categories.length ? h("select", { "aria-label": `Category for ${t.name}`, onchange: async (e) => {
+            try { await api(`/api/qbit/category/${t.hash}`, { method: "POST", body: { category: e.target.value } }); toast("Category changed"); } catch (err) { toast(err.message); }
+          } }, h("option", { value: "" }, "No category"), ...cats.categories.map((c) => h("option", { value: c.name, selected: c.name === t.category }, c.name))) : null,
+          h("button", { class: "btn ghost", type: "button", title: "Move the files to another folder", onclick: async () => {
+            const p = prompt("Move to which folder? (a folder on the qBittorrent machine)", t.save_path || "");
+            if (!p) return;
+            try { await api(`/api/qbit/location/${t.hash}`, { method: "POST", body: { path: p } }); toast("qBittorrent is moving it"); } catch (err) { toast(err.message); }
+          } }, "Move…"),
           h("button", { class: "btn ghost", type: "button", title: "Takes it off the list; the files stay", onclick: () => { if (confirm(`Remove "${t.name}" from qBittorrent's list? The files are kept.`)) act(t.hash, "remove"); } }, "Remove")))) : [h("p", { class: "hint" }, "Nothing downloading right now.")]));
     };
 
@@ -953,7 +983,7 @@ const Catalog = {
             a.in_client ? h("span", { class: "hint" }, "In qBittorrent")
               : h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
                 const b = e.currentTarget; b.disabled = true; b.textContent = "Adding…";
-                try { const r = await api("/api/qbit/rss/add", { method: "POST", body: { feed: f.name, id: a.id } }); toast(`Sent to qBittorrent: ${r.title}`); b.textContent = "Added"; refreshList(); }
+                try { const r = await api("/api/qbit/rss/add", { method: "POST", body: { feed: f.name, id: a.id, ...destBody() } }); toast(`Sent to qBittorrent: ${r.title}`); b.textContent = "Added"; refreshList(); }
                 catch (err) { toast(err.message); b.disabled = false; b.textContent = "Add"; }
               } }, "Add")))))) : [h("p", { class: "hint" }, "No RSS feeds in qBittorrent yet.")]),
         r.rules.length ? h("h3", {}, "Download rules") : null,

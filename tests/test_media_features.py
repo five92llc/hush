@@ -246,3 +246,38 @@ def test_qbit_adds_feed_items_by_id_and_checks_links(tmp_path):
         assert False
     except QbitError:
         pass
+
+
+def test_qbit_adds_into_a_category_or_folder_and_rejects_unknown_ones(tmp_path):
+    from hush.db import DB
+    from hush.qbit import Qbit, QbitError
+    sent = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        p = req.url.path
+        if p == "/api/v2/auth/login":
+            return httpx.Response(200, text="Ok.")
+        if p == "/api/v2/torrents/categories":
+            return httpx.Response(200, json={"TV": {"name": "TV", "savePath": "/data/tv"}, "Movies": {"name": "Movies", "savePath": ""}})
+        if p == "/api/v2/app/defaultSavePath":
+            return httpx.Response(200, text="/downloads")
+        if p in ("/api/v2/torrents/add", "/api/v2/torrents/setLocation", "/api/v2/torrents/setCategory"):
+            sent.append((p, req.content.decode()))
+            return httpx.Response(200, text="Ok.")
+        return httpx.Response(404)
+    qb = Qbit(DB(tmp_path / "q4.db"), transport=httpx.MockTransport(handler))
+    qb.update({"url": "http://qb:1", "username": "u", "password": "p"})
+    assert [c["name"] for c in qb.categories()["categories"]] == ["Movies", "TV"] and qb.categories()["default_path"] == "/downloads"
+    qb.add("magnet:?xt=urn:btih:" + "b" * 40, category="TV")
+    assert "category=TV" in sent[-1][1]
+    qb.add("magnet:?xt=urn:btih:" + "b" * 40, save_path="/data/shows")
+    assert "savepath=%2Fdata%2Fshows" in sent[-1][1]
+    qb.set_category("abc123", "Movies")
+    qb.set_location("abc123", "/data/movies")
+    assert sent[-2][0].endswith("setCategory") and sent[-1][0].endswith("setLocation")
+    for bad in ({"category": "Nope"}, {"save_path": "bad\npath"}):
+        try:
+            qb.add("magnet:?xt=urn:btih:" + "b" * 40, **bad)
+            assert False, bad
+        except QbitError:
+            pass

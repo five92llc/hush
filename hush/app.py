@@ -715,14 +715,29 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return r
         return _qb(go)
 
+    @app.get("/api/qbit/categories", dependencies=[need])
+    def qbit_categories():
+        return _qb(qb.categories)
+
     @app.post("/api/qbit/add", dependencies=[need])
     def qbit_add(body: dict = Body(...)):
-        _qb(lambda: qb.add(str(body.get("url", ""))))
+        _qb(lambda: qb.add(str(body.get("url", "")), str(body.get("category", "")), str(body.get("save_path", ""))))
+        return {"ok": True}
+
+    @app.post("/api/qbit/category/{h}", dependencies=[need])
+    def qbit_category(h: str, body: dict = Body(...)):
+        _qb(lambda: qb.set_category(h, str(body.get("category", ""))))
+        return {"ok": True}
+
+    @app.post("/api/qbit/location/{h}", dependencies=[need])
+    def qbit_location(h: str, body: dict = Body(...)):
+        _qb(lambda: qb.set_location(h, str(body.get("path", ""))))
         return {"ok": True}
 
     @app.post("/api/qbit/rss/add", dependencies=[need])
     def qbit_rss_add(body: dict = Body(...)):
-        title = _qb(lambda: qb.add_from_feed(str(body.get("feed", "")), str(body.get("id", ""))))
+        title = _qb(lambda: qb.add_from_feed(str(body.get("feed", "")), str(body.get("id", "")),
+                                             str(body.get("category", "")), str(body.get("save_path", ""))))
         return {"ok": True, "title": title}
 
     @app.post("/api/qbit/rss/refresh", dependencies=[need])

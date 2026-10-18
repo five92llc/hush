@@ -104,7 +104,7 @@ class Qbit:
         for t in r.json():
             out.append({"hash": t["hash"], "name": t["name"], "progress": t.get("progress", 0), "state": t.get("state", ""),
                         "size": t.get("size", 0), "dlspeed": t.get("dlspeed", 0), "upspeed": t.get("upspeed", 0), "eta": t.get("eta", 0),
-                        "category": t.get("category", ""), "added_on": t.get("added_on", 0), "completion_on": t.get("completion_on", 0),
+                        "category": t.get("category", ""), "save_path": t.get("save_path", ""), "added_on": t.get("added_on", 0), "completion_on": t.get("completion_on", 0),
                         "done": t.get("progress", 0) >= 1 or t.get("state") in DONE_STATES,
                         "paused": str(t.get("state", "")).startswith(("paused", "stopped"))})
         return out
@@ -156,23 +156,61 @@ class Qbit:
             raise QbitError("That link is too long")
         return url
 
-    def add(self, url: str) -> None:
-        """Hand a link to qBittorrent; it decides where the download is saved, as it does for its own RSS rules."""
+    def categories(self) -> dict:
+        """qBittorrent's categories (each can have its own save folder) and its default save folder."""
+        r = self._call("GET", "torrents/categories")
+        r.raise_for_status()
+        cats = [{"name": c.get("name") or n, "save_path": c.get("savePath", "")} for n, c in sorted((r.json() or {}).items(), key=lambda kv: kv[0].lower())]
+        d = self._call("GET", "app/defaultSavePath")
+        return {"categories": cats, "default_path": d.text.strip() if d.status_code == 200 else ""}
+
+    def _where(self, category: str, save_path: str) -> dict:
+        data: dict = {}
+        category, save_path = (category or "").strip(), (save_path or "").strip()
+        if category:
+            if category not in {c["name"] for c in self.categories()["categories"]}:
+                raise QbitError("qBittorrent has no category with that name")
+            data["category"] = category
+        if save_path:
+            if len(save_path) > 500 or any(ord(c) < 32 for c in save_path):
+                raise QbitError("That folder path is not valid")
+            data["savepath"] = save_path          # a folder on the qBittorrent machine; qBittorrent checks it itself
+        return data
+
+    def set_category(self, h: str, category: str) -> None:
+        if not h.isalnum():
+            raise QbitError("Bad torrent")
+        if category and category not in {c["name"] for c in self.categories()["categories"]}:
+            raise QbitError("qBittorrent has no category with that name")
+        self._call("POST", "torrents/setCategory", data={"hashes": h, "category": category})
+
+    def set_location(self, h: str, path: str) -> None:
+        if not h.isalnum():
+            raise QbitError("Bad torrent")
+        data = self._where("", path)
+        if "savepath" not in data:
+            raise QbitError("Enter a folder")
+        r = self._call("POST", "torrents/setLocation", data={"hashes": h, "location": data["savepath"]})
+        if r.status_code >= 400:
+            raise QbitError("qBittorrent could not use that folder")
+
+    def add(self, url: str, category: str = "", save_path: str = "") -> None:
+        """Hand a link to qBittorrent, optionally into a category or a folder (otherwise its own rules decide)."""
         url = self.check_link(url)
-        r = self._call("POST", "torrents/add", data={"urls": url})
+        r = self._call("POST", "torrents/add", data={"urls": url, **self._where(category, save_path)})
         if r.status_code == 415:
             raise QbitError("qBittorrent could not read that torrent")
         if r.status_code >= 400 or r.text.strip() == "Fails.":
             raise QbitError("qBittorrent did not take it. It may already have this download.")
 
-    def add_from_feed(self, feed: str, article_id: str) -> str:
+    def add_from_feed(self, feed: str, article_id: str, category: str = "", save_path: str = "") -> str:
         """Add one item of a feed qBittorrent follows. The link is looked up here, not trusted from the page."""
         for f in self.rss()["feeds"]:
             if f["name"] != feed:
                 continue
             for a in f["articles"]:
                 if a["id"] == article_id and a["url"]:
-                    self.add(a["url"])
+                    self.add(a["url"], category, save_path)
                     return a["title"]
         raise QbitError("That feed item is no longer there")
 
