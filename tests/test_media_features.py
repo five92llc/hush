@@ -94,3 +94,18 @@ def test_playlist_header_advertises_its_guide():
     from hush.sources import playlist
     assert playlist.epg_urls('#EXTM3U url-tvg="https://e.com/g.xml.gz,https://e.com/h.xml"\n#EXTINF:-1,A\nhttp://x') == [
         "https://e.com/g.xml.gz", "https://e.com/h.xml"]
+
+
+def test_artwork_follows_redirects_only_between_trusted_hosts(tmp_path, monkeypatch):
+    from hush.library import art
+    monkeypatch.setattr(art, "_scale", lambda ffmpeg, src, dst, extra_in=None: dst.write_bytes(b"ok") or True)
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/a.jpg":
+            return httpx.Response(302, headers={"location": "https://static.tvmaze.com/b.jpg"})
+        if req.url.path == "/evil.jpg":
+            return httpx.Response(302, headers={"location": "https://evil.example/x.jpg"})
+        return httpx.Response(200, headers={"content-type": "image/jpeg"}, content=b"\xff\xd8")
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    assert art.from_url("ffmpeg", "https://static.tvmaze.com/a.jpg", tmp_path / "x.jpg", client)
+    assert not art.from_url("ffmpeg", "https://static.tvmaze.com/evil.jpg", tmp_path / "y.jpg", client)

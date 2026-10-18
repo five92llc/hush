@@ -49,7 +49,7 @@ Hush picks the cheapest playback path for each file:
 
 - **Direct**: the browser plays the original bytes with range requests. Typical for mp4/H.264, mp3, wav and flac.
 - **Remux**: the video is copied untouched and the audio is converted to AAC. Typical for MKV with H.264/VP9/AV1. This is nearly free on CPU.
-- **Transcode**: a full H.264 encode, for HEVC, MPEG-2, DivX and similar. Set `video_encoder: h264_nvenc` (or `qsv`/`vaapi`) for GPU encoding.
+- **Transcode**: a full H.264 encode, for HEVC, MPEG-2, DivX and similar. `video_encoder: auto` (the default) uses an NVIDIA (NVENC) or Intel/AMD (VAAPI) GPU when the server can see one, otherwise the CPU; you can also set `h264_nvenc`, `h264_vaapi` or `libx264` yourself. HEVC files are copied untouched to screens that can decode HEVC (most TVs, Fire TV, Safari-less browsers), so they need no re-encode.
 
 ## Quick start
 
@@ -200,3 +200,13 @@ Run the tests with `pip install pytest && pytest`.
 - Scene skipping for nudity and violence using a frame classifier, with the same filter file format
 - Per-viewer profiles (kids get stricter categories)
 - HLS output so TVs can seek in filtered streams
+
+
+## Posters, guide and channel extras
+
+- **Artwork without a key.** Posters, summaries and episode stills come from Cinemeta (IMDb data), Wikipedia and TVmaze. A TMDB key (Settings in the library page) still gives the best matches. Titles without artwork are retried automatically.
+- **Programme guide.** If a playlist advertises an XMLTV guide (`url-tvg` on its first line), Live TV shows "Now / Next" on channel cards and in the channel banner. It refreshes with the Live TV task.
+- **Channel previews.** Rest on a channel card for a moment to see a still from the live stream.
+- **Backup sources.** If a channel stops answering, Hush tries another working channel with the same name.
+- **Fast zapping.** Channels are scanned briefly, neighbouring channels are prepared in advance, and probe results are remembered across restarts.
+- **Updating.** `./update.sh` on the server pulls the latest code from GitHub and restarts Hush.

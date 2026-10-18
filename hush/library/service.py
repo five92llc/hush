@@ -18,6 +18,9 @@ RETRY_UNMATCHED_AFTER = 7 * 86400
 DEFAULTS = {"provider": "auto", "tmdb_key": "", "language": "en-US"}
 
 
+PROVIDERS_REV = "3"      # bump when the online sources improve
+
+
 def show_key_for(title: str) -> str:
     return hashlib.sha1(f"show:{norm(title)}".encode()).hexdigest()[:16]
 
@@ -236,11 +239,15 @@ class MetadataService:
 
     def process_library(self, retry_unmatched: bool = True) -> dict:
         self.backfill_certs()
+        if self.db.get_setting("providers_rev") != PROVIDERS_REV:      # a better source was added: give unmatched titles another go now
+            self.db._exec("UPDATE meta SET updated_at=0 WHERE (provider='name' OR art=0) AND locked=0")
+            self.db.set_setting("providers_rev", PROVIDERS_REV)
+        self.db.drop_unknown_sources({s["id"] for s in self.registry.list()} | {"url"})
         rows = self.db.library_without_meta()
         if retry_unmatched:
             cutoff = time.time() - RETRY_UNMATCHED_AFTER
             for r in self.db._all("SELECT l.* FROM library_items l JOIN meta m ON m.media_key=l.media_key "
-                                  "WHERE m.provider='name' AND m.locked=0 AND m.updated_at<?", (cutoff,)):
+                                  "WHERE (m.provider='name' OR m.art=0) AND m.locked=0 AND m.updated_at<?", (cutoff,)):
                 rows.append(r)
         providers, cache = pick_providers(self.settings()), {}
         done = failed = 0

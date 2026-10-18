@@ -38,11 +38,22 @@ def from_file(ffmpeg: str, image: Path, dst: Path) -> bool:
 
 
 def from_url(ffmpeg: str, url: str, dst: Path, client: httpx.Client | None = None) -> bool:
-    host = urlparse(url).hostname or ""
-    if urlparse(url).scheme != "https" or host not in IMAGE_HOSTS:
-        return False
+    def allowed(u: str) -> bool:
+        p = urlparse(u)
+        return p.scheme == "https" and (p.hostname or "") in IMAGE_HOSTS
+
+    r = None
     try:
-        r = (client or httpx).get(url, timeout=20, headers=UA, follow_redirects=False)
+        for _ in range(4):                                 # follow a few redirects, but only to the same trusted hosts
+            if not allowed(url):
+                return False
+            r = (client or httpx).get(url, timeout=20, headers=UA, follow_redirects=False)
+            if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                url = str(httpx.URL(url).join(r.headers["location"]))
+                continue
+            break
+        else:
+            return False
         r.raise_for_status()
     except httpx.HTTPError:
         return False

@@ -387,6 +387,18 @@ class DB:
             c.commit()
         return len(gone)
 
+    def drop_unknown_sources(self, valid: set[str]) -> int:
+        """Forget titles from sources that were removed (a playlist that became Live TV, a deleted share)."""
+        with self._lock:
+            c = self._conn
+            gone = [r[0] for r in c.execute("SELECT media_key FROM library_items WHERE origin NOT IN (%s) AND source_id NOT IN (%s)"
+                                            % (",".join("?" * len(valid)) or "''", ",".join("?" * len(valid)) or "''"), (*valid, *valid))]
+            for k in gone:
+                c.execute("DELETE FROM meta WHERE media_key=?", (k,))
+                c.execute("DELETE FROM library_items WHERE media_key=?", (k,))
+            c.commit()
+        return len(gone)
+
     def library_stats(self) -> dict[str, int]:
         total = self._one("SELECT COUNT(*) n FROM library_items")["n"]
         scanned = self._one("SELECT COUNT(*) n FROM library_items l JOIN filters f "
