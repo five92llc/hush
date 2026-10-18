@@ -7,14 +7,18 @@ from typing import Any
 
 from .base import Entry, MediaRef, Source, SourceError, media_key  # noqa: F401
 from .dlna import DLNASource, discover as discover_dlna  # noqa: F401
+from .ftp import FTPSource
 from .http import HTTPSource
+from .links import LinkSource, WebSource
 from .local import LocalSource
 from .mediaservers import JellyfinSource, PlexSource
+from .sftp import SFTPSource
 from .smb import SMBSource
 
 TYPES: dict[str, type[Source]] = {
-    "local": LocalSource, "smb": SMBSource, "http": HTTPSource,
+    "local": LocalSource, "smb": SMBSource, "http": WebSource,
     "dlna": DLNASource, "jellyfin": JellyfinSource, "plex": PlexSource,
+    "ftp": FTPSource, "sftp": SFTPSource, "link": LinkSource,
 }
 
 # Fields never sent back to the browser.
@@ -32,7 +36,7 @@ class Registry:
         self._sources: dict[str, Source] = {}
         self.errors: dict[str, str] = {}
         # Built-in source for ad-hoc "Open URL" playback.
-        self._add({"id": "url", "type": "http", "name": "Opened URLs"})
+        self._add({"id": "url", "type": "link", "name": "Opened links"})
         for conf in static:
             self._add(dict(conf))
         for conf in db.list_sources():
@@ -70,7 +74,7 @@ class Registry:
                 sid, n = f"{base}-{n}", n + 1
             conf["id"] = sid
             cls = TYPES.get(conf.get("type", ""))
-            if not cls:
+            if not cls or conf.get("type") == "link":
                 raise SourceError("unknown source type")
             src = cls({**conf, "_runtime": True})  # validates config
             self._sources[sid] = src

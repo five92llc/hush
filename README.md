@@ -25,8 +25,23 @@ Your original files are never changed.
 | SMB / NAS share | Direct SMB2/3 with `smbprotocol`, no mount needed (Windows, Synology, QNAP, TrueNAS) |
 | Web folder or link | Direct files, nginx/Apache/Caddy listings, HLS `.m3u8` |
 | DLNA / UPnP | SSDP discovery and ContentDirectory browsing (MiniDLNA, Serviio, UMS…) |
+| FTP / SFTP | Browse and play from a server, with a source or a pasted `ftp://` / `sftp://` link |
 | Jellyfin / Emby | API key, plays the original file |
 | Plex | Token, plays the original file |
+
+### Play a link
+
+Paste any of these into **Play a link**:
+
+| Link | Result |
+|---|---|
+| `https://…`, HLS `.m3u8` | Plays, scans and filters like a file |
+| `smb://user:pass@nas/Share/folder/film.mkv` | Plays, scans and filters. End with `/` to browse a folder |
+| `ftp://user:pass@host/folder/film.mkv`, `sftp://user:pass@host/…` | Plays, scans and filters. End with `/` to browse |
+| `.m3u`, `.m3u8`, `.pls` playlist (link or file) | Opens like a folder: one entry per item, grouped by `group-title` for IPTV lists. Entries can be files, `http(s)`, `rtmp://` and other links. An `.m3u8` that is an HLS stream (`#EXT-X-` tags) plays as one video instead |
+| `rtmp://`, `rtsp://`, `udp://`, `srt://`, `mms://` | Live or network streams. Played as they are: no scanning, seeking or filtering, because they have no fixed length |
+
+Passwords inside a link are kept in the recent-links list in `data/hush.db`, and never shown in names. Prefer adding a source for anything you use often.
 
 Formats include mp4, m4v, mov, mkv, webm, avi, wmv, flv, mpg, ts, m2ts, mp3, wav, flac, aac, m4a, ogg, opus, wma, aiff and ape. Anything FFmpeg can read will play.
 
@@ -65,6 +80,7 @@ Sources can be added in `config.yaml` or from the app with **Add a source**.
 ## Using it
 
 1. Open a title and press **Language**, then **Scan this title**. Scans also run from the library's **Scan** buttons and keep going if you close the browser.
+   To scan a whole library, open a folder and press **Scan all**. It queues every unscanned title in that folder and the folders inside it. To keep a library scanned automatically, open **Tasks** and turn on **Library refresh**: pick the sources and how often, and it records new and removed titles and queues scans for new ones. Tasks shows what ran, when, and what it found, with **Run now** for each. (`analysis.auto_scan` in `config.yaml` can pre-select the sources.) **Clean up** removes leftover scan files and old scan records. **Notifications** on the same page send a webhook message (ntfy, Gotify, Home Assistant…) when a batch of scans finishes or a task fails. Scans you start yourself run before bulk ones, and **Scan next** in the Scans dialog moves any waiting title to the front.
 2. Lilac notches on the timeline show every muted moment. Hover a notch to see which word (masked) is muted.
 3. In the Language panel you can:
    - switch whole categories on or off (strong profanity, mild language, sexual terms, slurs, taking the Lord's name in vain),
@@ -103,13 +119,22 @@ Tips:
 
 ## Security notes
 
-- **Set a password.** Sessions are HMAC-signed, HTTP-only, `SameSite=Strict` cookies, and logins are rate-limited.
+- **Set a password.** Change it any time from **Password** in the top bar; it is stored hashed (scrypt) in `data/hush.db`, overrides `HUSH_PASSWORD`, and signs other browsers out. If you forget it, delete the saved one with `sqlite3 data/hush.db "delete from settings where key='password_hash'"` and restart; `HUSH_PASSWORD` applies again. Sessions are HMAC-signed, HTTP-only, `SameSite=Strict` cookies, and logins are rate-limited.
 - **TLS.** Put Hush behind your reverse proxy (Caddy, Traefik, nginx) for HTTPS, and set `public_url` so links for other players use it.
 - **Secrets.** Keep secrets in environment variables (`${NAS_PASSWORD}` syntax in `config.yaml`). Credentials for sources added in the app are stored in `data/hush.db`, so protect the data volume.
 - **Path safety.** Paths are confined to their source root, which blocks path traversal.
 - **Web sources.** Web sources block link-local and metadata addresses. Use `allowed_hosts` to pin a web source to specific hosts.
 - **FFmpeg access.** FFmpeg reads SMB files through a loopback endpoint that requires a per-process random token.
 - **Browser hardening.** The UI sends a strict CSP, has no third-party requests, and bundles its fonts (SIL OFL), so it works fully offline on a LAN.
+
+## Library, details and tidy names
+
+Open **Movies** or **TV shows** in the left bar for a poster library. Each title has a page with its summary, genres, runtime and rating, plus **Play**, **Scan this title**, **Fix match** and downloads.
+
+- **Where the details come from.** In order: the `.nfo` file next to the video (Kodi/Jellyfin/Plex format), then an online lookup, then the file name. The online lookup uses **TMDB** if you add a free key under **Tasks → Movie and show details**, and the free **Wikipedia** (movies) and **TVmaze** (shows and episodes) services otherwise. Posters come from a `poster.jpg` next to the video, the online source, or a frame from the video itself.
+- **Fix match.** If a title is matched wrongly, press **Fix match**, search, and pick the right one. Your choice is locked and never overwritten.
+- **Transcript.** After a title is scanned, download its transcript as text, SRT or WebVTT, optionally with filtered words masked (`f***`). Subtitle and caption tracks inside the file or next to it can be downloaded as SRT or WebVTT too.
+- **Tidy file names.** **Tasks → Tidy file names** previews renames such as `72.Hours.2026.1080p.WEBRip.x265-NeoNoir.mkv` → `72 Hours (2026).mkv` and `Collision 2026 S01E01 Business Protocol 1080p….mkv` → `Collision (2026) - S01E01 - Business Protocol.mkv`. By default every file goes straight into the source folder, with its subtitles and `.nfo` renamed to match; or choose one folder per title. Emptied folders are removed, leftovers stay. Nothing changes until you press Rename, nothing is overwritten, and the last rename can be undone. Filters, scans and posters follow the renamed files. This needs Hush to have write access to the folder.
 
 ## Legal
 

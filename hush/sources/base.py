@@ -17,9 +17,13 @@ from dataclasses import dataclass, field
 from typing import IO, Any, Callable
 
 VIDEO_EXT = {".mp4", ".m4v", ".mkv", ".webm", ".avi", ".mov", ".wmv", ".flv",
-             ".mpg", ".mpeg", ".ts", ".m2ts", ".mts", ".3gp", ".ogv", ".vob", ".divx"}
+             ".mpg", ".mpeg", ".ts", ".m2ts", ".mts", ".3gp", ".3g2", ".ogv", ".vob", ".divx",
+             ".m2v", ".mpe", ".asf", ".f4v", ".rm", ".rmvb", ".ogm", ".mxf", ".trp", ".tp",
+             ".wtv", ".dvr-ms", ".nsv", ".amv", ".evo", ".qt", ".mjpeg", ".h264", ".hevc"}
 AUDIO_EXT = {".mp3", ".wav", ".flac", ".aac", ".m4a", ".ogg", ".oga", ".opus",
-             ".wma", ".aiff", ".aif", ".alac", ".ape", ".mka"}
+             ".wma", ".aiff", ".aif", ".alac", ".ape", ".mka", ".ac3", ".eac3", ".dts",
+             ".mp2", ".mpc", ".wv", ".tta", ".dsf", ".dff", ".caf", ".au", ".amr", ".m4b",
+             ".m4r", ".weba", ".spx", ".ra", ".mid", ".midi"}
 SUB_EXT = {".srt", ".vtt", ".ass", ".ssa", ".sub"}
 
 
@@ -57,12 +61,16 @@ class Entry:
     kind: str                  # dir | video | audio
     size: int | None = None
     meta: dict[str, Any] = field(default_factory=dict)
+    source: str | None = None  # set when the item belongs to another source (playlist entries)
 
     def to_dict(self, source_id: str) -> dict[str, Any]:
+        sid = self.source or source_id
         d = {"id": self.id, "name": self.name, "kind": self.kind,
              "size": self.size, "meta": self.meta}
+        if self.source:
+            d["source_id"] = self.source
         if self.kind != "dir":
-            d["media_key"] = media_key(source_id, self.id)
+            d["media_key"] = media_key(sid, self.id)
         return d
 
 
@@ -72,7 +80,7 @@ class MediaRef:
 
     Exactly one access style is set:
       * ``path``   - a local filesystem path
-      * ``url``    - an HTTP(S) URL (``headers`` sent with every request)
+      * ``url``    - an HTTP(S) URL, or a ``native`` one that only ffmpeg can read (``headers`` sent with every request)
       * ``opener`` - a callable returning a seekable binary file object (SMB)
     """
     title: str
@@ -85,6 +93,8 @@ class MediaRef:
     name: str = ""                              # original file name, for mime/ext
     subtitle_paths: list[str] = field(default_factory=list)  # sidecar subs (local only)
     subtitle_openers: list[Callable[[], IO[bytes]]] = field(default_factory=list)
+    native: bool = False    # url is read by ffmpeg itself (ftp, rtmp, rtsp...); Hush cannot proxy it
+    live: bool = False      # no fixed length or seeking, and it cannot be scanned
 
     @property
     def ext(self) -> str:

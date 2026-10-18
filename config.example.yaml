@@ -16,11 +16,15 @@ analysis:
   whisper_model: small.en       # tiny.en | base.en | small.en | medium.en | large-v3
   whisper_device: auto          # auto | cpu | cuda
   whisper_compute_type: int8
+  # whisper_cpu_threads: 8      # CPU threads per scan (default 4); roughly physical cores / workers
+  # whisper_beam_size: 5        # 1 is about twice as fast with slightly less accuracy
   language: en
   pad_before: 0.12              # seconds muted before each word
   pad_after: 0.15               # seconds muted after each word
   merge_gap: 0.35               # join mutes closer together than this
   workers: 1                    # scans running at the same time
+  # auto_scan: [movies, shows]  # source ids to keep prescanned; new titles are queued automatically
+  # auto_scan_hours: 6          # how often to look for new titles
   # wordlist: /config/my-words.yaml   # start from hush/analysis/wordlists/default.yaml
 
 sources:

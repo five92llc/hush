@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import itertools
 import queue
 import subprocess
 import threading
@@ -12,6 +13,7 @@ from pathlib import Path
 from .. import media
 from ..sources import media_key
 from . import subtitles, transcribe
+from .walk import walk
 from .matcher import Word, WordList, build_ranges, carry_over
 
 log = logging.getLogger("hush.analysis")
@@ -24,13 +26,23 @@ class Analyzer:
         self.db = db
         self.registry = registry
         self.wordlist = WordList(self.acfg.wordlist)
-        self.q: queue.Queue[str] = queue.Queue()
+        # (priority, order, job id): scans you ask for go ahead of bulk scans
+        self.q: queue.PriorityQueue[tuple[int, int, str]] = queue.PriorityQueue()
+        self._seq = itertools.count()
+        self.on_event = lambda kind, title, message: None   # set by the app to send notifications
+        self._batch = {"done": 0, "error": 0}
         self._cancel: set[str] = set()
         self.models_dir = cfg.data_dir / "models"
         self.models_dir.mkdir(exist_ok=True)
-        db.fail_interrupted_jobs()
+        # Scans cut short by a restart pick up again from the start of their title.
+        self._resume = db.resume_interrupted_jobs()
+        self._go = threading.Event()
+        if not db.get_setting("scans_paused", False):
+            self._go.set()
 
     def start(self) -> None:
+        for jid in self._resume:
+            self.q.put((1, next(self._seq), jid))
         for i in range(max(1, self.acfg.workers)):
             threading.Thread(target=self._worker, name=f"analyzer-{i}", daemon=True).start()
 
@@ -39,7 +51,8 @@ class Analyzer:
                 "model": self.acfg.whisper_model}
 
     # ---- public API -----------------------------------------------------
-    def submit(self, source_id: str, item_id: str, title: str = "", engine: str | None = None) -> dict:
+    def submit(self, source_id: str, item_id: str, title: str = "", engine: str | None = None,
+               priority: int = 0) -> dict:
         key = media_key(source_id, item_id)
         active = self.db.active_job_for(key)
         if active:
@@ -49,8 +62,76 @@ class Analyzer:
         self.db.create_job(job)
         if engine:
             self.db.update_job(job["id"], stage=f"queued:{engine}")
-        self.q.put(job["id"])
+        self.q.put((priority, next(self._seq), job["id"]))
         return self.db.get_job(job["id"])
+
+    def queue_unscanned(self, source_id: str, entries, retry_failed: bool = False) -> dict:
+        """Queue a scan for each entry that has no filter, no active scan and no earlier failure."""
+        entries = list(entries)
+        keys = {e.id: media_key(e.source or source_id, e.id) for e in entries}
+        done = self.db.filtered_keys(list(keys.values()))
+        queued = skipped = 0
+        for e in entries:
+            k = keys[e.id]
+            if (k in done or self.db.active_job_for(k)
+                    or (not retry_failed and self.db.last_job_blocked(k))):
+                skipped += 1
+                continue
+            self.submit(e.source or source_id, e.id, e.name, priority=1)   # bulk scans wait behind manual ones
+            queued += 1
+        return {"queued": queued, "skipped": skipped}
+
+    def scan_tree(self, source_id: str, dir_id: str = "", retry_failed: bool = False) -> dict:
+        """Queue a scan for every title under a folder that has no filter yet."""
+        return self.queue_unscanned(source_id, walk(self.registry.get(source_id), dir_id=dir_id),
+                                    retry_failed)
+
+    # ---- queue control ----------------------------------------------------
+    @property
+    def paused(self) -> bool:
+        return not self._go.is_set()
+
+    def pause(self) -> None:
+        """Stop starting new scans. A scan already running finishes."""
+        self._go.clear()
+        self.db.set_setting("scans_paused", True)
+
+    def resume(self) -> None:
+        self._go.set()
+        self.db.set_setting("scans_paused", False)
+
+    def scan_next(self, job_id: str) -> dict | None:
+        """Move a waiting scan to the front of the queue."""
+        job = self.db.get_job(job_id)
+        if not job or job["status"] != "queued":
+            return job
+        self.q.put((-1, next(self._seq), job_id))   # the older entry is skipped once this one has run
+        return job
+
+    def stop_all(self) -> int:
+        """Cancel the running scan and everything waiting."""
+        jobs = self.db.active_jobs()
+        for j in jobs:
+            self.cancel(j["id"])
+        return len(jobs)
+
+    def restart(self, job_id: str) -> dict | None:
+        """Scan this title again from the start, replacing any scan still active."""
+        job = self.db.get_job(job_id)
+        if not job:
+            return None
+        for active in [self.db.active_job_for(job["media_key"])]:
+            if active:
+                self.cancel(active["id"])
+                self.db.update_job(active["id"], status="cancelled", stage="cancelled")
+        return self.submit(job["source_id"], job["item_id"], job.get("title") or "")
+
+    def retry_failed(self) -> int:
+        n = 0
+        for j in self.db.blocked_titles():
+            self.submit(j["source_id"], j["item_id"], j.get("title") or "")
+            n += 1
+        return n
 
     def cancel(self, job_id: str) -> None:
         self._cancel.add(job_id)
@@ -78,10 +159,12 @@ class Analyzer:
     # ---- worker ---------------------------------------------------------
     def _worker(self) -> None:
         while True:
-            job_id = self.q.get()
+            self._go.wait()
+            _, _, job_id = self.q.get()
+            self._go.wait()   # paused while this was waiting for a title: hold it
             job = self.db.get_job(job_id)
-            if not job or job["status"] == "cancelled" or job_id in self._cancel:
-                continue
+            if (not job or job["status"] != "queued" or job_id in self._cancel):
+                continue          # cancelled, already run, or a duplicate entry from Scan next
             try:
                 self._run(job)
             except InterruptedError:
@@ -93,6 +176,19 @@ class Analyzer:
                 self._cancel.discard(job_id)
                 for f in self.cfg.cache_dir.glob(f"{job_id}.*"):
                     f.unlink(missing_ok=True)
+            self._after_job(job_id)
+
+    def _after_job(self, job_id: str) -> None:
+        """Count finished scans; when the queue runs dry, report the batch once."""
+        status = (self.db.get_job(job_id) or {}).get("status")
+        if status in ("done", "error"):
+            self._batch["done" if status == "done" else "error"] += 1
+        if self.db.active_jobs() or not (self._batch["done"] or self._batch["error"]):
+            return
+        d, e = self._batch["done"], self._batch["error"]
+        self._batch = {"done": 0, "error": 0}
+        msg = f"{d} scanned" + (f", {e} failed" if e else "")
+        self.on_event("scans_done", "Hush: scans finished", msg)
 
     def _run(self, job: dict) -> None:
         jid = job["id"]

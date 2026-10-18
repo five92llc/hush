@@ -39,6 +39,8 @@ def _parse_range(header: str | None, size: int) -> tuple[int, int] | None:
 
 async def serve_raw(request: Request, ref: MediaRef) -> Response:
     """Serve original bytes with HTTP Range support (direct play + loopback)."""
+    if ref.native:
+        return Response(status_code=404, content="this link is only readable through a live stream")
     if ref.url:
         return await _proxy(request, ref)
 
@@ -128,6 +130,8 @@ def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str
                      mute_ranges: list[dict] | None = None, container: str = "mp4") -> tuple[list[str], str]:
     """Return (argv, mime) for a live stream of this item."""
     cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
+    if ref.live:
+        start, mute_ranges = 0.0, None   # live links cannot seek or be filtered
     if cfg.hwaccel and mode == "transcode":
         cmd += ["-hwaccel", cfg.hwaccel]
     if start > 0:

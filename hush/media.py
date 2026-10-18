@@ -41,6 +41,9 @@ def ffmpeg_input(ref: MediaRef, source_id: str, item_id: str) -> list[str]:
     """Input arguments that let ffmpeg/ffprobe read this item."""
     if ref.path:
         return ["-i", ref.path]
+    if ref.native:
+        args = ["-rtsp_transport", "tcp"] if ref.url.lower().startswith(("rtsp:", "rtsps:")) else []
+        return args + ["-i", ref.url]
     if ref.url:
         args = []
         if ref.headers:
@@ -63,6 +66,7 @@ class Stream:
     title: str = ""
     channels: int = 0
     default: bool = False
+    pix_fmt: str = ""
 
     def label(self) -> str:
         bits = [self.language.upper() if self.language else "", self.title, self.codec]
@@ -96,6 +100,8 @@ def probe(ffprobe: str, ref: MediaRef, source_id: str, item_id: str, timeout: in
         out = subprocess.run(cmd, capture_output=True, timeout=timeout, check=True).stdout
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(f"ffprobe failed: {exc.stderr.decode(errors='ignore')[-400:]}") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("ffprobe timed out: the link did not answer") from exc
     data = json.loads(out or b"{}")
     fmt = data.get("format", {})
     dur = fmt.get("duration")
@@ -106,7 +112,7 @@ def probe(ffprobe: str, ref: MediaRef, source_id: str, item_id: str, timeout: in
         st = Stream(index=s["index"], type=s.get("codec_type", ""), codec=s.get("codec_name", "?"),
                     language=tags.get("language", "") if tags.get("language") != "und" else "",
                     title=tags.get("title", ""), channels=s.get("channels", 0),
-                    default=bool(s.get("disposition", {}).get("default")))
+                    default=bool(s.get("disposition", {}).get("default")), pix_fmt=s.get("pix_fmt", ""))
         if st.type == "video" and not s.get("disposition", {}).get("attached_pic"):
             res.video.append(st)
         elif st.type == "audio":
@@ -118,20 +124,22 @@ def probe(ffprobe: str, ref: MediaRef, source_id: str, item_id: str, timeout: in
 
 def choose_mode(ref: MediaRef, p: ProbeResult, audio_index: int | None = None) -> str:
     vcodec = p.video[0].codec if p.video else None
+    # Browsers decode 8-bit 4:2:0 only. 10-bit and 4:2:2 H.264/VP9/AV1 must be re-encoded.
+    eight_bit = not p.video or (p.video[0].pix_fmt or "yuv420p") in ("yuv420p", "yuvj420p")
     a = next((s for s in p.audio if s.index == audio_index), p.audio[0] if p.audio else None)
     acodec = a.codec if a else None
     a_ok = acodec is None or acodec in BROWSER_AUDIO or (acodec.startswith("pcm_") and ref.ext == ".wav")
     first_audio = not p.audio or audio_index is None or audio_index == p.audio[0].index
-    is_hls = ref.ext in (".m3u8", ".mpd")
+    is_hls = ref.ext in (".m3u8", ".mpd") or ref.native
 
     if not p.video:  # audio only
         if ref.ext in DIRECT_CONTAINERS and a_ok and not is_hls:
             return "direct"
         return "audio"
-    if (ref.ext in DIRECT_CONTAINERS and vcodec in BROWSER_VIDEO and a_ok and first_audio
+    if (ref.ext in DIRECT_CONTAINERS and vcodec in BROWSER_VIDEO and eight_bit and a_ok and first_audio
             and not is_hls and any(f in p.format_names for f in DIRECT_CONTAINERS[ref.ext])):
         return "direct"
-    if vcodec in ("h264", "vp9", "av1"):  # all three are valid in fragmented MP4
+    if vcodec in ("h264", "vp9", "av1") and eight_bit:  # all three are valid in fragmented MP4
         return "remux"
     return "transcode"
 

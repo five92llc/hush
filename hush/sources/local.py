@@ -4,6 +4,9 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from urllib.parse import unquote, urlparse
+
+from . import playlist
 from .base import Entry, MediaRef, Source, SourceError, SUB_EXT, classify, dec, enc, sort_entries
 
 
@@ -44,6 +47,8 @@ class LocalSource(Source):
             dir_id = self._to_id(0, self.roots[0])
         idx = int(dec(dir_id).partition(":")[0])
         folder = self._to_path(dir_id)
+        if folder.is_file() and playlist.is_playlist_path(folder.name):
+            return self._playlist_entries(idx, folder)
         if not folder.is_dir():
             raise SourceError("not a folder")
         out: list[Entry] = []
@@ -57,6 +62,9 @@ class LocalSource(Source):
                         if de.is_dir():
                             out.append(Entry(self._to_id(idx, p), de.name, "dir"))
                             continue
+                        if playlist.is_playlist_path(de.name):    # opens like a folder
+                            out.append(Entry(self._to_id(idx, p), de.name, "dir", meta={"playlist": True}))
+                            continue
                         kind = classify(de.name)
                         if kind:
                             out.append(Entry(self._to_id(idx, p), de.name, kind,
@@ -66,6 +74,30 @@ class LocalSource(Source):
         except PermissionError:
             raise SourceError("permission denied")
         return sort_entries(out)
+
+    def _playlist_entries(self, idx: int, plist: Path) -> list[Entry]:
+        """Items of an .m3u/.m3u8/.pls file: files inside this source, or links to play."""
+        from .links import LIVE_SCHEMES  # local import: links imports this package
+        out: list[Entry] = []
+        try:
+            items = playlist.parse(plist.read_text(errors="replace"))
+        except OSError:
+            raise SourceError("cannot read the playlist")
+        for it in items:
+            raw = it["url"]
+            scheme = urlparse(raw).scheme.lower()
+            if scheme in ("http", "https") or scheme in LIVE_SCHEMES or scheme in ("smb", "ftp", "sftp"):
+                kind = classify(urlparse(raw).path) or "video"
+                out.append(Entry(enc(raw), it["title"] or raw.rsplit("/", 1)[-1], kind, source="url",
+                                 meta={"live": True} if scheme in LIVE_SCHEMES else {}))
+                continue
+            target = Path(unquote(raw.removeprefix("file://")))
+            target = (target if target.is_absolute() else plist.parent / target).resolve()
+            root = self.roots[idx]
+            if (target == root or root in target.parents) and target.is_file() and classify(target.name):
+                out.append(Entry(self._to_id(idx, target), it["title"] or target.stem,
+                                 classify(target.name), size=target.stat().st_size))
+        return out
 
     def resolve(self, item_id: str) -> MediaRef:
         path = self._to_path(item_id)

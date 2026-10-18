@@ -28,13 +28,12 @@ def _url_kind(url: str) -> str | None:
     return classify(path)
 
 
-def check_url_allowed(url: str, allow_private: bool = True, allowed_hosts: list[str] | None = None) -> None:
+def check_host(host: str, allow_private: bool = True, allowed_hosts: list[str] | None = None,
+               allow_multicast: bool = False) -> None:
     """Basic SSRF guard. Home servers usually *want* LAN addresses, so private
     ranges are allowed by default; link-local/metadata addresses never are."""
-    p = urlparse(url)
-    if p.scheme not in ("http", "https"):
-        raise SourceError("only http(s) URLs are supported")
-    host = p.hostname or ""
+    if not host:
+        raise SourceError("the link needs a host name")
     if allowed_hosts and host not in allowed_hosts:
         raise SourceError(f"host {host} is not in allowed_hosts")
     try:
@@ -43,10 +42,17 @@ def check_url_allowed(url: str, allow_private: bool = True, allowed_hosts: list[
         raise SourceError(f"cannot resolve {host}")
     for a in addrs:
         ip = ipaddress.ip_address(a.split("%")[0])
-        if ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+        if ip.is_link_local or ip.is_unspecified or (ip.is_multicast and not allow_multicast):
             raise SourceError("link-local / metadata addresses are blocked")
         if not allow_private and (ip.is_private or ip.is_loopback):
             raise SourceError("private addresses are disabled for this source")
+
+
+def check_url_allowed(url: str, allow_private: bool = True, allowed_hosts: list[str] | None = None) -> None:
+    p = urlparse(url)
+    if p.scheme not in ("http", "https"):
+        raise SourceError("only http(s) URLs are supported")
+    check_host(p.hostname or "", allow_private, allowed_hosts)
 
 
 class HTTPSource(Source):

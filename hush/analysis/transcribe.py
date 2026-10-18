@@ -29,7 +29,8 @@ def _load(cfg, models_dir: Path):
     global _model, _model_key
     from faster_whisper import WhisperModel
 
-    key = (cfg.whisper_model, cfg.whisper_device, cfg.whisper_compute_type)
+    key = (cfg.whisper_model, cfg.whisper_device, cfg.whisper_compute_type,
+           cfg.whisper_cpu_threads, cfg.workers)
     with _lock:
         if _model is None or _model_key != key:
             device = cfg.whisper_device
@@ -42,7 +43,9 @@ def _load(cfg, models_dir: Path):
             compute = cfg.whisper_compute_type
             if device == "cuda" and compute == "int8":
                 compute = "int8_float16"
+            # num_workers lets several scans decode at the same time on one loaded model
             _model = WhisperModel(cfg.whisper_model, device=device, compute_type=compute,
+                                  cpu_threads=cfg.whisper_cpu_threads, num_workers=max(1, cfg.workers),
                                   download_root=str(models_dir))
             _model_key = key
         return _model
@@ -58,7 +61,7 @@ def transcribe(wav_path: Path, cfg, models_dir: Path, duration: float | None,
         vad_filter=True,                       # skip silence and pure music
         vad_parameters={"min_silence_duration_ms": 500},
         condition_on_previous_text=False,      # reduces runaway hallucinations
-        beam_size=5,
+        beam_size=max(1, cfg.whisper_beam_size),
     )
     total = duration or getattr(info, "duration", None) or 1.0
     words: list[Word] = []

@@ -34,12 +34,16 @@ class AnalysisConfig:
     whisper_model: str = "small.en"  # tiny.en, base.en, small.en, medium.en, large-v3
     whisper_device: str = "auto"     # auto | cpu | cuda
     whisper_compute_type: str = "int8"
+    whisper_cpu_threads: int = 0     # CPU threads per scan; 0 = library default (4)
+    whisper_beam_size: int = 5       # 1 is about twice as fast, slightly less accurate
     language: str | None = "en"
     pad_before: float = 0.12         # seconds of extra mute before a word
     pad_after: float = 0.15          # seconds of extra mute after a word
     merge_gap: float = 0.35          # merge ranges closer than this
     workers: int = 1
     wordlist: str | None = None      # path to a custom wordlist YAML
+    auto_scan: list[str] = field(default_factory=list)   # source ids to keep prescanned
+    auto_scan_hours: float = 6       # how often auto_scan looks for new titles
 
 
 @dataclass

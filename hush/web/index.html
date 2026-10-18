@@ -31,6 +31,8 @@
       <button id="jobs-btn" class="btn ghost" type="button" aria-haspopup="dialog">
         <span id="jobs-dot" class="dot" hidden></span><span id="jobs-label">Scans</span>
       </button>
+      <a id="tasks-link" class="btn ghost" href="#/tasks">Tasks</a>
+      <button id="password-btn" class="btn ghost" type="button" aria-haspopup="dialog">Password</button>
       <button id="logout-btn" class="btn ghost" type="button" hidden>Sign out</button>
     </div>
   </header>
@@ -38,25 +40,41 @@
   <!-- Library -->
   <section id="library" class="library">
     <nav class="rail" aria-label="Sources">
+      <nav id="rail-links" class="rail-links" aria-label="Library">
+        <a href="#/movies">Movies</a>
+        <a href="#/shows">TV shows</a>
+      </nav>
       <ul id="source-list" class="source-list"></ul>
       <button id="add-source-btn" class="btn subtle wide" type="button">Add a source</button>
       <form id="url-form" class="url-form">
         <label for="url-input">Play a link</label>
         <div class="row">
-          <input id="url-input" type="url" placeholder="https://…/movie.mp4" required>
+          <input id="url-input" type="text" inputmode="url" placeholder="https://, smb://, ftp://, rtmp://…" spellcheck="false" required>
           <button class="btn subtle" type="submit">Play</button>
         </div>
       </form>
     </nav>
 
-    <div class="browser">
+    <div id="catalog-view" class="browser catalog" hidden></div>
+
+    <div class="browser" id="browser-view">
       <div class="browser-head">
         <ol id="crumbs" class="crumbs" aria-label="Folder path"></ol>
         <input id="filter-input" class="search" type="search" placeholder="Find in this folder" aria-label="Find in this folder">
+        <button id="scan-all-btn" class="btn subtle" type="button" title="Scan every title in this folder and the folders inside it">Scan all</button>
       </div>
       <ul id="entries" class="entries" aria-live="polite"></ul>
       <div id="browser-empty" class="empty" hidden></div>
     </div>
+  </section>
+
+  <!-- Tasks -->
+  <section id="tasks" class="tasks" hidden>
+    <div class="tasks-head">
+      <h1>Tasks</h1>
+      <p id="tasks-summary" class="hint"></p>
+    </div>
+    <div id="tasks-list" class="tasks-list"></div>
   </section>
 
   <!-- Player -->
@@ -85,11 +103,23 @@
         <button id="play-btn" class="icon-btn play" type="button" aria-label="Play">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
         </button>
+        <button id="prev-btn" class="icon-btn" type="button" aria-label="Previous (P)" title="Previous (P)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="next-btn" class="icon-btn" type="button" aria-label="Next (N)" title="Next (N)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
         <button id="back10" class="icon-btn" type="button" aria-label="Back 10 seconds">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2L7 6l5 4V7a5 5 0 1 1-5 5H5a7 7 0 1 0 7-7z"/></svg>
         </button>
         <button id="fwd10" class="icon-btn" type="button" aria-label="Forward 10 seconds">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5V2l5 4-5 4V7a5 5 0 1 0 5 5h2a7 7 0 1 1-7-7z"/></svg>
+        </button>
+        <button id="shuffle-btn" class="icon-btn" type="button" aria-pressed="false" aria-label="Shuffle (S)" title="Shuffle (S)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10.59 9.17L5.41 4 4 5.41l5.17 5.17 1.42-1.41zM14.5 4l2.04 2.04L4 18.59 5.41 20 17.96 7.46 20 9.5V4h-5.5zm.33 9.41l-1.41 1.41 3.13 3.13L14.5 20H20v-5.5l-2.04 2.04-3.13-3.13z"/></svg>
+        </button>
+        <button id="repeat-btn" class="icon-btn" type="button" data-repeat="off" aria-pressed="false" aria-label="Repeat: off (R)" title="Repeat: off (R)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7h10v3l4-4-4-4v3H5v6h2zm10 10H7v-3l-4 4 4 4v-3h12v-6h-2z"/><text class="one" x="12" y="15.2" font-size="7.5" font-weight="700" text-anchor="middle" fill="currentColor" stroke="none">1</text></svg>
         </button>
         <span class="time"><span id="t-now">0:00</span> / <span id="t-dur">0:00</span></span>
         <h1 id="now-title" class="now-title"></h1>
@@ -162,6 +192,8 @@
         <option value="dlna">DLNA media server</option>
         <option value="jellyfin">Jellyfin or Emby</option>
         <option value="plex">Plex</option>
+        <option value="ftp">FTP server</option>
+        <option value="sftp">SFTP (SSH) server</option>
         <option value="http">Web folder or links</option>
       </select>
     </label>
@@ -183,6 +215,8 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
     </button>
   </div>
+  <div id="jobs-tools" class="jobs-tools"></div>
+  <p id="jobs-note" class="hint"></p>
   <ul id="jobs-list" class="jobs-list"></ul>
 </dialog>
 
@@ -196,6 +230,43 @@
   </div>
   <p>Open this link in VLC (Media → Open Network Stream), Kodi, or a smart TV app. The filtered words are removed from the audio on the server. The link works for 12 hours.</p>
   <div class="row"><input id="external-url" readonly><button id="copy-url" class="btn subtle" type="button">Copy</button></div>
+</dialog>
+
+<!-- Change password -->
+<dialog id="password-dialog" class="dialog">
+  <form id="password-form" method="dialog">
+    <h2>Change password</h2>
+    <label id="pw-current-row">Current password
+      <input id="pw-current" type="password" autocomplete="current-password">
+    </label>
+    <label>New password
+      <input id="pw-new" type="password" autocomplete="new-password" required>
+    </label>
+    <label>New password again
+      <input id="pw-again" type="password" autocomplete="new-password" required>
+    </label>
+    <p id="pw-error" class="error" role="alert"></p>
+    <div class="dialog-actions">
+      <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+      <button class="btn primary" value="save" type="submit">Change password</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Fix a wrong match -->
+<dialog id="match-dialog" class="dialog wide">
+  <div class="dialog-head">
+    <h2>Fix the match</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </div>
+  <form id="match-form" class="row" method="dialog">
+    <input id="match-q" type="text" placeholder="Search by title" aria-label="Search by title">
+    <input id="match-year" type="text" inputmode="numeric" placeholder="Year" aria-label="Year" style="max-width:6rem">
+    <button class="btn subtle" type="submit" value="search">Search</button>
+  </form>
+  <ul id="match-results" class="match-results"></ul>
 </dialog>
 
 <div id="toast" class="toast" role="status" hidden></div>
