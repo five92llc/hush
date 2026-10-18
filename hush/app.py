@@ -10,11 +10,13 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
 from . import discover, media, stream
+from .hls import HLSError, HLSManager
+from .live import LiveTV
 from .analysis.jobs import Analyzer
 from .auth import COOKIE, SESSION_TTL, Auth
 from .config import Config, load_config
@@ -59,9 +61,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     media.configure(f"http://127.0.0.1:{cfg.port}", auth.internal_token)
     analyzer = Analyzer(cfg, db, registry)
     library = MetadataService(cfg, db, registry)
+    hls = HLSManager(cfg.data_dir / "hls")
+    livetv = LiveTV(cfg, db, registry)
     renamer = Renamer(db, registry)
     renamer.cache_dir, renamer.art_dir = cfg.cache_dir, library.art_dir
-    tasks = TaskManager(cfg, db, registry, analyzer, library)
+    tasks = TaskManager(cfg, db, registry, analyzer, library, livetv)
     notifier = Notifier(db)
     analyzer.on_event = notifier.event
     cache = Cache()
@@ -70,7 +74,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     registry.get("url").urls = db.get_setting("recent_urls", [])
 
     app = FastAPI(title="Hush", docs_url=None, redoc_url=None)
-    app.state.cfg, app.state.db, app.state.analyzer, app.state.tasks = cfg, db, analyzer, tasks
+    app.state.cfg, app.state.db, app.state.analyzer, app.state.tasks, app.state.hls = cfg, db, analyzer, tasks, hls
 
     @app.on_event("startup")
     def _start():
@@ -110,7 +114,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return hit
         ref = resolve(source_id, item_id)
         try:
-            return cache.put(key, media.probe(cfg.ffprobe, ref, source_id, item_id))
+            result = cache.put(key, media.probe(cfg.ffprobe, ref, source_id, item_id))
+            if result.duration is None and ref.url and not ref.live:
+                ref.live = True          # a stream with no length (IPTV channel): no seeking, scanning or filtering
+            return result
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not read media: {exc}")
 
@@ -187,10 +194,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/browse/{source_id}", dependencies=[need])
     def browse(source_id: str, dir: str = ""):
         entries = [e.to_dict(source_id) for e in registry.get(source_id).browse(dir)]
-        done = db.filtered_keys([e["media_key"] for e in entries if "media_key" in e])
+        keys = [e["media_key"] for e in entries if "media_key" in e]
+        done = db.filtered_keys(keys)
+        prog = db.progress_map(keys)
         for e in entries:
             if "media_key" in e:
                 e["filtered"] = e["media_key"] in done
+                pr = prog.get(e["media_key"])
+                if pr:
+                    e["watched"] = bool(pr["finished"])
+                    e["resume"] = pr["position"] if not pr["finished"] else 0
         return entries
 
     @app.post("/api/open-url", dependencies=[need])
@@ -211,8 +224,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         p = probe(source_id, item_id)
         key = media_key(source_id, item_id)
         f = db.get_filter(key)
+        prog = db.get_progress(key)
+        resume = ({"position": prog["position"], "finished": bool(prog["finished"])}
+                  if prog and not ref.live else None)
         return {"title": ref.title, "kind": "video" if p.video else "audio", "name": ref.name,
-                "live": ref.live, "media_key": key, "probe": p.to_dict(), "mode": media.choose_mode(ref, p, audio),
+                "live": ref.live, "resume": resume, "media_key": key, "probe": p.to_dict(), "mode": media.choose_mode(ref, p, audio),
                 "has_filter": bool(f), "job": db.active_job_for(key)}
 
     @app.get("/api/raw/{source_id}/{item_id}", dependencies=[need])
@@ -238,6 +254,35 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             mode = "audio" if not p.video else "remux"
         cmd, mime = stream.build_ffmpeg_cmd(cfg, ref, source_id, item_id, mode, max(0.0, start), audio)
         return await stream.ffmpeg_response(request, cmd, mime)
+
+    @app.get("/api/hls/start/{source_id}/{item_id}", dependencies=[need])
+    def hls_start(source_id: str, item_id: str, start: float = 0.0, audio: int | None = None,
+                  mode: str | None = None, cats: str = "", filter: int = 1, tab: str = ""):
+        """Begin an HLS session (for Safari and iOS) and send the browser to its playlist.
+        Safari cannot route HLS audio through the Web Audio API, so the filter's muting is done here."""
+        ref = resolve(source_id, item_id)
+        p = probe(source_id, item_id)
+        mode = mode if mode in ("remux", "transcode", "audio") else media.choose_mode(ref, p, audio)
+        if mode == "direct":
+            mode = "audio" if not p.video else "remux"
+        f = db.get_filter(media_key(source_id, item_id))
+        ranges = _select(f["ranges"], cats) if (f and filter and not ref.live) else None
+        try:
+            sid = hls.create(lambda d: stream.build_ffmpeg_cmd(
+                cfg, ref, source_id, item_id, mode, 0.0 if ref.live else max(0.0, start), audio,
+                mute_ranges=ranges, container="hls", hls_dir=d)[0], owner=tab[:40])
+        except HLSError as exc:
+            raise HTTPException(502, str(exc))
+        return RedirectResponse(f"/api/hls/{sid}/index.m3u8", status_code=307)
+
+    @app.get("/api/hls/{sid}/{name}", dependencies=[need])
+    def hls_file(sid: str, name: str):
+        f = hls.file(sid, name)
+        if not f:
+            raise HTTPException(404)
+        if name.endswith(".m3u8"):
+            return FileResponse(f, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
+        return FileResponse(f, media_type="video/mp2t", headers={"Cache-Control": "private, max-age=300"})
 
     @app.get("/api/seekpoint/{source_id}/{item_id}", dependencies=[need])
     def seekpoint(source_id: str, item_id: str, t: float, mode: str = "remux"):
@@ -371,7 +416,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/analyze", dependencies=[need])
     def analyze(body: dict = Body(...)):
         source_id, item_id = body["source_id"], body["item_id"]
-        ref = registry.get(source_id).resolve(item_id)
+        ref = resolve(source_id, item_id)
+        try:
+            probe(source_id, item_id)          # a stream with no length is marked live by the probe
+        except HTTPException:
+            pass
         if ref.live:
             raise HTTPException(400, "Live streams can't be scanned: they have no fixed length. Play them unfiltered.")
         engine = body.get("engine")
@@ -412,6 +461,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         m = dict(m)
         m["art_url"] = f"/api/art/{m['media_key']}.jpg" if m.get("art") else None
         m["scanned"] = bool(m.get("scanned"))
+        m["watched"] = bool(m.get("watched"))
         return m
 
     @app.get("/api/library/movies", dependencies=[need])
@@ -424,6 +474,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         for s in db.list_shows():
             s["art_url"] = f"/api/art/{s['show_key']}.jpg" if s.get("art") else None
             s["scanned"] = int(s.get("scanned") or 0)
+            s["watched"] = int(s.get("watched") or 0)
             out.append(s)
         return out
 
@@ -441,6 +492,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not m:
             raise HTTPException(404)
         m["scanned"] = bool(db.get_filter(key))
+        pr = db.get_progress(key) or {}
+        m["position"], m["duration"], m["watched"] = pr.get("position"), pr.get("duration"), bool(pr.get("finished"))
         return _card(m)
 
     @app.get("/api/art/{name}.jpg", dependencies=[need])
@@ -481,6 +534,61 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         out += [{"id": f"side{i}", "label": Path(x).name, "where": "next to the file"}
                 for i, x in enumerate(ref.subtitle_paths)]
         return {"tracks": out, "transcript": tr.load_words(cfg.cache_dir, key) is not None, "key": key}
+
+    # ---- playback progress ------------------------------------------------------
+    @app.post("/api/progress/{key}", dependencies=[need])
+    def progress_save(key: str, body: dict = Body(...)):
+        """Remember where someone is in a title. A POST so the browser can send it as the page closes."""
+        if not key.isalnum():
+            raise HTTPException(404)
+        try:
+            pos, dur = float(body.get("position", 0)), body.get("duration")
+            dur = float(dur) if dur not in (None, "") else None
+        except (TypeError, ValueError):
+            raise HTTPException(400, "bad position")
+        if not (0 <= pos < 1e7) or (dur is not None and not (0 < dur < 1e7)):
+            raise HTTPException(400, "bad position")
+        sid, iid = str(body.get("source_id", "")), str(body.get("item_id", ""))
+        if not sid or not iid or media_key(sid, iid) != key:
+            raise HTTPException(400, "source_id/item_id do not match this title")
+        return db.save_progress(key, sid, iid, str(body.get("title", ""))[:300], pos, dur)
+
+    @app.post("/api/progress/{key}/watched", dependencies=[need])
+    def progress_watched(key: str, body: dict = Body(...)):
+        """Mark a title watched or unwatched by hand."""
+        m = db.get_meta(key) or {}
+        if body.get("watched"):
+            sid, iid = body.get("source_id") or m.get("source_id"), body.get("item_id") or m.get("item_id")
+            if not sid or not iid or media_key(sid, iid) != key:
+                raise HTTPException(400, "unknown title")
+            existing = db.get_progress(key) or {}
+            dur = existing.get("duration") or 1.0
+            return db.save_progress(key, sid, iid, m.get("title") or str(body.get("title", ""))[:300], dur, dur)
+        db.clear_progress(key)
+        return {"position": 0.0, "finished": 0}
+
+    @app.delete("/api/progress/{key}", dependencies=[need])
+    def progress_clear(key: str):
+        db.clear_progress(key)
+        return {"ok": True}
+
+    @app.get("/api/progress/recent", dependencies=[need])
+    def progress_recent(limit: int = Query(20, ge=1, le=60)):
+        """Titles to pick up again, newest first, with the artwork and names the library has."""
+        out = []
+        for p in db.recent_progress(limit):
+            m = db.get_meta(p["media_key"]) or {}
+            show = db.get_show(m["show_key"]) if m.get("show_key") else None
+            title = (show["title"] if show else (m.get("title") or p["title"] or "Untitled"))
+            sub = ""
+            if show:
+                sub = f"S{m.get('season', 0):02d}E{m.get('episode', 0):02d}" + (f" · {m['title']}" if m.get("title") else "")
+            art = (f"/api/art/{p['media_key']}.jpg" if m.get("art") else
+                   (f"/api/art/{m['show_key']}.jpg" if show and show.get("art") else None))
+            out.append({"media_key": p["media_key"], "source_id": p["source_id"], "item_id": p["item_id"], "title": title,
+                        "subtitle": sub, "art_url": art, "position": p["position"], "duration": p["duration"],
+                        "fraction": min(1.0, p["position"] / p["duration"]) if p["duration"] else None})
+        return out
 
     # ---- tidy file names -----------------------------------------------------
     @app.get("/api/rename/plan", dependencies=[need])
@@ -548,6 +656,78 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(400, str(exc))
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not fetch that entry: {exc}")
+
+    # ---- live TV ---------------------------------------------------------------
+    def _channel(c: dict) -> dict:
+        return {"key": c["chan_key"], "name": c["name"], "groups": [g for g in (c["grp"] or "").split(";") if g],
+                "logo_url": f"/api/live/logo/{c['chan_key']}" if c["logo"] else None, "item_id": c["item_id"], "letter": c["letter"],
+                "favorite": bool(c["favorite"]), "failures": c["failures"]}
+
+    @app.get("/api/live/channels", dependencies=[need])
+    def live_channels(q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,
+                      letter: str = Query("", max_length=1), recent: bool = False,
+                      limit: int = Query(120, ge=1, le=500), offset: int = Query(0, ge=0)):
+        q = q.strip()
+        rows = db.list_channels(q, group, favorites, hide_dead, limit, offset, letter.upper(), recent)
+        return {"channels": [_channel(c) for c in rows],
+                "total": db.count_channels(q, group, favorites, hide_dead, letter.upper(), recent),
+                "letters": db.letter_counts(q, group, favorites, hide_dead), "stats": db.channel_stats()}
+
+    @app.get("/api/live/groups", dependencies=[need])
+    def live_groups():
+        return db.channel_groups()
+
+    @app.get("/api/live/logo/{key}", dependencies=[need])
+    def live_logo(key: str):
+        if not key.isalnum():
+            raise HTTPException(404)
+        f = livetv.logo_path(key)
+        if not f:
+            raise HTTPException(404)
+        return FileResponse(f, media_type="image/png", headers={"Cache-Control": "private, max-age=604800"})
+
+    @app.post("/api/live/channels/{key}/favorite", dependencies=[need])
+    def live_favorite(key: str, body: dict = Body(...)):
+        if not db.get_channel(key):
+            raise HTTPException(404)
+        db.set_favorite(key, bool(body.get("favorite")))
+        return {"ok": True}
+
+    @app.post("/api/live/channels/{key}/report", dependencies=[need])
+    def live_report(key: str, body: dict = Body(...)):
+        db.report_channel(key, bool(body.get("ok")))
+        return {"ok": True}
+
+    @app.get("/api/live/playlists", dependencies=[need])
+    def live_playlists():
+        return db.list_playlists()
+
+    @app.post("/api/live/playlists", dependencies=[need])
+    def live_playlist_add(body: dict = Body(...)):
+        return livetv.add_playlist(str(body.get("name", "")), str(body.get("url", "")))
+
+    @app.post("/api/live/playlists/import", dependencies=[need])
+    def live_import():
+        n = livetv.import_sources()
+        for p in db.list_playlists():
+            if not p["updated_at"]:
+                try:
+                    livetv.sync(p["id"])
+                except SourceError:
+                    pass
+        return {"imported": n}
+
+    @app.post("/api/live/playlists/{pid}/refresh", dependencies=[need])
+    def live_playlist_refresh(pid: str):
+        try:
+            return {"channels": livetv.sync(pid)}
+        except KeyError:
+            raise HTTPException(404)
+
+    @app.delete("/api/live/playlists/{pid}", dependencies=[need])
+    def live_playlist_delete(pid: str):
+        db.delete_playlist(pid)
+        return {"ok": True}
 
     # ---- background tasks ---------------------------------------------------
     @app.get("/api/tasks", dependencies=[need])

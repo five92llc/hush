@@ -25,6 +25,11 @@ CATALOG = {
         "description": "Works out each title's name and year, then adds the summary, genres and poster "
                        "(or a thumbnail from the video). Finds new titles first.",
     },
+    "livetv": {
+        "name": "Live TV channels",
+        "description": "Re-reads your Live TV playlists so new channels appear and removed ones go away. "
+                       "Your favorites are kept.",
+    },
     "cleanup": {
         "name": "Clean up",
         "description": "Removes leftover scan files and scan records older than 30 days.",
@@ -36,9 +41,9 @@ STARTUP_DELAY = 30
 
 
 class TaskManager:
-    def __init__(self, cfg, db, registry, analyzer, library=None):
+    def __init__(self, cfg, db, registry, analyzer, library=None, live=None):
         self.cfg, self.db, self.registry, self.analyzer = cfg, db, registry, analyzer
-        self.library = library
+        self.library, self.live = library, live
         self._running: set[str] = set()
         self._lock = threading.Lock()
         self._started = time.time()
@@ -192,6 +197,9 @@ class TaskManager:
         left = len(self.db.library_without_meta())
         return f"{r['processed']} titles filled in" + (f", {r['failed']} failed" if r["failed"] else "") + \
                (f", {left} still waiting" if left else "")
+
+    def _livetv(self, opts: dict) -> str:
+        return self.live.sync_all() if self.live else "Not available"
 
     def _cleanup(self, opts: dict) -> str:
         active = {j["id"] for j in self.db.active_jobs()}

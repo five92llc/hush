@@ -125,9 +125,21 @@ def mute_filter(ranges: list[dict], offset: float = 0.0) -> str | None:
     return f"volume=enable='{'+'.join(parts)}':volume=0"
 
 
+def _hls_output(ref: MediaRef, folder) -> list[str]:
+    """Segment and playlist options. A live source gets a sliding window; anything else a growing list."""
+    out = ["-f", "hls", "-hls_time", "4", "-hls_segment_type", "mpegts",
+           "-hls_segment_filename", str(folder / "seg%05d.ts")]
+    if ref.live:
+        out += ["-hls_list_size", "6", "-hls_flags", "delete_segments+independent_segments"]
+    else:
+        out += ["-hls_list_size", "0", "-hls_playlist_type", "event", "-hls_flags", "independent_segments"]
+    return out + [str(folder / "index.m3u8")]
+
+
 def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str,
                      start: float = 0.0, audio_index: int | None = None,
-                     mute_ranges: list[dict] | None = None, container: str = "mp4") -> tuple[list[str], str]:
+                     mute_ranges: list[dict] | None = None, container: str = "mp4",
+                     hls_dir=None) -> tuple[list[str], str]:
     """Return (argv, mime) for a live stream of this item."""
     cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin"]
     if ref.live:
@@ -150,6 +162,8 @@ def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str
         cmd += ["-map", f"0:{audio_index}" if audio_index is not None else "0:a:0", "-vn", "-sn"]
         if afilter:
             cmd += ["-af", afilter]
+        if container == "hls":
+            return cmd + ["-c:a", "aac", "-b:a", "192k", "-ac", "2", *_hls_output(ref, hls_dir)], "application/vnd.apple.mpegurl"
         cmd += ["-c:a", "libmp3lame", "-b:a", "192k", "-f", "mp3", "pipe:1"]
         return cmd, "audio/mpeg"
 
@@ -165,6 +179,8 @@ def build_ffmpeg_cmd(cfg, ref: MediaRef, source_id: str, item_id: str, mode: str
     if afilter:
         cmd += ["-af", afilter]
     cmd += ["-c:a", "aac", "-b:a", "192k", "-ac", "2"]
+    if container == "hls":
+        return cmd + _hls_output(ref, hls_dir), "application/vnd.apple.mpegurl"
     if container == "matroska":   # for external players (VLC, Kodi, TVs)
         cmd += ["-f", "matroska", "pipe:1"]
         return cmd, "video/x-matroska"

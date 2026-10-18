@@ -92,7 +92,7 @@ Sources can be added in `config.yaml` or from the app with **Add a source**.
 4. Subtitles shown in Hush are censored to match the audio.
 5. **Filter on/off** (or the **H** key) toggles everything instantly.
 
-Shortcuts: Space/K play/pause · J/L or ←/→ skip 10 s · F full screen · M mark · H filter on/off · Esc close panel.
+Previous and next, **Shuffle** and **Repeat** (off, all, one) are in the control bar, and **Autoplay** (start a title when it opens and move on to the next) is in the settings next to it. Shortcuts: N next · P previous · S shuffle · R repeat · Space/K play/pause · J/L or ←/→ skip 10 s · F full screen · M mark · H filter on/off · Esc close panel.
 
 ### Other players and TVs
 
@@ -126,6 +126,24 @@ Tips:
 - **Web sources.** Web sources block link-local and metadata addresses. Use `allowed_hosts` to pin a web source to specific hosts.
 - **FFmpeg access.** FFmpeg reads SMB files through a loopback endpoint that requires a per-process random token.
 - **Browser hardening.** The UI sends a strict CSP, has no third-party requests, and bundles its fonts (SIL OFL), so it works fully offline on a LAN.
+
+## Finding things: A–Z and 0–9
+
+Movies, TV shows, Live TV and long folders have a row of **A–Z** and **1–0** buttons at the top. Pick one to see only titles starting with it (pick it again, or **All**, to clear). Letters with nothing under them are dimmed, and the counts follow your other filters, such as the Live TV group. "The", "A" and "An" are ignored for movies and shows, so *The Matrix* files under M. The … button holds titles in other alphabets.
+
+## Resume
+
+Hush remembers where you stopped in every movie, episode and song, on the server, so it works from any device. Opening a title picks up at that spot (with a **Start over** button for a few seconds), the folder lists show **Resume 1:03** or **✓ Watched**, and **Movies** and **TV shows** open with a **Continue watching** row. A title counts as watched at 92% (or in the last 90 seconds of a long one); mark it by hand on its page. Live channels are not tracked.
+
+## Live TV
+
+Open **Live TV** in the left bar. Add an IPTV playlist (an `.m3u` or `.m3u8` list of channels, for example from iptv-org) under **Playlists**, or import the ones already saved as sources. Hush reads it once and keeps the channels in its database: logos (fetched and cached by the server, so the page makes no third-party requests), groups, search, and favorites. Playlists refresh daily from **Tasks → Live TV channels**. Channels that fail to play twice in a row are hidden (there is a switch to show them), because public lists are full of dead and geo-blocked streams. Live channels play unfiltered: they have no fixed length to scan.
+
+Live TV works like a TV: channels are numbered in the list you are looking at, a banner with the logo, number and group shows when you change channel, and **↑ / ↓** (or Page Up/Down) change channel. Type a number (for example **1 2**) to jump to it, **B** returns to the last channel, **G** (or the Channels button) opens the channel list, and **I** shows the banner again. A **Recently watched** row sits at the top of Live TV, and **Back to Live TV** returns to the same group, letter and search you left.
+
+## Safari and iPhone
+
+Safari and every iOS browser cannot play the live MP4 stream Hush uses for MKV, HEVC and live channels, so for them Hush switches to **HLS** automatically. The filter's muting is then done on the server (Safari's audio API does not work with HLS), so changing categories or edits restarts the stream at the same spot. Other browsers are unchanged.
 
 ## Library, details and tidy names
 

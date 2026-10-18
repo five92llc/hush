@@ -48,6 +48,15 @@ const store = {
   set(k, v) { try { localStorage.setItem("hush." + k, JSON.stringify(v)); } catch { /* private mode */ } },
 };
 
+/* Safari and every iOS browser use WebKit, which cannot play a live MP4 stream: they get HLS instead. */
+const UA = navigator.userAgent;
+const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /iP(hone|ad|od)/.test(UA)
+  || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const TAB = (() => {
+  try { let t = sessionStorage.getItem("hush.tab"); if (!t) { t = Math.random().toString(36).slice(2, 12); sessionStorage.setItem("hush.tab", t); } return t; }
+  catch { return Math.random().toString(36).slice(2, 12); }
+})();
+
 let toastTimer;
 function toast(msg) {
   const t = $("#toast");
@@ -144,7 +153,7 @@ async function browse(sourceId, dirId = "") {
     return;
   }
   for (const e of S.entries) if (e.kind === "dir") { S.dirNames[e.id] = e.name; S.dirParent[e.id] = dirId; }
-  S.currentDir = dirId;
+  S.currentDir = dirId; S.letter = "";
   $("#scan-all-btn").hidden = sourceId === "url";
   $("#filter-input").value = "";
   renderEntries();
@@ -168,7 +177,13 @@ function showEmpty(title, body) {
 
 function renderEntries() {
   const q = $("#filter-input").value.trim().toLowerCase();
-  const items = S.entries.filter((e) => !q || e.name.toLowerCase().includes(q));
+  const wanted = S.letter || "";
+  const bar = $("#folder-letters");                      // A-Z / 0-9 picker, shown once a folder is long enough to need it
+  if (S.entries.length >= 15) {
+    if (!S.letterBar) { S.letterBar = makeLetterBar((l) => { S.letter = l; renderEntries(); }); bar.replaceChildren(S.letterBar.el); }
+    S.letterBar.set(new Set(S.entries.map((e) => letterOf(e.name))), wanted);
+  } else { bar.replaceChildren(); S.letterBar = null; }
+  const items = S.entries.filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!wanted || S.entries.length < 15 || letterOf(e.name) === wanted));
   Queue.set(items.filter((e) => e.kind !== "dir").map((e) => ({ src: e.source_id || S.source, item: e.id, title: e.name })));
   const list = $("#entries");
   list.replaceChildren(...items.map((e) => {
@@ -177,7 +192,8 @@ function renderEntries() {
     return h("li", { class: `entry ${e.kind}` },
       icon(isDir ? "dir" : e.kind),
       h("a", { class: "name", href: target, title: e.name }, e.name),
-      h("span", { class: "meta" }, isDir ? "" : [e.meta?.year, fmtSize(e.size)].filter(Boolean).join("  ")),
+      h("span", { class: "meta" }, isDir ? "" : [e.meta?.year, fmtSize(e.size)].filter(Boolean).join("  "),
+        e.watched ? h("span", { class: "resume" }, "  ✓ Watched") : e.resume ? h("span", { class: "resume" }, `  Resume ${fmt(e.resume)}`) : null),
       isDir ? h("span") : e.filtered
         ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", ""), "Filter ready")
         : h("button", { class: "btn subtle scan-btn", type: "button", onclick: (ev) => scanFromList(ev, e) }, "Scan"),
@@ -361,6 +377,77 @@ function jobText(j) {
 $("#jobs-btn").addEventListener("click", () => { $("#jobs-dialog").showModal(); Jobs.render(); Jobs.poll(); });
 $$("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 
+const autoplay = () => store.get("autoplay", true);
+
+/* ===================================================== A-Z / 0-9 picker */
+const LETTERS = [..."ABCDEFGHIJKLMNOPQRSTUVWXYZ", ..."1234567890"];
+/** The letter or digit a title files under (leading "The"/"A"/"An" can be ignored). Must match db.letter_of. */
+const letterOf = (name, skipArticles = false) => {
+  let t = (name || "").trim();
+  if (skipArticles) { const m = /^(the|an|a)\s+\S/i.exec(t); if (m) t = t.slice(m[1].length).trim(); }
+  for (const ch of t) {
+    if (/[0-9]/.test(ch)) return ch;
+    const base = ch.normalize("NFKD")[0].toUpperCase();
+    if (base >= "A" && base <= "Z") return base;
+    if (/[\p{L}\p{N}]/u.test(ch)) return "*";
+  }
+  return "*";
+};
+const sortKey = (name) => (name || "").trim().replace(/^(the|an|a)\s+(?=\S)/i, "").toLowerCase();
+
+/** A row of A-Z and 1-0 buttons. Letters with nothing under them are dimmed. */
+function makeLetterBar(onPick) {
+  const el = h("div", { class: "letters", role: "group", "aria-label": "Jump to a letter" });
+  let current = "", available = new Set();
+  const draw = () => el.replaceChildren(...[
+    h("button", { type: "button", class: "lt", "aria-pressed": String(current === ""), onclick: () => pick("") }, "All"),
+    ...LETTERS.map((l) => h("button", { type: "button", class: "lt", "aria-pressed": String(current === l), disabled: !available.has(l) && current !== l,
+      onclick: () => pick(current === l ? "" : l) }, l)),
+    available.has("*") ? h("button", { type: "button", class: "lt", title: "Other alphabets and symbols", "aria-pressed": String(current === "*"),
+      onclick: () => pick(current === "*" ? "" : "*") }, "…") : null,
+  ].filter(Boolean));
+  const pick = (l) => { current = l; draw(); onPick(l); };
+  return { el, set(avail, cur) { available = avail; current = cur; draw(); }, get current() { return current; } };
+}
+
+/* ===================================================== resume: remember where you were */
+const Progress = {
+  timer: null, last: -1, armed: false,
+  arm() { this.armed = true; this.last = -1; clearInterval(this.timer); this.timer = setInterval(() => { if (!video.paused) this.save(); }, 10000); },
+  disarm() { this.armed = false; clearInterval(this.timer); },
+  /** Send the position. A title that is nearly over is recorded as watched by the server. */
+  save(force = false, finished = false) {
+    const P = Player;
+    if (!this.armed || !P.info || P.info.live || !P.duration) return;
+    const pos = finished ? P.duration : P.now();
+    if (!force && Math.abs(pos - this.last) < 5) return;
+    this.last = pos;
+    fetch(`/api/progress/${P.info.media_key}`, { method: "POST", credentials: "same-origin", keepalive: true,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ source_id: P.src, item_id: P.item, title: P.info.title, position: pos, duration: P.duration }) }).catch(() => {});
+  },
+};
+window.addEventListener("pagehide", () => Progress.save(true));
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden") Progress.save(true); });
+
+/* ===================================================== Live TV channel list */
+const guide = {
+  open() {
+    if (!Player.chan) return;
+    const list = $("#guide-list");
+    list.replaceChildren(...Queue.list.map((c, i) => h("li", {}, h("button", { type: "button", "aria-current": String(i === Queue.pos),
+      onclick: () => { if (i !== Queue.pos) { Queue.history.push(Queue.pos); Queue.go(i); } } },
+      h("span", { class: "n" }, i + 1), h("span", {}, splitTags(c.title).title)))));
+    if (!$("#panel").hidden) togglePanel(false);
+    $("#guide").hidden = false; $("#guide-btn").setAttribute("aria-expanded", "true");
+    list.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "center" });
+  },
+  close() { $("#guide").hidden = true; $("#guide-btn").setAttribute("aria-expanded", "false"); },
+  toggle() { $("#guide").hidden ? this.open() : this.close(); },
+};
+$("#guide-btn").addEventListener("click", () => guide.toggle());
+$("#guide-close").addEventListener("click", () => guide.close());
+
 /* ===================================================== play queue: previous, next, shuffle, repeat */
 const Queue = {
   list: [], pos: -1, history: [], played: new Set(), pending: false,
@@ -373,6 +460,9 @@ const Queue = {
     const i = this.list.findIndex((x) => x.src === src && x.item === item);
     if (i < 0) this.list = [{ src, item, title: "" }];
     this.pos = i < 0 ? 0 : i;
+    const key = this.list[this.pos]?.chan || null;          // Live TV: remember the channel we came from (for "last channel")
+    if (key && key !== this.curKey) this.lastKey = this.curKey;
+    if (key) this.curKey = key;
     if (this.pending) this.pending = false;              // moving inside the queue keeps its history
     else { this.history = []; this.played = new Set([this.pos]); }
     this.ui();
@@ -410,9 +500,55 @@ const Queue = {
   },
 
   prev() {
+    if (Player.chan) { this.zap(-1); return; }
     if ((video.currentTime || 0) > 3 || (!this.history.length && this.pos <= 0 && this.repeat !== "all")) { Player.seek(0); return; }
     const i = this.history.length ? this.history.pop() : (this.pos > 0 ? this.pos - 1 : this.list.length - 1);
     this.go(i);
+  },
+
+  /* ---------- Live TV, like a remote: channel up/down, number keys, last channel ---------- */
+  curKey: null, lastKey: null, loadMore: null, digits: "", digitTimer: null, bannerTimer: null,
+
+  banner() {
+    const c = this.list[this.pos];
+    if (!c?.chan) return;
+    $("#cb-num").textContent = this.pos + 1;
+    $("#cb-name").textContent = splitTags(c.title).title;
+    $("#cb-sub").textContent = [...splitTags(c.title).tags, ...(c.groups || []).slice(0, 2)].join(" · ");
+    const logo = $("#cb-logo");
+    logo.hidden = !c.logo; if (c.logo) logo.src = c.logo;
+    const b = $("#chan-banner"); b.hidden = false;
+    clearTimeout(this.bannerTimer); this.bannerTimer = setTimeout(() => { b.hidden = true; }, 4500);
+  },
+
+  /** Go to the channel at this position, loading more of the list first if it is further down. */
+  async jumpTo(i) {
+    while (i >= this.list.length && this.loadMore && await this.loadMore()) { /* fetch pages until it exists */ }
+    if (i >= 0 && i < this.list.length) { this.history.push(this.pos); this.go(i); }
+    else toast(`There is no channel ${i + 1}`);
+  },
+  async zap(dir) {
+    const n = this.list.length;
+    if (n < 2) return;
+    let i = this.pos + dir;
+    if (i < 0) i = n - 1;
+    else if (i >= n && !(this.loadMore && await this.loadMore())) i = 0;     // past the last channel: next page, or wrap
+    this.history.push(this.pos); this.go(i);
+  },
+  recall() {
+    const i = this.list.findIndex((x) => x.chan && x.chan === this.lastKey);
+    if (i < 0) { toast("No earlier channel yet"); return; }
+    this.go(i);
+  },
+  digit(d) {
+    this.digits = (this.digits + d).slice(-4);
+    const box = $("#chan-entry");
+    box.textContent = this.digits; box.hidden = false;
+    clearTimeout(this.digitTimer);
+    this.digitTimer = setTimeout(() => {
+      const n = Number(this.digits); this.digits = ""; box.hidden = true;
+      if (n > 0) this.jumpTo(n - 1);
+    }, 1400);
   },
 
   toggleShuffle() {
@@ -443,7 +579,15 @@ $("#shuffle-btn").addEventListener("click", () => Queue.toggleShuffle());
 $("#repeat-btn").addEventListener("click", () => Queue.cycleRepeat());
 
 /* ===================================================== catalog: posters, shows, details */
-const initials = (t) => (t || "?").split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+const initials = (t) => {
+  const words = (t || "").replace(/[\[(][^\])]*[\])]/g, " ").split(/[^\p{L}\p{N}]+/u).filter(Boolean);
+  return (words.length > 1 ? words.slice(0, 2).map((w) => w[0]).join("") : (words[0] || "?").slice(0, 2)).toUpperCase();
+};
+/** "BBC One (1080p) [Geo-blocked]" -> its title and the tags that were in brackets. */
+const splitTags = (name) => {
+  const tags = [...(name || "").matchAll(/[\[(]([^\])]*)[\])]/g)].map((m) => m[1].trim()).filter(Boolean);
+  return { title: (name || "").replace(/\s*[\[(][^\])]*[\])]/g, "").trim() || name, tags };
+};
 const mins = (n) => (n ? `${Math.floor(n / 60) ? Math.floor(n / 60) + " h " : ""}${n % 60} min` : "");
 const artBox = (url, label, cls = "art") => h("div", { class: cls }, url
   ? h("img", { src: url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, initials(label)));
@@ -451,15 +595,135 @@ const artBox = (url, label, cls = "art") => h("div", { class: cls }, url
 const Catalog = {
   box: () => $("#catalog-view"),
   async open(view, id) {
+    if (view !== "live") Queue.loadMore = null;
     $$("#rail-links a").forEach((a) => a.setAttribute("aria-current", String(
       a.hash === `#/${view}` || (view === "show" && a.hash === "#/shows") || (view === "title" && a.hash === (this.cameFrom || "#/movies")))));
     this.box().replaceChildren(h("p", { class: "hint" }, "Loading…"));
     try {
-      if (view === "movies") await this.grid("movies");
+      if (view === "live") await this.live();
+      else if (view === "movies") await this.grid("movies");
       else if (view === "shows") await this.grid("shows");
       else if (view === "show") await this.show(id);
       else await this.title(id);
     } catch (err) { this.box().replaceChildren(h("p", { class: "error" }, err.message)); }
+  },
+
+  /* ---------- Live TV: channels from IPTV playlists ---------- */
+  async live() {
+    const st = this.liveState ||= { q: "", group: "", favorites: false, hideDead: true, panel: false, letter: "" };
+    this.cameFrom = "#/live";
+    document.title = "Live TV – Hush";
+    const [groups, playlists] = await Promise.all([api("/api/live/groups"), api("/api/live/playlists")]);
+    const head = h("div", { class: "catalog-head" });
+    const tools = h("div", { class: "live-tools" });
+    const panel = h("div", { class: "pl-panel", hidden: !st.panel });
+    const grid = h("div", { class: "chans" });
+    const more = h("button", { class: "btn subtle", type: "button", hidden: true }, "Show more channels");
+    const summary = h("p", { class: "hint" });
+    let loaded = [], total = 0, stats = { dead: 0, favorites: 0, total: 0 };
+
+    const toQueue = () => Queue.set(loaded.map((c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups })));
+    const card = (c, n) => {
+      const star = h("button", { class: "star", type: "button", "aria-pressed": String(c.favorite), title: c.favorite ? "Remove from favorites" : "Add to favorites",
+        "aria-label": `Favorite: ${c.name}`, onclick: async (e) => {
+          e.preventDefault(); e.stopPropagation();
+          c.favorite = !c.favorite;
+          star.setAttribute("aria-pressed", String(c.favorite)); star.textContent = c.favorite ? "★" : "☆";
+          try { await api(`/api/live/channels/${c.key}/favorite`, { method: "POST", body: { favorite: c.favorite } }); } catch (err) { toast(err.message); }
+        } }, c.favorite ? "★" : "☆");
+      return h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => toQueue() },
+        n != null ? h("span", { class: "num" }, n + 1) : null,
+        h("div", { class: "logo" }, c.logo_url
+          ? h("img", { src: c.logo_url, alt: "", loading: "lazy", onerror: (e) => { e.target.replaceWith(h("span", { class: "noart" }, initials(c.name))); } })
+          : h("span", { class: "noart" }, initials(c.name))),
+        star, h("span", { class: "name", title: c.name }, splitTags(c.name).title),
+        h("span", { class: "sub" }, [...splitTags(c.name).tags, ...c.groups.slice(0, 1)].join(" · ")));
+    };
+
+    const fetchPage = async (reset) => {
+      if (reset) { loaded = []; grid.replaceChildren(); }
+      const q = new URLSearchParams({ q: st.q, group: st.group, favorites: st.favorites, hide_dead: st.hideDead, letter: st.letter, limit: 120, offset: loaded.length });
+      const r = await api(`/api/live/channels?${q}`);
+      total = r.total; stats = r.stats;
+      const first = loaded.length;
+      loaded = loaded.concat(r.channels);
+      grid.append(...r.channels.map((c, i) => card(c, first + i)));
+      toQueue();
+      lb.set(new Set(Object.keys(r.letters)), st.letter);
+      showRecent();
+      more.hidden = loaded.length >= total;
+      summary.textContent = stats.total
+        ? `${plural(total, "channel")}${st.group ? ` in ${st.group}` : ""}${stats.dead ? ` · ${stats.dead} hidden because they didn't play` : ""}`
+        : "";
+      if (!stats.total) grid.replaceChildren();
+    };
+    more.addEventListener("click", () => fetchPage(false));
+    Queue.loadMore = async () => { if (loaded.length >= total) return false; await fetchPage(false); return true; };   // channel up/down and number keys can reach further down the list
+
+    const lb = makeLetterBar((l) => { st.letter = l; fetchPage(true); });
+    const recentBox = h("section", { class: "recent-row", hidden: true });
+    const showRecent = async () => {                         // "Recently watched" while nothing is filtered
+      const plain = !st.q && !st.group && !st.favorites && !st.letter;
+      if (!plain) { recentBox.hidden = true; return; }
+      try {
+        const r = await api("/api/live/channels?recent=true&limit=8");
+        const items = r.channels;
+        recentBox.hidden = !items.length;
+        const q = () => Queue.set(items.map((c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups })));
+        recentBox.replaceChildren(h("h2", {}, "Recently watched"),
+          h("div", { class: "chans small" }, ...items.map((c) => { const a = card(c, null); a.addEventListener("click", q, true); return a; })));
+      } catch { recentBox.hidden = true; }
+    };
+
+    let timer;
+    const search = h("input", { class: "search", type: "search", placeholder: "Find a channel", value: st.q, "aria-label": "Find a channel" });
+    search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => { st.q = search.value.trim(); fetchPage(true); }, 300); });
+    const sel = h("select", { "aria-label": "Group", onchange: (e) => { st.group = e.target.value; fetchPage(true); } },
+      h("option", { value: "" }, "All groups"), ...groups.map((g) => h("option", { value: g.name, selected: g.name === st.group }, `${g.name} (${g.count})`)));
+    const favBtn = h("button", { class: "btn subtle", type: "button", "aria-pressed": String(st.favorites), onclick: (e) => {
+      st.favorites = !st.favorites; e.currentTarget.setAttribute("aria-pressed", String(st.favorites));
+      e.currentTarget.textContent = st.favorites ? "★ Favorites only" : "☆ Favorites"; fetchPage(true);
+    } }, st.favorites ? "★ Favorites only" : "☆ Favorites");
+    const dead = h("label", {}, h("input", { type: "checkbox", checked: st.hideDead, onchange: (e) => { st.hideDead = e.target.checked; fetchPage(true); } }), "Hide channels that don't play");
+    const plBtn = h("button", { class: "btn ghost", type: "button", onclick: () => { st.panel = !st.panel; panel.hidden = !st.panel; } }, "Playlists");
+    tools.append(search, sel, favBtn, dead, plBtn);
+
+    const reloadAll = () => this.open("live");
+    const addName = h("input", { type: "text", placeholder: "Name (optional)", "aria-label": "Playlist name" });
+    const addUrl = h("input", { type: "text", placeholder: "https://…/channels.m3u", "aria-label": "Playlist address", spellcheck: "false" });
+    panel.append(
+      h("p", { class: "hint" }, "Playlists are .m3u or .m3u8 lists of channels. Hush reads them once, keeps the channels here with their logos and groups, and refreshes them every day."),
+      playlists.length ? h("ul", {}, ...playlists.map((p) => h("li", {},
+        h("span", { class: "grow" }, h("strong", {}, p.name), " ", h("span", { class: p.error ? "error" : "hint" }, p.error ? p.error : `${plural(p.channels, "channel")}`)),
+        h("button", { class: "btn ghost", type: "button", onclick: async (e) => {
+          e.currentTarget.disabled = true; e.currentTarget.textContent = "Reading…";
+          try { await api(`/api/live/playlists/${p.id}/refresh`, { method: "POST" }); } catch (err) { toast(err.message); }
+          reloadAll();
+        } }, "Refresh"),
+        h("button", { class: "btn ghost", type: "button", onclick: async () => {
+          if (!confirm(`Remove "${p.name}" and its channels from Live TV?`)) return;
+          await api(`/api/live/playlists/${p.id}`, { method: "DELETE" }); reloadAll();
+        } }, "Remove")))) : null,
+      h("form", { class: "row", onsubmit: async (e) => {
+        e.preventDefault();
+        const btn = e.submitter; btn.disabled = true; btn.textContent = "Reading…";
+        try { await api("/api/live/playlists", { method: "POST", body: { name: addName.value, url: addUrl.value } }); toast("Playlist added"); reloadAll(); }
+        catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Add playlist"; }
+      } }, addName, addUrl, h("button", { class: "btn primary", type: "submit" }, "Add playlist")),
+      h("div", { class: "row" }, h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
+        e.currentTarget.disabled = true; e.currentTarget.textContent = "Importing…";
+        try { const r = await api("/api/live/playlists/import", { method: "POST" }); toast(r.imported ? `Imported ${plural(r.imported, "playlist")}` : "No saved playlists found"); } catch (err) { toast(err.message); }
+        reloadAll();
+      } }, "Import playlists from my saved sources")));
+
+    head.append(h("div", {}, h("h1", {}, "Live TV"), summary));
+    const empty = h("div", { class: "empty", hidden: true }, h("h3", {}, "No channels yet"),
+      h("p", {}, "Add an IPTV playlist (.m3u or .m3u8) and its channels appear here with their logos, sorted into groups."),
+      h("button", { class: "btn primary", type: "button", onclick: () => { st.panel = true; panel.hidden = false; panel.scrollIntoView({ block: "nearest" }); } }, "Add a playlist"));
+    this.box().replaceChildren(head, tools, lb.el, panel, recentBox, grid, h("div", { class: "row", style: "margin-top:1.25rem" }, more), empty);
+    await fetchPage(true);
+    empty.hidden = stats.total > 0;
+    if (!stats.total) { st.panel = true; panel.hidden = false; }
   },
 
   empty(what) {
@@ -471,18 +735,48 @@ const Catalog = {
       h("a", { class: "btn ghost", href: "#/tasks" }, "Open Tasks"));
   },
 
+  /** "Continue watching": titles that were left part-way, newest first. */
+  async continueRow() {
+    let items = [];
+    try { items = await api("/api/progress/recent?limit=12"); } catch { return null; }
+    if (!items.length) return null;
+    const row = h("section", { class: "continue" }, h("h2", {}, "Continue watching"));
+    const grid = h("div", { class: "grid shelf" });
+    for (const it of items) {
+      const card = h("a", { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
+        h("div", { class: "art" }, it.art_url ? h("img", { src: it.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
+          it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null,
+          h("button", { class: "x", type: "button", title: "Remove from Continue watching", "aria-label": `Remove ${it.title}`, onclick: async (e) => {
+            e.preventDefault(); e.stopPropagation();
+            try { await api(`/api/progress/${it.media_key}`, { method: "DELETE" }); card.remove(); if (!grid.children.length) row.remove(); } catch (err) { toast(err.message); }
+          } }, "✕")),
+        h("span", { class: "name" }, it.title),
+        h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : `at ${fmt(it.position)}`].filter(Boolean).join(" · ")));
+      grid.append(card);
+    }
+    row.append(grid);
+    return row;
+  },
+
   async grid(kind) {
-    const items = await api(`/api/library/${kind}`);
+    const [items, shelf] = await Promise.all([api(`/api/library/${kind}`), this.continueRow()]);
     const isShows = kind === "shows";
+    items.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title)));             // "The Matrix" files under M
+    const sel = (this.letterSel ||= { movies: "", shows: "" });
+    const bar = makeLetterBar((l) => { sel[kind] = l; draw(); });
+    const available = new Set(items.map((m) => letterOf(m.title, true)));
     const q = h("input", { class: "search", type: "search", placeholder: `Find in ${isShows ? "TV shows" : "movies"}`, "aria-label": "Find a title" });
     const list = h("div", { class: "grid" });
     const draw = () => {
       const f = q.value.trim().toLowerCase();
-      const shown = items.filter((m) => !f || m.title.toLowerCase().includes(f));
+      bar.set(available, sel[kind]);
+      const shown = items.filter((m) => (!f || m.title.toLowerCase().includes(f)) && (!sel[kind] || letterOf(m.title, true) === sel[kind]));
       if (!isShows) Queue.set(shown.map((m) => ({ src: m.source_id, item: m.item_id, title: m.title })));
       list.replaceChildren(...shown.map((m) => h("a", { class: "card", href: isShows ? `#/show/${m.show_key}` : `#/title/${m.media_key}` },
         h("div", { class: "art" }, m.art_url ? h("img", { src: m.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, m.title),
-          (isShows ? m.scanned && m.scanned === m.episodes : m.scanned) ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", "")) : null),
+          (isShows ? m.scanned && m.scanned === m.episodes : m.scanned) ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", "")) : null,
+          (isShows ? m.episodes && m.watched >= m.episodes : m.watched) ? h("span", { class: "tick" }, "✓ Watched") : null,
+          !isShows && !m.watched && m.position && m.duration ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round((m.position / m.duration) * 100)}%` })) : null),
         h("span", { class: "name" }, m.title),
         h("span", { class: "sub" }, isShows ? `${plural(m.episodes, "episode")}${m.seasons > 1 ? ` · ${m.seasons} seasons` : ""}` : (m.year || "")))));
     };
@@ -490,7 +784,7 @@ const Catalog = {
     this.box().replaceChildren(
       h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, isShows ? "TV shows" : "Movies"),
         h("p", { class: "hint" }, plural(items.length, isShows ? "show" : "movie"))), q),
-      items.length ? list : this.empty(isShows ? "TV shows" : "movies"));
+      items.length ? bar.el : null, shelf, items.length ? list : this.empty(isShows ? "TV shows" : "movies"));
     if (items.length) draw();
     this.cameFrom = isShows ? "#/shows" : "#/movies";
     document.title = `${isShows ? "TV shows" : "Movies"} – Hush`;
@@ -515,9 +809,10 @@ const Catalog = {
         h("ul", { class: "eps" }, ...eps.map((e) => h("li", { class: "ep" },
           h("a", { class: "thumb", href: `#/title/${e.media_key}` }, e.art_url ? h("img", { src: e.art_url, alt: "", loading: "lazy" }) : null),
           h("div", {}, h("div", { class: "ep-title" }, h("a", { href: `#/title/${e.media_key}` }, `E${e.episode}${e.title ? ` · ${e.title}` : ""}`),
+            e.watched ? h("span", { class: "hint", style: "margin-left:.5rem" }, "✓ Watched") : e.position ? h("span", { class: "hint", style: "margin-left:.5rem" }, `Resume ${fmt(e.position)}`) : null,
             e.scanned ? h("span", { class: "badge", style: "margin-left:.5rem", title: "Language filter is ready" }, icon("hush", ""), "Filter ready") : null),
             e.overview ? h("div", { class: "ep-sub" }, e.overview) : null),
-          h("a", { class: "btn subtle", href: `#/p/${e.source_id}/${e.item_id}` }, "Play")))))));
+          h("a", { class: "btn subtle", href: `#/p/${e.source_id}/${e.item_id}` }, e.position && !e.watched ? "Resume" : "Play")))))));
   },
 
   async scanAll(episodes) {
@@ -544,7 +839,13 @@ const Catalog = {
           h("div", { class: "facts" }, ...[m.kind === "movie" ? m.genres?.join(", ") : "", mins(m.runtime), m.rating ? `★ ${Number(m.rating).toFixed(1)}` : ""].filter(Boolean).map((t) => h("span", {}, t))),
           m.overview ? h("p", { class: "overview" }, m.overview) : h("p", { class: "hint" }, "No summary yet."),
           h("div", { class: "actions" },
-            h("a", { class: "btn primary", href: `#/p/${m.source_id}/${m.item_id}` }, "Play"),
+            h("a", { class: "btn primary", href: `#/p/${m.source_id}/${m.item_id}` }, m.position && !m.watched ? `Resume from ${fmt(m.position)}` : "Play"),
+            h("button", { class: "btn ghost", type: "button", onclick: async () => {
+              try {
+                await api(`/api/progress/${key}/watched`, { method: "POST", body: { watched: !m.watched, source_id: m.source_id, item_id: m.item_id, title: m.title } });
+                toast(m.watched ? "Marked as not watched" : "Marked as watched"); this.open("title", key);
+              } catch (err) { toast(err.message); }
+            } }, m.watched ? "Mark as not watched" : "Mark as watched"),
             m.scanned ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", ""), "Filter ready")
               : h("button", { class: "btn subtle", type: "button", onclick: async (ev) => {
                 ev.currentTarget.disabled = true;
@@ -788,12 +1089,17 @@ const Player = {
     this.close(false);
     this.src = sourceId; this.item = itemId; this.triedTranscode = false;
     Queue.sync(sourceId, itemId);
+    this.chan = Queue.list[Queue.pos]?.chan || null; this.reported = null;
+    const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
+    $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
+    $("#guide-btn").hidden = !this.chan; guide.close();
+    if (this.chan) Queue.banner();
     $("#library").hidden = true; $("#player").hidden = false;
     document.body.style.overflow = "hidden";
     this.message("Opening…");
     try {
       this.info = await api(`/api/media/${sourceId}/${itemId}`);
-    } catch (err) { this.message(err.message, true); return; }
+    } catch (err) { this.report(false); this.message(err.message, true); return; }
     const info = this.info;
     this.duration = info.probe.duration || 0;
     this.mode = info.mode;
@@ -807,7 +1113,13 @@ const Player = {
     this.setupTracks();
     this.applyFilterButton();
     $("#mode-select").value = this.bleep ? "bleep" : "mute";
-    this.startAt(0, true);
+    $("#autoplay-toggle").checked = autoplay();
+    const resumeAt = info.resume && !info.resume.finished && info.resume.position > 20 ? info.resume.position : 0;
+    this.startAt(resumeAt, true);
+    if (resumeAt) this.showResume(resumeAt);
+    if (autoplay()) {          // a browser may refuse to start with sound until the person has pressed play once
+      video.play().catch(() => this.message("Press play to start"));
+    }
     await this.loadFilter();
     this.job = info.job;
     if (this.job) Jobs.poll();
@@ -815,6 +1127,8 @@ const Player = {
   },
 
   close(goBack = true) {
+    Progress.save(true); Progress.disarm();
+    $("#resume-chip").hidden = true;
     video.pause(); video.removeAttribute("src"); video.load();
     this.subCues = null; $("#subs").replaceChildren();
     this.filter = null; this.ranges = []; this.markStart = null; this.selected = null;
@@ -823,7 +1137,7 @@ const Player = {
     document.body.style.overflow = "";
     document.title = "Hush";
     if (document.fullscreenElement) document.exitFullscreen();
-    if (goBack) history.length > 1 ? history.back() : go("#/");
+    if (goBack) go(S.libraryHash || "#/");        // back to the library, not to whatever was open before
   },
 
   setupTracks() {
@@ -847,11 +1161,35 @@ const Player = {
     return `/api/stream/${this.src}/${this.item}?${q}`;
   },
 
+  hls: IS_WEBKIT, hlsSig: "", hlsTimer: null,
+  /** True when the server (not the browser) is muting the filtered words. */
+  serverMuted() { return this.hls && this.mode !== "direct"; },
+  sig() {
+    return `${+this.filterOn}|${[...this.cats].sort()}|${this.ranges.map((r) => `${r.id}:${r.start}:${r.end}:${+r.enabled}`).join(",")}`;
+  },
+  hlsUrl(start) {
+    this.hlsSig = this.sig();
+    const q = new URLSearchParams({ start: start.toFixed(3), tab: TAB, filter: +this.filterOn, cats: [...this.cats].join(",") });
+    if (this.audioIndex != null) q.set("audio", this.audioIndex);
+    q.set("mode", this.mode);
+    return `/api/hls/start/${this.src}/${this.item}?${q}`;
+  },
+  /** The filter or its words changed: rebuild the stream so the server mutes the right moments. */
+  queueHlsRefresh(delay = 1500) {
+    if (!this.serverMuted() || !this.info || this.info.live) return;
+    clearTimeout(this.hlsTimer);
+    this.hlsTimer = setTimeout(() => {
+      if (this.serverMuted() && this.sig() !== this.hlsSig) this.startAt(this.now()).then(() => video.play().catch(() => {}));
+    }, delay);
+  },
+
   async startAt(t, initial = false) {
     const wasPlaying = !video.paused || initial;
     if (this.mode === "direct") {
-      if (initial) video.src = `/api/raw/${this.src}/${this.item}`;
-      else video.currentTime = t;
+      if (initial) {
+        video.src = `/api/raw/${this.src}/${this.item}`;
+        if (t > 0.2) video.addEventListener("loadedmetadata", () => { video.currentTime = t; }, { once: true });
+      } else video.currentTime = t;
       this.offset = 0;
     } else {
       let landing = t;
@@ -860,9 +1198,9 @@ const Player = {
       }
       this.offset = landing;
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
-      video.src = this.streamUrl(landing);
+      video.src = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
     }
-    this.message(null);
+    this.message(this.serverMuted() || this.info?.live ? "Preparing the stream…" : null);
     this.Audio.reset();
     if (wasPlaying && !initial) video.play().catch(() => {});
   },
@@ -907,7 +1245,8 @@ const Player = {
     ctx: null, mute: null, master: null, toneGain: null, scheduled: new Set(), timer: null, fallback: false,
     ensure() {
       if (this.ctx || this.fallback) { this.ctx?.resume(); return; }
-      try {
+      if (IS_WEBKIT) this.fallback = true;     // WebKit's Web Audio is silent for HLS, so it is not used at all
+      else try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
         const source = ctx.createMediaElementSource(video);
         this.mute = ctx.createGain(); this.master = ctx.createGain(); this.toneGain = ctx.createGain();
@@ -926,12 +1265,14 @@ const Player = {
     },
     volume(v) { if (this.master) this.master.gain.value = v; else video.volume = v; },
     set(muted, at) {
+      if (Player.serverMuted()) { video.muted = false; return; }
       if (!this.ctx) { video.muted = muted; return; }
       const when = at ?? this.ctx.currentTime;
       this.mute.gain.setTargetAtTime(muted ? 0 : 1, when, 0.004);
       this.toneGain.gain.setTargetAtTime(muted && Player.bleep ? 0.12 : 0, when, 0.004);
     },
     reset() {
+      if (Player.serverMuted()) { Player.queueHlsRefresh(); return; }
       Player._iv = null;
       this.scheduled.clear();
       if (this.ctx) {
@@ -942,6 +1283,7 @@ const Player = {
     },
     tick() {
       const P = Player;
+      if (P.serverMuted()) return;
       if (!P.filterOn || video.paused || !P.intervals().length) {
         if (this.scheduled.size || (this.ctx ? this.mute.gain.value < 1 : video.muted)) { this.scheduled.clear(); this.set(false); }
         return;
@@ -965,6 +1307,21 @@ const Player = {
   },
 
   /* ---------- UI ---------- */
+  showResume(at) {
+    const chip = $("#resume-chip");
+    $("#resume-text").textContent = `Resumed at ${fmt(at)}`;
+    chip.hidden = false;
+    clearTimeout(this.chipTimer);
+    this.chipTimer = setTimeout(() => { chip.hidden = true; }, 9000);
+  },
+
+  /** Tell the server whether a Live TV channel played, so dead ones can be hidden. */
+  report(ok) {
+    if (!this.chan || this.reported === ok) return;
+    this.reported = ok;
+    api(`/api/live/channels/${this.chan}/report`, { method: "POST", body: { ok } }).catch(() => {});
+  },
+
   message(text, isError = false) {
     const m = $("#stage-msg");
     m.hidden = !text; m.textContent = text || ""; m.classList.toggle("error", isError);
@@ -1124,7 +1481,7 @@ const Player = {
       try {
         this.filter = await api(`/api/filters/${this.info.media_key}`, { method: "PUT",
           body: { source_id: this.src, item_id: this.item, title: this.info.title, duration: this.duration, ranges: this.ranges } });
-        this.ranges = this.filter.ranges; this.renderMarks();
+        this.ranges = this.filter.ranges; this.renderMarks(); this.queueHlsRefresh(200);
       } catch (err) { toast(`Couldn't save: ${err.message}`); }
     }, 600);
   },
@@ -1240,7 +1597,11 @@ video.addEventListener("pause", () => { $("#player").classList.remove("playing")
 video.addEventListener("seeked", () => Player.Audio.reset());
 video.addEventListener("ratechange", () => Player.Audio.reset());
 video.addEventListener("waiting", () => Player.Audio.reset());
-video.addEventListener("playing", () => { Player.message(null); Player.Audio.reset(); });
+video.addEventListener("playing", () => { Player.message(null); Player.Audio.reset(); Player.report(true); if (!Progress.armed) Progress.arm(); });
+video.addEventListener("pause", () => { if (!video.ended) Progress.save(true); });
+$("#resume-restart").addEventListener("click", () => {
+  $("#resume-chip").hidden = true; Player.seek(0); setTimeout(() => Progress.save(true), 600);
+});
 function applyPendingSeek() {  // live streams start on a keyframe; skip the few seconds before the target
   const ps = Player.pendingSeek;
   if (ps == null || video.readyState < 2) return;
@@ -1252,7 +1613,11 @@ function applyPendingSeek() {  // live streams start on a keyframe; skip the few
   }
 }
 ["progress", "canplay", "timeupdate"].forEach((ev) => video.addEventListener(ev, applyPendingSeek));
-video.addEventListener("ended", () => { $("#player").classList.remove("playing"); if (!Player.info?.live) Queue.next(true); });
+video.addEventListener("ended", () => {
+  $("#player").classList.remove("playing"); Progress.save(true, true);
+  if (autoplay() && !Player.info?.live) Queue.next(true);
+});
+$("#autoplay-toggle").addEventListener("change", (e) => { store.set("autoplay", e.target.checked); toast(e.target.checked ? "Autoplay on" : "Autoplay off"); });
 video.addEventListener("error", () => {
   if (!Player.info) return;
   if (Player.mode === "direct") {           // the browser refused the original: fall back to a live stream
@@ -1266,6 +1631,7 @@ video.addEventListener("error", () => {
     Player.startAt(Player.now()).then(() => video.play().catch(() => {}));
     return;
   }
+  Player.report(false);
   const code = video.error?.code ? ` (error ${video.error.code})` : "";
   const safari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
   Player.message(safari && Player.mode !== "direct"
@@ -1364,12 +1730,18 @@ document.addEventListener("keydown", (e) => {
   if ($("#player").hidden || e.target.matches("input:not([type=checkbox]):not([type=range]), select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
   if (document.querySelector("dialog[open]")) return;
   const k = e.key.toLowerCase();
+  if (Player.chan) {                                          // Live TV: use the keyboard like a remote control
+    if (/^[0-9]$/.test(k)) { e.preventDefault(); Queue.digit(k); idle.bump(); return; }
+    const zapKeys = { arrowup: () => Queue.zap(-1), pageup: () => Queue.zap(-1), arrowdown: () => Queue.zap(1), pagedown: () => Queue.zap(1),
+      b: () => Queue.recall(), g: () => guide.toggle(), i: () => Queue.banner() };
+    if (zapKeys[k]) { e.preventDefault(); zapKeys[k](); idle.bump(); return; }
+  }
   const map = {
     n: () => Queue.next(), p: () => Queue.prev(), s: () => Queue.toggleShuffle(), r: () => Queue.cycleRepeat(),
     " ": togglePlay, k: togglePlay, f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10), l: () => Player.seek(Player.now() + 10),
     arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10),
-    escape: () => (!$("#panel").hidden ? togglePanel(false) : !$("#settings").hidden ? ($("#settings").hidden = true) : null),
+    escape: () => (!$("#guide").hidden ? guide.close() : !$("#panel").hidden ? togglePanel(false) : !$("#settings").hidden ? ($("#settings").hidden = true) : null),
   };
   if (e.target === $("#timeline") && (k === "arrowleft" || k === "arrowright")) return;
   if (map[k]) { e.preventDefault(); map[k](); idle.bump(); }
@@ -1381,11 +1753,12 @@ async function route() {
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   const [view, src, id] = [parts[0], parts[1], parts.slice(2).join("/")];
   $("#tasks").hidden = view !== "tasks";
+  if (view !== "p") S.libraryHash = location.hash || "#/";
   if (view === "p" && src && id) { Player.open(src, id); return; }
   if (!$("#player").hidden) Player.close(false);
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   $("#library").hidden = false;
-  const inCatalog = ["movies", "shows", "show", "title"].includes(view);
+  const inCatalog = ["movies", "shows", "show", "title", "live"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;
   $$("#rail-links a").forEach((a) => { if (!inCatalog) a.removeAttribute("aria-current"); });
   if (inCatalog) { Catalog.open(view, src); return; }

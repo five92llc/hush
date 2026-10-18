@@ -28,7 +28,7 @@ def parse(text: str, base: str | None = None) -> list[dict]:
     if text.lstrip().lower().startswith("[playlist]"):
         return _parse_pls(text, base)
     out: list[dict] = []
-    title, group = "", ""
+    title, group, logo, tvg_id = "", "", "", ""
     sticky_group = ""
     for raw in text.splitlines():
         line = raw.strip()
@@ -39,12 +39,13 @@ def parse(text: str, base: str | None = None) -> list[dict]:
             _, _, tail = _QUOTED.sub('""', line).partition(",")
             title = tail.strip() or attrs.get("tvg-name", "")
             group = attrs.get("group-title", "")
+            logo, tvg_id = attrs.get("tvg-logo", ""), attrs.get("tvg-id", "")
         elif line.upper().startswith("#EXTGRP:"):
             sticky_group = line.split(":", 1)[1].strip()
         elif not line.startswith("#"):
             out.append({"title": title, "url": urljoin(base, line) if base else line,
-                        "group": group or sticky_group})
-            title, group = "", ""
+                        "group": group or sticky_group, "logo": logo, "tvg_id": tvg_id})
+            title, group, logo, tvg_id = "", "", "", ""
     return out
 
 

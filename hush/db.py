@@ -5,6 +5,7 @@ import json
 import sqlite3
 import threading
 import time
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -88,6 +89,40 @@ CREATE TABLE IF NOT EXISTS renames (
     undone      INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS renames_batch ON renames(batch);
+CREATE TABLE IF NOT EXISTS progress (
+    media_key   TEXT PRIMARY KEY,
+    source_id   TEXT NOT NULL,
+    item_id     TEXT NOT NULL,
+    title       TEXT,
+    position    REAL NOT NULL DEFAULT 0,   -- seconds; 0 once finished
+    duration    REAL,
+    finished    INTEGER DEFAULT 0,
+    updated_at  REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS progress_recent ON progress(finished, updated_at);
+CREATE TABLE IF NOT EXISTS playlists (
+    id          TEXT PRIMARY KEY,
+    name        TEXT NOT NULL,
+    url         TEXT NOT NULL,
+    channels    INTEGER DEFAULT 0,
+    updated_at  REAL,
+    error       TEXT
+);
+CREATE TABLE IF NOT EXISTS channels (
+    chan_key    TEXT PRIMARY KEY,    -- hash of the stream address
+    playlist    TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    letter      TEXT,                -- first letter or digit, for the A-Z picker
+    grp         TEXT,                -- ";News;Sport;" so one channel can be in several groups
+    logo        TEXT,
+    url         TEXT NOT NULL,
+    item_id     TEXT NOT NULL,       -- how the player opens it
+    position    INTEGER DEFAULT 0,
+    favorite    INTEGER DEFAULT 0,
+    failures    INTEGER DEFAULT 0,   -- playback failures in a row; two hide the channel
+    last_ok     REAL
+);
+CREATE INDEX IF NOT EXISTS channels_playlist ON channels(playlist);
 CREATE TABLE IF NOT EXISTS sources (
     id          TEXT PRIMARY KEY,
     data        TEXT NOT NULL        -- JSON source definition
@@ -99,6 +134,27 @@ CREATE TABLE IF NOT EXISTS settings (
 """
 
 
+def letter_of(name: str, skip_articles: bool = False) -> str:
+    """The bucket a title files under in the A-Z / 0-9 picker: its first letter or digit,
+    ignoring leading symbols and accents. Anything else (other alphabets) files under "*"."""
+    text = (name or "").strip()
+    if skip_articles:
+        low = text.lower()
+        for art in ("the ", "a ", "an "):
+            if low.startswith(art) and len(text) > len(art):
+                text = text[len(art):]
+                break
+    for ch in text:
+        if ch.isdigit() and ch.isascii():
+            return ch
+        base = unicodedata.normalize("NFKD", ch)[:1].upper()
+        if "A" <= base <= "Z":
+            return base
+        if ch.isalnum():
+            return "*"
+    return "*"
+
+
 class DB:
     def __init__(self, path: Path):
         self._lock = threading.RLock()
@@ -106,7 +162,17 @@ class DB:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(SCHEMA)
+        self._migrate()
         self._conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring databases made by an older version up to date."""
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(channels)")}
+        if "letter" not in cols:
+            self._conn.execute("ALTER TABLE channels ADD COLUMN letter TEXT")
+            self._conn.executemany("UPDATE channels SET letter=? WHERE chan_key=?",
+                                   [(letter_of(n), k) for k, n in self._conn.execute("SELECT chan_key, name FROM channels")])
+        self._conn.execute("CREATE INDEX IF NOT EXISTS channels_letter ON channels(letter)")
 
     def _exec(self, sql: str, args: tuple = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -289,22 +355,27 @@ class DB:
                          "WHERE m.media_key IS NULL ORDER BY l.title LIMIT ?", (limit,))
 
     def list_movies(self) -> list[dict]:
-        rows = self._all("SELECT m.*, (f.media_key IS NOT NULL) AS scanned FROM meta m "
-                         "LEFT JOIN filters f ON f.media_key=m.media_key WHERE m.kind='movie' "
+        rows = self._all("SELECT m.*, (f.media_key IS NOT NULL) AS scanned, p.position, p.duration, "
+                         "COALESCE(p.finished,0) AS watched FROM meta m "
+                         "LEFT JOIN filters f ON f.media_key=m.media_key "
+                         "LEFT JOIN progress p ON p.media_key=m.media_key WHERE m.kind='movie' "
                          "ORDER BY lower(m.title), m.year")
         return [self._decode(r) for r in rows]
 
     def list_shows(self) -> list[dict]:
         rows = self._all(
             "SELECT s.*, COUNT(m.media_key) AS episodes, COUNT(DISTINCT m.season) AS seasons, "
-            "SUM(f.media_key IS NOT NULL) AS scanned FROM shows s "
+            "SUM(f.media_key IS NOT NULL) AS scanned, SUM(COALESCE(p.finished,0)) AS watched FROM shows s "
             "LEFT JOIN meta m ON m.show_key=s.show_key LEFT JOIN filters f ON f.media_key=m.media_key "
+            "LEFT JOIN progress p ON p.media_key=m.media_key "
             "GROUP BY s.show_key ORDER BY lower(s.title)")
         return [self._decode(r) for r in rows]
 
     def episodes_of(self, show_key: str) -> list[dict]:
-        rows = self._all("SELECT m.*, (f.media_key IS NOT NULL) AS scanned FROM meta m "
-                         "LEFT JOIN filters f ON f.media_key=m.media_key WHERE m.show_key=? "
+        rows = self._all("SELECT m.*, (f.media_key IS NOT NULL) AS scanned, p.position, p.duration, "
+                         "COALESCE(p.finished,0) AS watched FROM meta m "
+                         "LEFT JOIN filters f ON f.media_key=m.media_key "
+                         "LEFT JOIN progress p ON p.media_key=m.media_key WHERE m.show_key=? "
                          "ORDER BY m.season, m.episode", (show_key,))
         return [self._decode(r) for r in rows]
 
@@ -324,6 +395,140 @@ class DB:
             c.execute("UPDATE library_items SET media_key=?, source_id=?, item_id=? WHERE media_key=?",
                       (new, source_id, item_id, old))
             c.commit()
+
+    # ---- playback progress ----------------------------------------------------------------
+    MIN_RESUME = 20.0        # earlier than this is "not started"
+    FINISHED_AT = 0.92       # past this share of the length (or, in a long title, within 90 s of the end) it counts as watched
+
+    def save_progress(self, key: str, source_id: str, item_id: str, title: str, position: float, duration: float | None) -> dict:
+        position = max(0.0, position)
+        duration = duration if duration and duration > 0 else None
+        if duration and (position >= duration * self.FINISHED_AT or (duration > 600 and duration - position < 90)):
+            state = {"position": 0.0, "finished": 1}
+        elif position < self.MIN_RESUME:
+            self._exec("DELETE FROM progress WHERE media_key=? AND finished=0", (key,))     # started over
+            return {"position": 0.0, "finished": 0}
+        else:
+            state = {"position": position, "finished": 0}
+        self._exec("INSERT INTO progress(media_key,source_id,item_id,title,position,duration,finished,updated_at) "
+                   "VALUES(?,?,?,?,?,?,?,?) ON CONFLICT(media_key) DO UPDATE SET position=excluded.position, "
+                   "duration=COALESCE(excluded.duration, duration), finished=excluded.finished, title=excluded.title, "
+                   "updated_at=excluded.updated_at",
+                   (key, source_id, item_id, title, state["position"], duration, state["finished"], time.time()))
+        return state
+
+    def get_progress(self, key: str) -> dict | None:
+        return self._one("SELECT * FROM progress WHERE media_key=?", (key,))
+
+    def progress_map(self, keys: list[str]) -> dict[str, dict]:
+        if not keys:
+            return {}
+        out = {}
+        for i in range(0, len(keys), 500):
+            chunk = keys[i:i + 500]
+            for r in self._all(f"SELECT * FROM progress WHERE media_key IN ({','.join('?' * len(chunk))})", tuple(chunk)):
+                out[r["media_key"]] = r
+        return out
+
+    def recent_progress(self, limit: int = 20) -> list[dict]:
+        return self._all("SELECT * FROM progress WHERE finished=0 AND position>=? ORDER BY updated_at DESC LIMIT ?",
+                         (self.MIN_RESUME, limit))
+
+    def clear_progress(self, key: str) -> None:
+        self._exec("DELETE FROM progress WHERE media_key=?", (key,))
+
+    # ---- live TV ------------------------------------------------------------------------
+    def list_playlists(self) -> list[dict]:
+        return self._all("SELECT * FROM playlists ORDER BY name")
+
+    def get_playlist(self, pid: str) -> dict | None:
+        return self._one("SELECT * FROM playlists WHERE id=?", (pid,))
+
+    def save_playlist(self, pid: str, name: str, url: str) -> None:
+        self._exec("INSERT INTO playlists(id,name,url) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url",
+                   (pid, name, url))
+
+    def playlist_status(self, pid: str, count: int | None, error: str | None) -> None:
+        self._exec("UPDATE playlists SET channels=COALESCE(?,channels), updated_at=?, error=? WHERE id=?",
+                   (count, time.time(), error, pid))
+
+    def delete_playlist(self, pid: str) -> None:
+        self._exec("DELETE FROM channels WHERE playlist=?", (pid,))
+        self._exec("DELETE FROM playlists WHERE id=?", (pid,))
+
+    def replace_channels(self, pid: str, rows: list[tuple]) -> int:
+        """rows = (chan_key, name, grp, logo, url, item_id). Favorites and failure counts of channels that
+        are still in the list are kept. Returns the channel count."""
+        with self._lock:
+            c = self._conn
+            keep = {r[0]: (r[1], r[2], r[3]) for r in c.execute(
+                "SELECT chan_key, favorite, failures, last_ok FROM channels WHERE playlist=?", (pid,))}
+            c.execute("DELETE FROM channels WHERE playlist=?", (pid,))
+            c.executemany(
+                "INSERT OR REPLACE INTO channels(chan_key,playlist,name,letter,grp,logo,url,item_id,position,favorite,failures,last_ok) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                [(k, pid, n, letter_of(n), g, lg, u, i, pos, *(keep.get(k) or (0, 0, None)))
+                 for pos, (k, n, g, lg, u, i) in enumerate(rows)])
+            c.commit()
+        return len(rows)
+
+    @staticmethod
+    def _channel_filter(q: str, group: str, favorites: bool, hide_dead: bool, letter: str = "", recent: bool = False):
+        sql, args = ["WHERE 1=1"], []
+        if q:
+            sql.append("AND name LIKE ?"); args.append(f"%{q}%")
+        if group:
+            sql.append("AND grp LIKE ?"); args.append(f"%;{group};%")
+        if letter:
+            sql.append("AND letter=?"); args.append(letter)
+        if favorites:
+            sql.append("AND favorite=1")
+        if recent:
+            sql.append("AND last_ok IS NOT NULL")
+        if hide_dead:
+            sql.append("AND failures<2")
+        return " ".join(sql), args
+
+    def list_channels(self, q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,
+                      limit: int = 120, offset: int = 0, letter: str = "", recent: bool = False) -> list[dict]:
+        where, args = self._channel_filter(q, group, favorites, hide_dead, letter, recent)
+        order = "last_ok DESC" if recent else "lower(name), position"
+        return self._all(f"SELECT * FROM channels {where} ORDER BY {order} LIMIT ? OFFSET ?", (*args, limit, offset))
+
+    def count_channels(self, q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,
+                       letter: str = "", recent: bool = False) -> int:
+        where, args = self._channel_filter(q, group, favorites, hide_dead, letter, recent)
+        return self._one(f"SELECT COUNT(*) n FROM channels {where}", tuple(args))["n"]
+
+    def letter_counts(self, q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True) -> dict[str, int]:
+        """How many channels start with each letter, under the current filters (but not the letter itself)."""
+        where, args = self._channel_filter(q, group, favorites, hide_dead)
+        return {r["letter"]: r["n"] for r in self._all(
+            f"SELECT letter, COUNT(*) n FROM channels {where} GROUP BY letter", tuple(args)) if r["letter"]}
+
+    def channel_groups(self) -> list[dict]:
+        counts: dict[str, int] = {}
+        for r in self._all("SELECT grp FROM channels WHERE failures<2"):
+            for g in (r["grp"] or "").split(";"):
+                if g:
+                    counts[g] = counts.get(g, 0) + 1
+        return [{"name": g, "count": n} for g, n in sorted(counts.items(), key=lambda kv: kv[0].lower())]
+
+    def channel_stats(self) -> dict:
+        r = self._one("SELECT COUNT(*) total, SUM(failures>=2) dead, SUM(favorite=1) favorites FROM channels")
+        return {"total": r["total"] or 0, "dead": r["dead"] or 0, "favorites": r["favorites"] or 0}
+
+    def get_channel(self, key: str) -> dict | None:
+        return self._one("SELECT * FROM channels WHERE chan_key=?", (key,))
+
+    def set_favorite(self, key: str, on: bool) -> None:
+        self._exec("UPDATE channels SET favorite=? WHERE chan_key=?", (int(on), key))
+
+    def report_channel(self, key: str, ok: bool) -> None:
+        if ok:
+            self._exec("UPDATE channels SET failures=0, last_ok=? WHERE chan_key=?", (time.time(), key))
+        else:
+            self._exec("UPDATE channels SET failures=failures+1 WHERE chan_key=?", (key,))
 
     # ---- rename journal --------------------------------------------------------------
     def journal(self, batch: str, source_id: str, kind: str, src: str, dst: str) -> int:

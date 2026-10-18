@@ -43,6 +43,7 @@
       <nav id="rail-links" class="rail-links" aria-label="Library">
         <a href="#/movies">Movies</a>
         <a href="#/shows">TV shows</a>
+        <a href="#/live">Live TV</a>
       </nav>
       <ul id="source-list" class="source-list"></ul>
       <button id="add-source-btn" class="btn subtle wide" type="button">Add a source</button>
@@ -63,6 +64,7 @@
         <input id="filter-input" class="search" type="search" placeholder="Find in this folder" aria-label="Find in this folder">
         <button id="scan-all-btn" class="btn subtle" type="button" title="Scan every title in this folder and the folders inside it">Scan all</button>
       </div>
+      <div id="folder-letters"></div>
       <ul id="entries" class="entries" aria-live="polite"></ul>
       <div id="browser-empty" class="empty" hidden></div>
     </div>
@@ -87,6 +89,16 @@
       </div>
       <div id="subs" class="subs" aria-live="off"></div>
       <div id="stage-msg" class="stage-msg" hidden></div>
+      <div id="chan-banner" class="chan-banner" hidden>
+        <img id="cb-logo" alt="" hidden>
+        <div><div class="cb-top"><span id="cb-num" class="cb-num"></span><span id="cb-name" class="cb-name"></span></div>
+          <div id="cb-sub" class="cb-sub"></div></div>
+      </div>
+      <div id="chan-entry" class="chan-entry" hidden></div>
+      <div id="resume-chip" class="resume-chip" hidden>
+        <span id="resume-text"></span>
+        <button id="resume-restart" class="btn subtle" type="button">Start over</button>
+      </div>
       <button id="back-btn" class="btn ghost back" type="button">Back to library</button>
     </div>
 
@@ -132,6 +144,7 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path d="M16 8.5a5 5 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2"/></svg>
           <input id="volume" type="range" min="0" max="1" step="0.02" value="1">
         </label>
+        <button id="guide-btn" class="btn subtle" type="button" aria-controls="guide" aria-expanded="false" title="Channel list (G)" hidden>Channels</button>
         <button id="panel-btn" class="btn subtle" type="button" aria-controls="panel" aria-expanded="false">Language</button>
         <button id="settings-btn" class="icon-btn" type="button" aria-label="Audio and subtitles" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 13h4M12 13h6M6 16h8"/></svg>
@@ -143,6 +156,7 @@
       <div id="settings" class="settings" hidden>
         <label>Audio track <select id="audio-select"></select></label>
         <label>Subtitles <select id="sub-select"><option value="">Off</option></select></label>
+        <label class="check"><input id="autoplay-toggle" type="checkbox" checked> Autoplay: start a title when it opens and go on to the next one</label>
         <label>When filtering
           <select id="mode-select">
             <option value="mute">Mute the word</option>
@@ -151,6 +165,17 @@
         </label>
       </div>
     </div>
+
+    <!-- Channel list (Live TV) -->
+    <aside id="guide" class="panel guide" hidden aria-label="Channels">
+      <div class="panel-head">
+        <h2>Channels</h2>
+        <button id="guide-close" class="icon-btn" type="button" aria-label="Close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+      </div>
+      <ol id="guide-list" class="guide-list"></ol>
+    </aside>
 
     <!-- Language panel -->
     <aside id="panel" class="panel" hidden aria-label="Language filter">

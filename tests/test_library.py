@@ -354,3 +354,16 @@ def test_flat_layout_puts_everything_in_the_source_folder(rename_env):
     assert not (root / "Uncharted (2022) [1080p] [BluRay]").exists()      # the emptied folder was removed
     assert r.plan("m")["groups"] == []
     assert r.undo(res["batch"])["problems"] == [] and _tree(root) == before
+
+
+def test_library_cards_carry_watched_and_progress(lib_service):
+    svc, db = lib_service
+    svc.process_library()
+    movie = next(m for m in db.list_movies())
+    db.save_progress(movie["media_key"], movie["source_id"], movie["item_id"], movie["title"], 100.0, 1000.0)
+    again = next(m for m in db.list_movies() if m["media_key"] == movie["media_key"])
+    assert (again["position"], again["duration"], again["watched"]) == (100.0, 1000.0, 0)
+    for s in db.list_shows():
+        eps = db.episodes_of(s["show_key"])
+        db.save_progress(eps[0]["media_key"], eps[0]["source_id"], eps[0]["item_id"], "e", 1000.0, 1000.0)
+        assert next(x for x in db.list_shows() if x["show_key"] == s["show_key"])["watched"] == 1
