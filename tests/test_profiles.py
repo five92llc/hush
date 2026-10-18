@@ -1,0 +1,252 @@
+"""Profiles: names only, per-profile data, and a kids profile that only sees vetted titles."""
+import json
+import sqlite3
+
+import pytest
+from fastapi.testclient import TestClient
+
+from hush.app import create_app
+from hush.config import Config
+from hush.profiles import approved, cert_level
+from hush.sources import media_key
+from hush.sources.base import enc
+
+
+@pytest.fixture()
+def env(tmp_path):
+    cfg = Config(password="", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir(); cfg.cache_dir.mkdir()
+    app = create_app(cfg)
+    db = app.state.db
+
+    def movie(name, flags=None, cert=None, scanned=True):
+        key = media_key("lib", enc(name))
+        db.save_meta({"media_key": key, "source_id": "lib", "item_id": enc(name), "kind": "movie", "title": name, "year": 2020,
+                      "provider": "nfo", "cert": cert})
+        if scanned:
+            ranges = [{"id": f"{i}", "start": i, "end": i + 1, "words": ["x"], "category": cat, "context": "", "source": "auto", "enabled": True}
+                      for cat, n in (flags or {}).items() for i in range(n)]
+            db.save_filter(key, "lib", enc(name), name, 100.0, "whisper", ranges)
+        return key
+
+    keys = {"clean": movie("Clean Fun", cert="PG"), "mild": movie("Mild Words", {"mild": 2}), "swears": movie("Heavy Words", {"strong": 5}),
+            "unscanned": movie("Never Scanned", scanned=False), "rated": movie("Grown Up Stuff", cert="R")}
+    # a show: one clean episode, one flagged
+    db.save_show({"show_key": "sh1", "title": "The Show", "year": 2020, "provider": "nfo", "cert": "TV-PG"})
+    for n, flags in ((1, {}), (2, {"slurs": 1})):
+        key = media_key("lib", enc(f"ep{n}"))
+        db.save_meta({"media_key": key, "source_id": "lib", "item_id": enc(f"ep{n}"), "kind": "episode", "title": f"Ep {n}", "show_key": "sh1",
+                      "season": 1, "episode": n, "provider": "nfo"})
+        db.save_filter(key, "lib", enc(f"ep{n}"), f"Ep {n}", 100.0, "whisper",
+                       [{"id": "a", "start": 1, "end": 2, "words": ["x"], "category": c, "context": "", "source": "auto", "enabled": True} for c in flags])
+    c = TestClient(app)
+    return c, db, keys
+
+
+def make_kid(c, **settings):
+    r = c.post("/api/profiles", json={"name": "Sam", "kids": True, "settings": settings})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def as_profile(c, pid):
+    assert c.post("/api/profiles/select", json={"id": pid}).status_code == 200
+
+
+def test_rules_and_ratings():
+    assert [cert_level(x) for x in ("Rated PG-13", "US:TV-MA", "PG", "G", "Unrated", None, "junk")] == [2, 3, 1, 0, None, None, None]
+    kid = {"kids": True, "settings": {}}
+    assert approved(kid, {"scanned": True, "flags": "{}", "cert": "PG"})
+    assert not approved(kid, {"scanned": True, "flags": "{}", "cert": None})                # no rating: cannot be vouched for
+    assert approved({"kids": True, "settings": {"allow_unrated": True}}, {"scanned": True, "flags": "{}", "cert": None})
+    assert not approved(kid, {"scanned": True, "flags": '{"mild": 1}'})            # any flagged moment, by default
+    assert not approved(kid, {"scanned": False})                                    # never scanned: cannot be vouched for
+    assert not approved(kid, {"scanned": True, "flags": "{}", "cert": "R"})          # too mature
+    assert not approved(kid, None)                                                  # not in the library
+    assert approved({"kids": False}, None)                                          # grown-ups see everything
+    relaxed = {"kids": True, "settings": {"block": ["strong", "sexual", "slurs", "blasphemy"], "max_cert": 2}}
+    assert approved(relaxed, {"scanned": True, "flags": '{"mild": 4}', "cert": "PG-13"})   # mild language allowed here
+    assert not approved(relaxed, {"scanned": True, "flags": '{"strong": 1}'})
+    assert approved(kid, {"scanned": True, "flags": "{}", "cert": None, "show_cert": "TV-PG"})
+    assert not approved(kid, {"scanned": True, "flags": "{}", "cert": None, "show_cert": "TV-MA"})   # a show's rating covers its episodes
+
+
+def test_default_profile_and_picker(env):
+    c, db, _ = env
+    r = c.get("/api/profiles").json()
+    assert [p["name"] for p in r["profiles"]] == ["Main"] and r["needs_pick"] is False and r["can_manage"] is True
+    kid = make_kid(c)
+    assert kid["kids"] and kid["settings"]["max_hits"] == 0 and kid["settings"]["allow_live"] is False
+    fresh = TestClient(c.app)                                                        # a browser that has not chosen yet
+    assert fresh.get("/api/profiles").json()["needs_pick"] is True                   # two profiles: it must ask
+    assert c.post("/api/profiles", json={"name": "sam"}).status_code == 400          # names are unique
+    assert c.post("/api/profiles", json={"name": " "}).status_code == 400
+
+
+def test_kids_only_see_vetted_titles(env):
+    c, db, keys = env
+    adult_titles = {m["title"] for m in c.get("/api/library/movies").json()}
+    assert adult_titles == {"Clean Fun", "Mild Words", "Heavy Words", "Never Scanned", "Grown Up Stuff"}
+    kid = make_kid(c); as_profile(c, kid["id"])
+    assert [m["title"] for m in c.get("/api/library/movies").json()] == ["Clean Fun"]               # rated PG, scanned, clean
+    shows = c.get("/api/library/shows").json()
+    assert [(s["title"], s["episodes"]) for s in shows] == [("The Show", 1)]          # only the clean episode counts
+    eps = c.get("/api/library/shows/sh1").json()["episodes"]
+    assert [e["title"] for e in eps] == ["Ep 1"]
+    assert c.get(f"/api/library/title/{keys['clean']}").status_code == 200
+    for hidden in ("mild", "swears", "unscanned", "rated"):
+        assert c.get(f"/api/library/title/{keys[hidden]}").status_code == 404
+
+    # the server refuses what the buttons hide, even if someone types the address
+    item = enc("Heavy Words")
+    for url in (f"/api/media/lib/{item}", f"/api/raw/lib/{item}", f"/api/stream/lib/{item}", f"/api/hls/start/lib/{item}",
+                f"/api/filters/{keys['swears']}", f"/api/progress/{keys['swears']}"):
+        r = c.get(url) if "progress" not in url else c.post(url, json={"source_id": "lib", "item_id": item, "position": 50, "duration": 100})
+        assert r.status_code == 403, url
+    assert c.get(f"/api/filters/{keys['clean']}").status_code in (200, 404)           # fine to read a vetted title's filter
+    assert c.get(f"/api/media/lib/{enc('Clean Fun')}").status_code != 403              # and a vetted title is allowed through (the file is absent here)
+    for url in ("/api/tasks", "/api/jobs", "/api/notifications", "/api/rename/plan?source_id=lib", "/api/live/channels", "/api/library/settings",
+                "/api/transcript/abc.srt", "/api/browse/lib", "/api/open-url"):
+        assert c.get(url).status_code == 403, url
+    assert c.get("/api/sources").json() == []                                        # no folders to browse
+    assert c.post("/api/sources", json={"type": "local", "path": "/"}).status_code == 403
+    assert c.post("/api/analyze", json={"source_id": "lib", "item_id": item}).status_code == 403
+    assert c.post("/api/profiles", json={"name": "Hacker"}).status_code == 403       # kids cannot add profiles
+    assert c.put("/api/filters/x", json={}).status_code == 403
+    assert c.get("/api/art/" + keys["swears"] + ".jpg").status_code == 403
+    assert c.get("/api/progress/recent").json() == []
+
+
+def test_kids_settings_loosen_and_tighten(env):
+    c, db, keys = env
+    kid = make_kid(c, block=["strong", "sexual", "slurs", "blasphemy"], max_cert=5, hide_unscanned=False, allow_unrated=True)   # mild OK, any rating, unscanned OK
+    as_profile(c, kid["id"])
+    assert {m["title"] for m in c.get("/api/library/movies").json()} == {"Clean Fun", "Mild Words", "Never Scanned", "Grown Up Stuff"}
+    # a parent tightens it again
+    main = next(p for p in c.get("/api/profiles").json()["profiles"] if not p["kids"])
+    as_profile(c, main["id"])
+    assert c.put(f"/api/profiles/{kid['id']}", json={"settings": {"block": ["strong", "mild", "sexual", "slurs", "blasphemy"], "max_cert": 1, "hide_unscanned": True}}).status_code == 200
+    as_profile(c, kid["id"])
+    assert [m["title"] for m in c.get("/api/library/movies").json()] == ["Clean Fun"]
+
+
+def test_live_tv_is_off_for_kids_unless_allowed(env):
+    c, db, _ = env
+    kid = make_kid(c); as_profile(c, kid["id"])
+    assert c.get("/api/live/channels").status_code == 403
+    main = next(p for p in c.get("/api/profiles").json()["profiles"] if not p["kids"])
+    as_profile(c, main["id"])
+    c.put(f"/api/profiles/{kid['id']}", json={"settings": {"allow_live": True}})
+    as_profile(c, kid["id"])
+    assert c.get("/api/live/channels").status_code == 200
+    assert c.get("/api/live/playlists").status_code == 403                            # but managing playlists never
+
+
+def test_each_profile_has_its_own_progress_and_favorites(env):
+    c, db, keys = env
+    item = enc("Clean Fun"); key = keys["clean"]
+    save = lambda pos: c.post(f"/api/progress/{key}", json={"source_id": "lib", "item_id": item, "title": "Clean Fun", "position": pos, "duration": 3600})  # noqa: E731
+    main = next(p for p in c.get("/api/profiles").json()["profiles"] if not p["kids"])
+    other = c.post("/api/profiles", json={"name": "Alex"}).json()
+    save(1200)
+    as_profile(c, other["id"])
+    assert [r["title"] for r in c.get("/api/progress/recent").json()] == []           # Alex has watched nothing
+    save(300)
+    assert round(c.get("/api/progress/recent").json()[0]["position"]) == 300
+    as_profile(c, main["id"])
+    assert round(c.get("/api/progress/recent").json()[0]["position"]) == 1200          # Main's place is untouched
+
+    # favorites and "recently watched" channels
+    db.save_playlist("pl", "TV", "http://x/tv.m3u")
+    db.replace_channels("pl", [("ch1", "One", ";News;", "", "http://x/1", enc("http://x/1")), ("ch2", "Two", ";News;", "", "http://x/2", enc("http://x/2"))])
+    c.post("/api/live/channels/ch1/favorite", json={"favorite": True}); c.post("/api/live/channels/ch1/report", json={"ok": True})
+    assert [x["name"] for x in c.get("/api/live/channels?favorites=true").json()["channels"]] == ["One"]
+    as_profile(c, other["id"])
+    assert c.get("/api/live/channels?favorites=true").json()["total"] == 0
+    assert c.get("/api/live/channels?recent=true").json()["total"] == 0
+    c.post("/api/live/channels/ch2/favorite", json={"favorite": True})
+    assert [x["name"] for x in c.get("/api/live/channels?favorites=true").json()["channels"]] == ["Two"]
+
+
+def test_profile_management_rules(env):
+    c, db, _ = env
+    main = next(p for p in c.get("/api/profiles").json()["profiles"] if not p["kids"])
+    assert c.delete(f"/api/profiles/{main['id']}").status_code == 400                  # the last grown-up stays
+    assert c.put(f"/api/profiles/{main['id']}", json={"kids": True}).status_code == 400
+    kid = make_kid(c)
+    assert c.put(f"/api/profiles/{kid['id']}", json={"name": "Sammy", "color": "#E2735F"}).json()["name"] == "Sammy"
+    assert c.put(f"/api/profiles/{kid['id']}", json={"settings": {"max_hits": "lots"}}).status_code == 400
+    c.post(f"/api/progress/{media_key('lib', 'x')}", json={"source_id": "lib", "item_id": "x", "position": 90, "duration": 100})
+    assert c.delete(f"/api/profiles/{kid['id']}").status_code == 200
+    assert [p["name"] for p in c.get("/api/profiles").json()["profiles"]] == ["Main"]
+    for i in range(11):
+        assert c.post("/api/profiles", json={"name": f"P{i}"}).status_code == 200
+    assert c.post("/api/profiles", json={"name": "Too many"}).status_code == 400       # twelve is the limit
+
+
+def test_leaving_a_kids_profile_can_ask_for_the_hush_password(tmp_path):
+    cfg = Config(password="secret", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    assert c.post("/api/login", json={"password": "secret"}).status_code == 200
+    kid = make_kid(c)
+    main = next(p for p in c.get("/api/profiles").json()["profiles"] if not p["kids"])
+    assert c.put("/api/profiles/lock", json={"lock": True}).json() == {"lock": True}
+    as_profile(c, kid["id"])
+    assert c.post("/api/profiles/select", json={"id": main["id"]}).status_code == 403                       # a child cannot just switch back
+    assert c.post("/api/profiles/select", json={"id": main["id"], "password": "nope"}).status_code == 403
+    assert c.post("/api/profiles/select", json={"id": main["id"], "password": "secret"}).status_code == 200
+    assert c.get("/api/profiles").json()["current"]["id"] == main["id"]
+
+
+def test_existing_data_moves_into_the_first_profile(tmp_path):
+    """A database from before profiles keeps its progress and favorite channels, under the first profile."""
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("""
+        CREATE TABLE progress (media_key TEXT PRIMARY KEY, source_id TEXT NOT NULL, item_id TEXT NOT NULL, title TEXT,
+            position REAL NOT NULL DEFAULT 0, duration REAL, finished INTEGER DEFAULT 0, updated_at REAL NOT NULL);
+        INSERT INTO progress VALUES ('k1','lib','i1','Old Movie',555,3600,0,1.0);
+        CREATE TABLE channels (chan_key TEXT PRIMARY KEY, playlist TEXT NOT NULL, name TEXT NOT NULL, grp TEXT, logo TEXT,
+            url TEXT NOT NULL, item_id TEXT NOT NULL, position INTEGER DEFAULT 0, favorite INTEGER DEFAULT 0,
+            failures INTEGER DEFAULT 0, last_ok REAL);
+        INSERT INTO channels VALUES ('c1','pl','Fav One',';A;','','http://x/1','i',0,1,0,5.0);
+        INSERT INTO channels VALUES ('c2','pl','Plain','','', 'http://x/2','i',1,0,0,NULL);
+        CREATE TABLE filters (media_key TEXT PRIMARY KEY, source_id TEXT NOT NULL, item_id TEXT NOT NULL, title TEXT, duration REAL,
+            engine TEXT, data TEXT NOT NULL, updated_at REAL NOT NULL);
+        INSERT INTO filters VALUES ('k1','lib','i1','Old Movie',100,'whisper','[{"category":"mild"},{"category":"strong"},{"category":"mild"}]',1.0);
+    """)
+    old.commit(); old.close()
+    from hush.db import DB
+    db = DB(path)
+    first = db.list_profiles()[0]
+    assert first["name"] == "Main" and not first["kids"]
+    assert db.get_progress(first["id"], "k1")["position"] == 555
+    assert [c["name"] for c in db.list_channels(favorites=True, profile_id=first["id"])] == ["Fav One"]
+    assert [c["name"] for c in db.list_channels(recent=True, profile_id=first["id"])] == ["Fav One"]
+    assert db._one("SELECT flags FROM filters WHERE media_key='k1'")["flags"] == json.dumps({"mild": 2, "strong": 1})
+    assert DB(path).list_profiles()[0]["id"] == first["id"]                            # opening it again changes nothing
+
+
+def test_profile_pictures(env):
+    c, db, _ = env
+    info = c.get("/api/profiles").json()
+    assert "cat" in info["avatars"] and len(info["avatars"]) == 16 and info["profiles"][0]["avatar"] == ""     # existing profiles keep the initial
+    kid = c.post("/api/profiles", json={"name": "Mia", "kids": True, "avatar": "panda", "color": "#E2735F"}).json()
+    assert kid["avatar"] == "panda"
+    assert c.post("/api/profiles", json={"name": "Hax", "avatar": "<script>"}).status_code == 400            # only known pictures
+    assert c.put(f"/api/profiles/{kid['id']}", json={"avatar": "fox"}).json()["avatar"] == "fox"
+    assert c.put(f"/api/profiles/{kid['id']}", json={"name": "Mia R"}).json()["avatar"] == "fox"              # an edit that skips it keeps it
+    assert c.put(f"/api/profiles/{kid['id']}", json={"avatar": ""}).json()["avatar"] == ""                    # back to the initial letter
+    assert next(p for p in c.get("/api/profiles").json()["profiles"] if p["id"] == kid["id"])["avatar"] == ""
+
+
+def test_picture_column_is_added_to_older_databases(tmp_path):
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript("CREATE TABLE profiles (id TEXT PRIMARY KEY, name TEXT NOT NULL, kids INTEGER DEFAULT 0, color TEXT, settings TEXT, position INTEGER DEFAULT 0, created_at REAL);"
+                      "INSERT INTO profiles VALUES ('p1','Main',0,'#A99CF0','{}',0,1.0);")
+    old.commit(); old.close()
+    from hush.db import DB
+    db = DB(path)
+    assert db.get_profile("p1")["avatar"] is None or db.get_profile("p1")["avatar"] == ""
+    db.save_profile("p1", "Main", False, "#A99CF0", {}, "owl")
+    assert db.get_profile("p1")["avatar"] == "owl"

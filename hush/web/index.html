@@ -7,6 +7,8 @@
 <title>Hush</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23191A2C'/%3E%3Cpath d='M9 13h4l5-4v14l-5-4H9z' fill='%23F0B04A'/%3E%3Cpath d='M21 12l6 8M27 12l-6 8' stroke='%23A99CF0' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/styles.css">
+<script src="/static/diag.js"></script>
+<script src="/static/avatars.js" defer></script>
 <script src="/static/app.js" defer></script>
 </head>
 <body>
@@ -23,31 +25,66 @@
   </form>
 </main>
 
+<!-- Who is watching? -->
+<section id="profile-picker" class="picker" hidden aria-label="Who is watching?">
+  <h1>Who's watching?</h1>
+  <div id="profile-tiles" class="tiles"></div>
+  <form id="profile-pass" class="pass" hidden>
+    <p id="profile-pass-text" class="hint"></p>
+    <div class="row"><input id="profile-pass-input" type="password" placeholder="Hush password" autocomplete="current-password" required>
+      <button class="btn primary" type="submit">Continue</button>
+      <button id="profile-pass-cancel" class="btn ghost" type="button">Cancel</button></div>
+    <p id="profile-pass-error" class="error" role="alert"></p>
+  </form>
+  <div class="picker-actions">
+    <button id="profiles-manage" class="btn ghost" type="button" hidden>Manage profiles</button>
+    <button id="profiles-cancel" class="btn ghost" type="button" hidden>Cancel</button>
+  </div>
+</section>
+
 <!-- App -->
 <div id="app" class="app" hidden>
   <header class="topbar">
     <a href="#/" class="brand-mark small" aria-label="Hush home">Hush</a>
     <div class="topbar-actions">
-      <button id="jobs-btn" class="btn ghost" type="button" aria-haspopup="dialog">
+      <button id="profile-btn" class="btn ghost profile-chip" type="button" aria-haspopup="dialog" title="Switch profile">
+        <span id="profile-avatar" class="avatar" aria-hidden="true"></span><span id="profile-name"></span>
+      </button>
+      <button id="jobs-btn" class="btn ghost admin-only" type="button" aria-haspopup="dialog">
         <span id="jobs-dot" class="dot" hidden></span><span id="jobs-label">Scans</span>
       </button>
-      <a id="tasks-link" class="btn ghost" href="#/tasks">Tasks</a>
-      <button id="password-btn" class="btn ghost" type="button" aria-haspopup="dialog">Password</button>
+      <button id="remote-btn" class="btn ghost admin-only" type="button" aria-haspopup="dialog" title="Control this screen from your phone">Phone remote</button>
+      <button id="tv-toggle" class="btn ghost" type="button" aria-pressed="false" title="Big screen mode: bigger, made for a remote control">Big screen</button>
+      <a id="tasks-link" class="btn ghost admin-only" href="#/tasks">Tasks</a>
+      <button id="password-btn" class="btn ghost admin-only" type="button" aria-haspopup="dialog">Password</button>
       <button id="logout-btn" class="btn ghost" type="button" hidden>Sign out</button>
     </div>
   </header>
 
+  <!-- Big screen navigation (shown only in big screen mode) -->
+  <nav id="tv-nav" class="tv-nav" aria-label="Main">
+    <a href="#/home">Home</a>
+    <a href="#/movies">Movies</a>
+    <a href="#/shows">TV shows</a>
+    <a href="#/live" class="live-link">Live TV</a>
+    <a href="#/folders" class="admin-only">Folders</a>
+    <button id="tv-exit" class="btn ghost" type="button">Exit big screen</button>
+  </nav>
+
   <!-- Library -->
   <section id="library" class="library">
     <nav class="rail" aria-label="Sources">
+      <div id="mini-slot" class="mini-slot" hidden></div>
       <nav id="rail-links" class="rail-links" aria-label="Library">
+        <a href="#/home">Home</a>
         <a href="#/movies">Movies</a>
         <a href="#/shows">TV shows</a>
-        <a href="#/live">Live TV</a>
+        <a href="#/live" class="live-link">Live TV</a>
+        <a href="#/profiles" class="admin-only">Profiles</a>
       </nav>
-      <ul id="source-list" class="source-list"></ul>
-      <button id="add-source-btn" class="btn subtle wide" type="button">Add a source</button>
-      <form id="url-form" class="url-form">
+      <ul id="source-list" class="source-list admin-only"></ul>
+      <button id="add-source-btn" class="btn subtle wide admin-only" type="button">Add a source</button>
+      <form id="url-form" class="url-form admin-only">
         <label for="url-input">Play a link</label>
         <div class="row">
           <input id="url-input" type="text" inputmode="url" placeholder="https://, smb://, ftp://, rtmp://…" spellcheck="false" required>
@@ -81,7 +118,7 @@
 
   <!-- Player -->
   <section id="player" class="player" hidden>
-    <div class="stage" id="stage">
+    <div class="stage" id="stage" tabindex="-1">
       <video id="video" playsinline preload="auto"></video>
       <div id="audio-art" class="audio-art" hidden>
         <div class="audio-disc" aria-hidden="true"></div>
@@ -89,6 +126,24 @@
       </div>
       <div id="subs" class="subs" aria-live="off"></div>
       <div id="stage-msg" class="stage-msg" hidden></div>
+      <div id="mini-bar" class="mini-bar">
+        <button id="mini-title" class="t" type="button" title="Open the player">&nbsp;</button>
+        <button id="mini-prev" class="icon-btn" type="button" aria-label="Previous" title="Previous">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6z"/></svg>
+        </button>
+        <button id="mini-play" class="icon-btn play" type="button" aria-label="Play or pause">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path class="i-play" d="M8 5v14l11-7z"/><path class="i-pause" d="M7 5h4v14H7zM13 5h4v14h-4z"/></svg>
+        </button>
+        <button id="mini-next" class="icon-btn" type="button" aria-label="Next" title="Next">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z"/></svg>
+        </button>
+        <button id="mini-expand" class="icon-btn" type="button" aria-label="Open the player" title="Open the player">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+        <button id="mini-close" class="icon-btn" type="button" aria-label="Stop and close" title="Stop and close">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+        </button>
+      </div>
       <div id="chan-banner" class="chan-banner" hidden>
         <img id="cb-logo" alt="" hidden>
         <div><div class="cb-top"><span id="cb-num" class="cb-num"></span><span id="cb-name" class="cb-name"></span></div>
@@ -136,7 +191,7 @@
         <span class="time"><span id="t-now">0:00</span> / <span id="t-dur">0:00</span></span>
         <h1 id="now-title" class="now-title"></h1>
 
-        <button id="filter-btn" class="hush-toggle" type="button" aria-pressed="true">
+        <button id="filter-btn" class="hush-toggle admin-only" type="button" aria-pressed="true">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="x" d="M16 9l5 6M21 9l-5 6"/></svg>
           <span id="filter-label">Filter on</span>
         </button>
@@ -145,9 +200,12 @@
           <input id="volume" type="range" min="0" max="1" step="0.02" value="1">
         </label>
         <button id="guide-btn" class="btn subtle" type="button" aria-controls="guide" aria-expanded="false" title="Channel list (G)" hidden>Channels</button>
-        <button id="panel-btn" class="btn subtle" type="button" aria-controls="panel" aria-expanded="false">Language</button>
+        <button id="panel-btn" class="btn subtle admin-only" type="button" aria-controls="panel" aria-expanded="false">Language</button>
         <button id="settings-btn" class="icon-btn" type="button" aria-label="Audio and subtitles" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 13h4M12 13h6M6 16h8"/></svg>
+        </button>
+        <button id="mini-btn" class="icon-btn" type="button" aria-label="Mini player" title="Mini player: keep watching while you browse">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v14H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 11h7v6h-7z"/></svg>
         </button>
         <button id="fs-btn" class="icon-btn" type="button" aria-label="Full screen">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5" fill="none" stroke="currentColor" stroke-width="2"/></svg>
@@ -156,6 +214,7 @@
       <div id="settings" class="settings" hidden>
         <label>Audio track <select id="audio-select"></select></label>
         <label>Subtitles <select id="sub-select"><option value="">Off</option></select></label>
+        <label class="check"><input id="mini-toggle" type="checkbox" checked> Keep playing in a mini player when I go back to the library</label>
         <label class="check"><input id="autoplay-toggle" type="checkbox" checked> Autoplay: start a title when it opens and go on to the next one</label>
         <label>When filtering
           <select id="mode-select">
@@ -174,6 +233,12 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
         </button>
       </div>
+      <div class="guide-tools">
+        <input id="guide-q" type="search" placeholder="Find a channel" aria-label="Find a channel">
+        <select id="guide-group" aria-label="Group"><option value="">All groups</option></select>
+        <button id="guide-fav" class="btn subtle" type="button" aria-pressed="false">☆ Favorites</button>
+      </div>
+      <p id="guide-count" class="hint guide-count"></p>
       <ol id="guide-list" class="guide-list"></ol>
     </aside>
 
@@ -255,6 +320,67 @@
   </div>
   <p>Open this link in VLC (Media → Open Network Stream), Kodi, or a smart TV app. The filtered words are removed from the audio on the server. The link works for 12 hours.</p>
   <div class="row"><input id="external-url" readonly><button id="copy-url" class="btn subtle" type="button">Copy</button></div>
+</dialog>
+
+<!-- Add or edit a profile -->
+<dialog id="profile-dialog" class="dialog">
+  <div class="dialog-head">
+    <h2 id="pd-title">Profile</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </div>
+  <form id="pd-form" method="dialog" style="display:grid;gap:.8rem">
+    <label>Name <input id="pd-name" type="text" maxlength="24" required placeholder="Sam"></label>
+    <div><span class="hint">Colour</span><div id="pd-colors" class="swatches" role="radiogroup" aria-label="Colour"></div></div>
+    <div><span class="hint">Picture</span><div id="pd-avatars" class="avatars" role="radiogroup" aria-label="Picture"></div></div>
+    <label class="check"><input id="pd-kids" type="checkbox"> Kids profile: only shows titles that are safe for children</label>
+    <fieldset id="pd-kidsopts" class="kidsopts" hidden>
+      <legend>What a kids profile can see</legend>
+      <label>Language
+        <select id="pd-language">
+          <option value="strict">No flagged language at all (strictest)</option>
+          <option value="mild">Allow mild language (damn, hell…)</option>
+        </select>
+      </label>
+      <label>Highest rating
+        <select id="pd-cert">
+          <option value="0">G and TV-Y / TV-G</option>
+          <option value="1">PG and TV-PG</option>
+          <option value="2">PG-13 and TV-14</option>
+          <option value="5">No rating limit</option>
+        </select>
+      </label>
+      <label class="check"><input id="pd-unscanned" type="checkbox"> Also show titles that have not been scanned yet</label>
+      <label class="check"><input id="pd-unrated" type="checkbox"> Also show titles with no known rating</label>
+      <label class="check"><input id="pd-live" type="checkbox"> Allow Live TV (live channels cannot be checked)</label>
+      <p class="hint">Titles are checked by Hush's scan and by their rating (from the .nfo file or TMDB), so scan your library first. Whatever the scan finds is hidden. Words the scan catches are also muted if they slip through. Raw folders, Tasks and settings are never shown.</p>
+    </fieldset>
+    <p id="pd-error" class="error" role="alert"></p>
+    <div class="dialog-actions">
+      <button id="pd-delete" class="btn ghost" type="button" hidden>Delete profile</button>
+      <button class="btn ghost" value="cancel" formnovalidate type="submit">Cancel</button>
+      <button class="btn primary" value="save" type="submit">Save</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Phone remote -->
+<dialog id="remote-dialog" class="dialog">
+  <div class="dialog-head">
+    <h2>Phone remote</h2>
+    <button class="icon-btn" type="button" data-close aria-label="Close">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2"/></svg>
+    </button>
+  </div>
+  <p>Use your phone as a remote for this screen: play and pause, skip, change channel, move around with arrows, and pick something to play.</p>
+  <form method="dialog" style="display:grid;gap:.75rem">
+    <label class="check"><input id="remote-enable" type="checkbox"> Let a phone control this screen</label>
+    <label>Name of this screen <input id="remote-name" type="text" placeholder="Living room TV" maxlength="40"></label>
+    <p class="hint" style="margin:0">On your phone, open this address (use Share → Add to Home Screen to keep it like an app):</p>
+    <div class="row"><input id="remote-url" readonly aria-label="Remote address"><button id="remote-copy" class="btn subtle" type="button">Copy</button></div>
+    <p id="remote-status" class="hint" style="margin:0" role="status"></p>
+  </form>
 </dialog>
 
 <!-- Change password -->

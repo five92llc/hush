@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#191A2C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Hush Remote</title>
+<link rel="manifest" href="/static/remote.webmanifest">
+<link rel="stylesheet" href="/static/remote.css">
+</head>
+<body>
+<main id="login" class="card-box" hidden>
+  <h1>Hush Remote</h1>
+  <form id="login-form">
+    <label>Password <input id="password" type="password" autocomplete="current-password" required></label>
+    <p id="login-error" class="error" role="alert"></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</main>
+
+<main id="remote" hidden>
+  <header class="top">
+    <h1>Remote</h1>
+    <span id="dot" class="dot off" title="Connection"></span>
+    <select id="screen" aria-label="Screen to control"></select>
+  </header>
+
+  <p id="none" class="notice" hidden>No screen is connected. On the TV or computer, open Hush, press <b>Phone remote</b> and switch it on.</p>
+
+  <section id="now" class="now" hidden>
+    <div class="art"><img id="art" alt="" hidden><span id="art-fallback"></span></div>
+    <div class="meta">
+      <div id="chan-line" class="chan-line" hidden></div>
+      <div id="title" class="title">Nothing playing</div>
+      <div id="sub" class="sub"></div>
+      <div id="bar" class="bar"><i id="bar-i"></i></div>
+      <div id="times" class="times"><span id="t-now">0:00</span><span id="t-dur"></span></div>
+    </div>
+  </section>
+
+  <section class="pad transport" id="transport">
+    <button data-cmd="prev" aria-label="Previous">⏮</button>
+    <button data-cmd="seek" data-args='{"delta":-10}' aria-label="Back 10 seconds">⏪ 10</button>
+    <button id="pp" class="big" data-cmd="playpause" aria-label="Play or pause">⏯</button>
+    <button data-cmd="seek" data-args='{"delta":10}' aria-label="Forward 10 seconds">10 ⏩</button>
+    <button data-cmd="next" aria-label="Next">⏭</button>
+  </section>
+
+  <section class="pad vol">
+    <button data-cmd="volume" data-args='{"delta":-0.1}' aria-label="Volume down">🔉 −</button>
+    <button data-cmd="mute" aria-label="Mute">🔇</button>
+    <button data-cmd="volume" data-args='{"delta":0.1}' aria-label="Volume up">🔊 +</button>
+    <button id="filter" data-cmd="filter" aria-pressed="true">Filter on</button>
+  </section>
+
+  <section id="live-pad" class="pad live" hidden>
+    <button data-cmd="channel" data-args='{"delta":1}'>▲ Channel</button>
+    <button data-cmd="channel" data-args='{"delta":-1}'>▼ Channel</button>
+    <button data-cmd="guide">Channels</button>
+    <div class="digits" id="digits"></div>
+  </section>
+
+  <details class="dpad-box" open>
+    <summary>Arrows</summary>
+    <div class="dpad">
+      <span></span><button data-cmd="key" data-args='{"key":"ArrowUp"}' aria-label="Up">▲</button><span></span>
+      <button data-cmd="key" data-args='{"key":"ArrowLeft"}' aria-label="Left">◀</button>
+      <button class="ok" data-cmd="key" data-args='{"key":"Enter"}'>OK</button>
+      <button data-cmd="key" data-args='{"key":"ArrowRight"}' aria-label="Right">▶</button>
+      <button data-cmd="key" data-args='{"key":"Escape"}'>Back</button>
+      <button data-cmd="key" data-args='{"key":"ArrowDown"}' aria-label="Down">▼</button>
+      <button data-cmd="home">Home</button>
+    </div>
+    <div class="pad small">
+      <button data-cmd="mini">Mini player</button>
+      <button data-cmd="stop">Stop</button>
+      <button data-cmd="tv" data-args='{"on":true}'>Big screen</button>
+    </div>
+  </details>
+
+  <section class="browse">
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="continue" aria-selected="true">Continue</button>
+      <button role="tab" data-tab="movies" aria-selected="false">Movies</button>
+      <button role="tab" data-tab="shows" aria-selected="false">Shows</button>
+      <button role="tab" data-tab="live" aria-selected="false">Live TV</button>
+    </div>
+    <input id="q" type="search" placeholder="Search" aria-label="Search" autocomplete="off">
+    <p id="list-note" class="hint"></p>
+    <ul id="list" class="list"></ul>
+  </section>
+</main>
+<div id="toast" class="toast" role="status" hidden></div>
+<script src="/static/diag.js"></script>
+<script src="/static/remote.js"></script>
+</body>
+</html>

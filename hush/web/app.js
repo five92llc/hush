@@ -52,6 +52,16 @@ const store = {
 const UA = navigator.userAgent;
 const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /iP(hone|ad|od)/.test(UA)
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+/* Smart TVs (LG webOS/NetCast, Samsung Tizen, Android TV, ...). On these the remote's arrow keys move a slow mouse pointer
+   unless the page claims them, so the app handles them itself and hides the pointer. */
+const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|Android.*\bTV\b/i;
+const IS_TV_DEVICE = TVUA.test(UA);
+/** TV remotes often report keys only by their old numeric code (key is empty or "Unidentified"): translate them. */
+const KEYCODE_NAMES = { 37: "ArrowLeft", 38: "ArrowUp", 39: "ArrowRight", 40: "ArrowDown", 13: "Enter", 27: "Escape", 8: "Backspace",
+  461: "GoBack", 10009: "GoBack", 10182: "GoBack", 415: "MediaPlay", 19: "MediaPause", 413: "MediaStop", 417: "MediaFastForward",
+  412: "MediaRewind", 10252: "MediaPlayPause" };
+const normKey = (e) => (e.key && e.key !== "Unidentified" && e.key !== "Dead" ? e.key : (KEYCODE_NAMES[e.keyCode] || e.key || ""));
+
 const TAB = (() => {
   try { let t = sessionStorage.getItem("hush.tab"); if (!t) { t = Math.random().toString(36).slice(2, 12); sessionStorage.setItem("hush.tab", t); } return t; }
   catch { return Math.random().toString(36).slice(2, 12); }
@@ -410,6 +420,84 @@ function makeLetterBar(onPick) {
   return { el, set(avail, cur) { available = avail; current = cur; draw(); }, get current() { return current; } };
 }
 
+/* ===================================================== profiles: who is watching */
+const pk = (k) => `${S.profile?.id || ""}.${k}`;           // preferences that belong to one profile
+const isKids = () => !!S.profile?.kids;
+const initialOf = (name) => (name || "?").trim()[0]?.toUpperCase() || "?";
+/** A profile's picture on its colour: the drawing it chose, or its first letter. */
+function fillAvatar(el, p) {
+  el.style.background = p?.color || "";
+  const svg = p?.avatar && window.AVATAR_SVG ? window.AVATAR_SVG[p.avatar] : "";
+  if (svg) el.innerHTML = svg; else el.textContent = initialOf(p?.name);
+  return el;
+}
+const avatarEl = (p, cls = "avatar") => fillAvatar(h("span", { class: cls }), p);
+
+/** One line about what a kids profile can see, for the profile list. */
+const RATING_NAMES = { 0: "G", 1: "PG", 2: "PG-13" };
+const kidsSummary = (s = {}) => [
+  (s.block || []).includes("mild") || !s.block ? "No flagged language" : "Mild language allowed",
+  `up to ${RATING_NAMES[s.max_cert] || "any rating"}`,
+  s.allow_live ? "Live TV on" : "no Live TV",
+].join(" · ");
+
+const Profiles = {
+  data: null,
+  async load() { this.data = await api("/api/profiles"); S.profile = this.data.current; return this.data; },
+
+  /** Make the app match the chosen profile: kids see no admin tools and always get the filter. */
+  apply() {
+    const p = S.profile, kids = isKids();
+    document.documentElement.classList.toggle("kids", kids);
+    fillAvatar($("#profile-avatar"), p);
+    $("#profile-name").textContent = p?.name || "";
+    $("#profile-btn").hidden = (this.data?.profiles.length || 1) < 2 && !this.data?.can_manage;
+    const live = !kids || !!p?.settings?.allow_live;
+    $$(".live-link").forEach((el) => { el.hidden = !live; });
+    Player.filterOn = kids ? true : store.get(pk("filterOn"), true);
+    Player.bleep = !kids && store.get(pk("mode"), "mute") === "bleep";
+    $("#mode-select").value = Player.bleep ? "bleep" : "mute";
+  },
+
+  /** The full-screen picker. ``forced`` = nobody has chosen yet, so there is no way to cancel. */
+  show(forced = false) {
+    const d = this.data, box = $("#profile-tiles");
+    $("#profile-pass").hidden = true; $("#profile-pass-error").textContent = "";
+    box.replaceChildren(...d.profiles.map((p) => h("button", { class: "tile", type: "button", onclick: () => this.choose(p) },
+      avatarEl(p, "face"), h("span", { class: "nm" }, p.name), p.kids ? h("span", { class: "kid" }, "Kids") : null)));
+    $("#profiles-manage").hidden = !d.can_manage || forced;
+    $("#profiles-cancel").hidden = forced;
+    $("#profile-picker").hidden = false;
+    document.body.style.overflow = "hidden";
+    setTimeout(() => box.querySelector(".tile")?.focus(), 50);
+  },
+  hide() { $("#profile-picker").hidden = true; document.body.style.overflow = ""; },
+
+  async choose(p, password) {
+    try {
+      await api("/api/profiles/select", { method: "POST", body: { id: p.id, password } });
+    } catch (err) {
+      if (err.status === 403 && this.data.lock) {                       // leaving a kids profile asks for the Hush password
+        $("#profile-pass-text").textContent = `Enter the Hush password to switch to ${p.name}.`;
+        $("#profile-pass").hidden = false; $("#profile-pass-input").value = ""; $("#profile-pass-input").focus();
+        this.pending = p; return;
+      }
+      toast(err.message); return;
+    }
+    location.hash = "#/home";                                           // start fresh as the new profile, on Home
+    location.reload();
+  },
+};
+$("#profile-btn").addEventListener("click", async () => { await Profiles.load(); Profiles.show(false); });
+$("#profiles-cancel").addEventListener("click", () => Profiles.hide());
+$("#profiles-manage").addEventListener("click", () => { Profiles.hide(); go("#/profiles"); });
+$("#profile-pass").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try { await api("/api/profiles/select", { method: "POST", body: { id: Profiles.pending.id, password: $("#profile-pass-input").value } }); location.hash = "#/home"; location.reload(); }
+  catch (err) { $("#profile-pass-error").textContent = err.message; }
+});
+$("#profile-pass-cancel").addEventListener("click", () => { $("#profile-pass").hidden = true; });
+
 /* ===================================================== resume: remember where you were */
 const Progress = {
   timer: null, last: -1, armed: false,
@@ -432,19 +520,92 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 
 /* ===================================================== Live TV channel list */
 const guide = {
-  open() {
-    if (!Player.chan) return;
+  feed: null, observer: null,
+  /** Every channel, in pages as you scroll. Starts from the filters the Live TV page had. */
+  newFeed() {
+    const st = Catalog.liveState || {};
+    this.feed = { q: st.q || "", group: st.group || "", favorites: !!st.favorites, items: [], total: 0, loading: false, done: false };
+    $("#guide-q").value = this.feed.q; $("#guide-fav").setAttribute("aria-pressed", String(this.feed.favorites));
+    $("#guide-fav").textContent = this.feed.favorites ? "★ Favorites only" : "☆ Favorites";
+  },
+  async more() {
+    const f = this.feed;
+    if (!f || f.loading || f.done) return false;
+    f.loading = true;
+    try {
+      const q = new URLSearchParams({ q: f.q, group: f.group, favorites: f.favorites, hide_dead: true, limit: 240, offset: f.items.length });
+      const r = await api(`/api/live/channels?${q}`);
+      if (f !== this.feed) return false;
+      const first = f.items.length;
+      f.items.push(...r.channels); f.total = r.total; f.done = f.items.length >= r.total || !r.channels.length;
+      this.append(first);
+      return !!r.channels.length;
+    } catch { return false; } finally { f.loading = false; }
+  },
+  append(from) {
     const list = $("#guide-list");
-    list.replaceChildren(...Queue.list.map((c, i) => h("li", {}, h("button", { type: "button", "aria-current": String(i === Queue.pos),
-      onclick: () => { if (i !== Queue.pos) { Queue.history.push(Queue.pos); Queue.go(i); } } },
-      h("span", { class: "n" }, i + 1), h("span", {}, splitTags(c.title).title)))));
+    list.querySelector(".sentinel")?.remove();
+    list.append(...this.feed.items.slice(from).map((c, k) => {
+      const i = from + k;
+      return h("li", {}, h("button", { type: "button", "data-key": c.key, "aria-current": String(c.key === Player.chan), onclick: () => this.pick(i) },
+        h("span", { class: "n" }, i + 1), h("span", {}, splitTags(c.name).title)));
+    }));
+    if (!this.feed.done) list.append(h("li", { class: "sentinel" }, ""));
+    this.watch();
+    $("#guide-count").textContent = `${plural(this.feed.total, "channel")}`;
+  },
+  watch() {
+    this.observer?.disconnect();
+    const s = $("#guide-list .sentinel");
+    if (!s) return;
+    this.observer = new IntersectionObserver((e) => { if (e[0].isIntersecting) this.more(); }, { root: $("#guide-list") });
+    this.observer.observe(s);
+  },
+  async reload() {
+    this.newFeedKeep();
+    $("#guide-list").replaceChildren();
+    await this.more();
+  },
+  newFeedKeep() {                                          // a fresh feed with what the controls say now
+    this.feed = { q: $("#guide-q").value.trim(), group: $("#guide-group").value, favorites: $("#guide-fav").getAttribute("aria-pressed") === "true",
+      items: [], total: 0, loading: false, done: false };
+  },
+  /** Play this channel; from now on up/down and the number keys move through THIS list. */
+  pick(i) {
+    const c = this.feed.items[i];
+    if (!c) return;
+    Queue.set(this.feed.items.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups })));
+    const feed = this.feed;
+    Queue.loadMore = async () => (feed === this.feed ? this.more() : false);
+    if (c.key !== Player.chan) { Queue.history.push(Queue.pos); Queue.go(i); }
+  },
+  async open() {
+    if (!Player.chan) return;
     if (!$("#panel").hidden) togglePanel(false);
     $("#guide").hidden = false; $("#guide-btn").setAttribute("aria-expanded", "true");
-    list.querySelector('[aria-current="true"]')?.scrollIntoView({ block: "center" });
+    if (!$("#guide-group").dataset.ready) {
+      $("#guide-group").dataset.ready = "1";
+      try { for (const g of await api("/api/live/groups")) $("#guide-group").append(h("option", { value: g.name }, `${g.name} (${g.count})`)); } catch { /* optional */ }
+    }
+    this.newFeed();
+    $("#guide-group").value = this.feed.group;
+    $("#guide-list").replaceChildren();
+    await this.more();
+    // bring the channel being watched into view if it is near the top (otherwise search or pick a group)
+    for (let n = 0; n < 3 && !$(`#guide-list [data-key="${Player.chan}"]`) && !this.feed.done; n++) await this.more();
+    $(`#guide-list [data-key="${Player.chan}"]`)?.scrollIntoView({ block: "center" });
+    $("#guide-q").focus({ preventScroll: true });
   },
-  close() { $("#guide").hidden = true; $("#guide-btn").setAttribute("aria-expanded", "false"); },
+  close() { $("#guide").hidden = true; $("#guide-btn").setAttribute("aria-expanded", "false"); this.observer?.disconnect(); },
   toggle() { $("#guide").hidden ? this.open() : this.close(); },
 };
+let guideTimer;
+$("#guide-q").addEventListener("input", () => { clearTimeout(guideTimer); guideTimer = setTimeout(() => guide.reload(), 300); });
+$("#guide-group").addEventListener("change", () => guide.reload());
+$("#guide-fav").addEventListener("click", (e) => {
+  const on = e.currentTarget.getAttribute("aria-pressed") !== "true";
+  e.currentTarget.setAttribute("aria-pressed", String(on)); e.currentTarget.textContent = on ? "★ Favorites only" : "☆ Favorites"; guide.reload();
+});
 $("#guide-btn").addEventListener("click", () => guide.toggle());
 $("#guide-close").addEventListener("click", () => guide.close());
 
@@ -472,7 +633,13 @@ const Queue = {
     const t = this.list[i];
     if (!t) return;
     this.pending = true; this.pos = i;
-    location.hash = `#/p/${t.src}/${t.item}`;
+    if (Player.mini) { Player.open(t.src, t.item, { mini: true }); return; }   // stay in the mini player; the page behind does not change
+    const hash = `#/p/${t.src}/${t.item}`;
+    // Zapping between channels replaces the history entry, so the remote's Back button
+    // leaves the player instead of stepping through every channel watched.
+    if (location.hash.startsWith("#/p/") && location.hash !== hash) {
+      location.replace(location.href.split("#")[0] + hash);
+    } else location.hash = hash;
   },
 
   /** Which index plays next, or null when the queue is over. */
@@ -600,7 +767,10 @@ const Catalog = {
       a.hash === `#/${view}` || (view === "show" && a.hash === "#/shows") || (view === "title" && a.hash === (this.cameFrom || "#/movies")))));
     this.box().replaceChildren(h("p", { class: "hint" }, "Loading…"));
     try {
-      if (view === "live") await this.live();
+      if (view === "profiles") await this.profilesPage();
+      else if (view === "home") await this.home();
+      else if (view === "folders") await this.folders();
+      else if (view === "live") await this.live();
       else if (view === "movies") await this.grid("movies");
       else if (view === "shows") await this.grid("shows");
       else if (view === "show") await this.show(id);
@@ -623,7 +793,7 @@ const Catalog = {
     let loaded = [], total = 0, stats = { dead: 0, favorites: 0, total: 0 };
 
     const toQueue = () => Queue.set(loaded.map((c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups })));
-    const card = (c, n) => {
+    const card = (c, n, setQueue = toQueue) => {
       const star = h("button", { class: "star", type: "button", "aria-pressed": String(c.favorite), title: c.favorite ? "Remove from favorites" : "Add to favorites",
         "aria-label": `Favorite: ${c.name}`, onclick: async (e) => {
           e.preventDefault(); e.stopPropagation();
@@ -631,7 +801,7 @@ const Catalog = {
           star.setAttribute("aria-pressed", String(c.favorite)); star.textContent = c.favorite ? "★" : "☆";
           try { await api(`/api/live/channels/${c.key}/favorite`, { method: "POST", body: { favorite: c.favorite } }); } catch (err) { toast(err.message); }
         } }, c.favorite ? "★" : "☆");
-      return h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => toQueue() },
+      return h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => setQueue() },
         n != null ? h("span", { class: "num" }, n + 1) : null,
         h("div", { class: "logo" }, c.logo_url
           ? h("img", { src: c.logo_url, alt: "", loading: "lazy", onerror: (e) => { e.target.replaceWith(h("span", { class: "noart" }, initials(c.name))); } })
@@ -671,7 +841,7 @@ const Catalog = {
         recentBox.hidden = !items.length;
         const q = () => Queue.set(items.map((c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups })));
         recentBox.replaceChildren(h("h2", {}, "Recently watched"),
-          h("div", { class: "chans small" }, ...items.map((c) => { const a = card(c, null); a.addEventListener("click", q, true); return a; })));
+          h("div", { class: "chans small" }, ...items.map((c) => card(c, null, () => { q(); Queue.loadMore = null; }))));
       } catch { recentBox.hidden = true; }
     };
 
@@ -685,7 +855,7 @@ const Catalog = {
       e.currentTarget.textContent = st.favorites ? "★ Favorites only" : "☆ Favorites"; fetchPage(true);
     } }, st.favorites ? "★ Favorites only" : "☆ Favorites");
     const dead = h("label", {}, h("input", { type: "checkbox", checked: st.hideDead, onchange: (e) => { st.hideDead = e.target.checked; fetchPage(true); } }), "Hide channels that don't play");
-    const plBtn = h("button", { class: "btn ghost", type: "button", onclick: () => { st.panel = !st.panel; panel.hidden = !st.panel; } }, "Playlists");
+    const plBtn = h("button", { class: "btn ghost", type: "button", onclick: () => { st.panel = !st.panel; panel.hidden = !st.panel; } }, "＋ Add / manage playlists");
     tools.append(search, sel, favBtn, dead, plBtn);
 
     const reloadAll = () => this.open("live");
@@ -727,12 +897,133 @@ const Catalog = {
   },
 
   empty(what) {
+    if (isKids()) return h("div", { class: "empty" }, h("h3", {}, `No ${what} for you yet`),
+      h("p", {}, "Titles show up here once a grown-up has scanned them and they are safe to watch."));
     return h("div", { class: "empty" }, h("h3", {}, `No ${what} yet`),
       h("p", {}, "Hush needs to look through your sources and add details and artwork. Run it once; after that it keeps itself up to date."),
       h("button", { class: "btn primary", type: "button", onclick: async () => {
         try { await api("/api/tasks/metadata/run", { method: "POST" }); toast("Started. This can take a few minutes."); } catch (e) { toast(e.message); }
       } }, "Find my titles"),
       h("a", { class: "btn ghost", href: "#/tasks" }, "Open Tasks"));
+  },
+
+  /* ---------- Home: shelves, made for the couch ---------- */
+  shelf(title, seeAll, cards) {
+    if (!cards.length) return null;
+    return h("section", { class: "shelf" },
+      h("div", { class: "shelf-head" }, h("h2", {}, title), seeAll ? h("a", { href: seeAll }, "See all →") : null),
+      h("div", { class: "shelf-row" }, ...cards));
+  },
+  async home() {
+    this.cameFrom = "#/home";
+    document.title = "Home – Hush";
+    const get = (p, f = (x) => x) => api(p).then(f).catch(() => []);
+    const [cont, recent, favs, movies, shows] = await Promise.all([
+      get("/api/progress/recent?limit=12"), get("/api/live/channels?recent=true&limit=12", (r) => r.channels),
+      get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows")]);
+    const chan = (list) => (c) => h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => {
+      Queue.set(list.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups }))); Queue.loadMore = null;
+    } }, h("div", { class: "logo" }, c.logo_url ? h("img", { src: c.logo_url, alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))),
+      h("span", { class: "name" }, splitTags(c.name).title));
+    const poster = (isShow, list) => (m) => h("a", { class: "card", href: isShow ? `#/show/${m.show_key}` : `#/title/${m.media_key}`,
+      onclick: () => { if (!isShow) Queue.set(list.map((x) => ({ src: x.source_id, item: x.item_id, title: x.title }))); } },
+      h("div", { class: "art" }, m.art_url ? h("img", { src: m.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, m.title)),
+      h("span", { class: "name" }, m.title), h("span", { class: "sub" }, isShow ? plural(m.episodes, "episode") : (m.year || "")));
+    movies.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title))); shows.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title)));
+    const rows = [
+      this.shelf("Continue watching", null, cont.map((it) => h("a", { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
+        h("div", { class: "art" }, it.art_url ? h("img", { src: it.art_url, alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
+          it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null),
+        h("span", { class: "name" }, it.title),
+        h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))))),
+      this.shelf("Live TV: recently watched", "#/live", recent.map(chan(recent))),
+      this.shelf("Live TV: favorites", "#/live", favs.map(chan(favs))),
+      this.shelf("Movies", "#/movies", movies.slice(0, 18).map(poster(false, movies))),
+      this.shelf("TV shows", "#/shows", shows.slice(0, 18).map(poster(true, shows))),
+    ].filter(Boolean);
+    this.box().replaceChildren(h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Home"))),
+      ...(rows.length ? rows : [h("div", { class: "empty" }, h("h3", {}, "Nothing here yet"),
+        h("p", {}, "Add a source, then open Tasks to build your library. Live TV channels you watch and favorite show up here."),
+        h("a", { class: "btn primary", href: "#/live" }, "Open Live TV"))]));
+  },
+  /* ---------- manage profiles (grown-ups only) ---------- */
+  async profilesPage() {
+    this.cameFrom = "#/profiles";
+    document.title = "Profiles – Hush";
+    const d = await Profiles.load();
+    const lockBox = h("input", { type: "checkbox", checked: d.lock, onchange: async (e) => {
+      try { await api("/api/profiles/lock", { method: "PUT", body: { lock: e.target.checked } }); toast(e.target.checked ? "Leaving a kids profile now asks for the password" : "Switching is free again"); }
+      catch (err) { toast(err.message); e.target.checked = !e.target.checked; }
+    } });
+    this.box().replaceChildren(
+      h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Profiles"),
+        h("p", { class: "hint" }, "Everyone keeps their own place in movies and shows, favorite channels and filter choices. No passwords: just pick a name."))),
+      h("div", { class: "profile-list" }, ...d.profiles.map((p) => h("div", { class: "profile-row" },
+        avatarEl(p),
+        h("div", { class: "grow" }, h("strong", {}, p.name), h("div", { class: "sub" }, p.kids ? kidsSummary(p.settings) : "Sees everything. Can change settings.")),
+        h("button", { class: "btn subtle", type: "button", onclick: () => this.profileDialog(p, d) }, "Edit")))),
+      h("div", { class: "row" }, h("button", { class: "btn primary", type: "button", onclick: () => this.profileDialog(null, d) }, "Add a profile")),
+      d.lock !== undefined && d.profiles.some((p) => p.kids) ? h("label", { class: "inline", style: "display:flex;gap:.5rem;align-items:center;margin-top:1.25rem;color:var(--linen-dim)" },
+        lockBox, "Ask for the Hush password to leave a kids profile (needs a Hush password to be set)") : null);
+  },
+
+  profileDialog(p, d) {
+    const dlg = $("#profile-dialog"), isNew = !p;
+    let color = p?.color || d.colors[d.profiles.length % d.colors.length];
+    let avatar = p?.avatar || "";
+    $("#pd-title").textContent = isNew ? "Add a profile" : `Edit ${p.name}`;
+    $("#pd-name").value = p?.name || ""; $("#pd-kids").checked = !!p?.kids; $("#pd-error").textContent = "";
+    const st = p?.settings || { block: d.categories, max_cert: 1, hide_unscanned: true, allow_live: false };
+    $("#pd-language").value = (st.block || []).includes("mild") ? "strict" : "mild";
+    $("#pd-cert").value = [0, 1, 2].includes(st.max_cert) ? String(st.max_cert) : "5";
+    $("#pd-unscanned").checked = st.hide_unscanned === false; $("#pd-unrated").checked = !!st.allow_unrated; $("#pd-live").checked = !!st.allow_live;
+    const sync = () => { $("#pd-kidsopts").hidden = !$("#pd-kids").checked; };
+    $("#pd-kids").onchange = sync; sync();
+    const swatches = $("#pd-colors");
+    const drawColors = () => swatches.replaceChildren(...d.colors.map((c) => h("button", { type: "button", role: "radio", "aria-checked": String(c === color), "aria-label": c,
+      style: `background:${c}`, onclick: () => { color = c; drawColors(); drawAvatars(); } })));
+    const avatarBox = $("#pd-avatars");
+    const drawAvatars = () => avatarBox.replaceChildren(...["", ...d.avatars].map((id) => {
+      const name = $("#pd-name").value || "A";
+      const b = h("button", { type: "button", role: "radio", "aria-checked": String(id === avatar), title: id || "Letter", "aria-label": id || "Letter",
+        onclick: () => { avatar = id; drawAvatars(); } });
+      fillAvatar(b, { color, avatar: id, name });
+      return b;
+    }));
+    const redraw = () => { drawColors(); drawAvatars(); };
+    $("#pd-name").oninput = drawAvatars;
+    redraw();
+    $("#pd-delete").hidden = isNew;
+    $("#pd-delete").onclick = async () => {
+      if (!confirm(`Delete ${p.name}? Their place in movies and favorite channels go too.`)) return;
+      try { await api(`/api/profiles/${p.id}`, { method: "DELETE" }); dlg.close(); this.open("profiles"); } catch (err) { $("#pd-error").textContent = err.message; }
+    };
+    $("#pd-form").onsubmit = async (e) => {
+      if (e.submitter?.value !== "save") return;
+      e.preventDefault();
+      const kids = $("#pd-kids").checked;
+      const body = { name: $("#pd-name").value, kids, color, avatar, settings: kids ? {
+        block: $("#pd-language").value === "strict" ? d.categories : d.categories.filter((c) => c !== "mild"), max_hits: 0,
+        max_cert: Number($("#pd-cert").value), hide_unscanned: !$("#pd-unscanned").checked, allow_unrated: $("#pd-unrated").checked,
+        allow_live: $("#pd-live").checked } : {} };
+      try {
+        await api(isNew ? "/api/profiles" : `/api/profiles/${p.id}`, { method: isNew ? "POST" : "PUT", body });
+        dlg.close(); toast("Saved");
+        await Profiles.load(); Profiles.apply();                       // the top bar shows the new picture straight away
+        this.open("profiles");
+      } catch (err) { $("#pd-error").textContent = err.message; }
+    };
+    dlg.showModal();
+  },
+
+  async folders() {
+    this.cameFrom = "#/folders";
+    document.title = "Folders – Hush";
+    const list = S.sources.filter((s) => !s.error);
+    this.box().replaceChildren(h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Folders"), h("p", { class: "hint" }, "Browse your sources as folders"))),
+      list.length ? h("div", { class: "grid shelf-grid" }, ...list.map((s) => h("a", { class: "card wide", href: `#/b/${s.id}` },
+        h("div", { class: "art" }, h("div", { class: "noart" }, s.name)), h("span", { class: "name" }, s.name), h("span", { class: "sub" }, s.type))))
+        : h("div", { class: "empty" }, h("h3", {}, "No sources yet"), h("p", {}, "Add a source from the normal (not big screen) view.")));
   },
 
   /** "Continue watching": titles that were left part-way, newest first. */
@@ -781,10 +1072,10 @@ const Catalog = {
         h("span", { class: "sub" }, isShows ? `${plural(m.episodes, "episode")}${m.seasons > 1 ? ` · ${m.seasons} seasons` : ""}` : (m.year || "")))));
     };
     q.addEventListener("input", draw);
-    this.box().replaceChildren(
+    this.box().replaceChildren(...[
       h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, isShows ? "TV shows" : "Movies"),
         h("p", { class: "hint" }, plural(items.length, isShows ? "show" : "movie"))), q),
-      items.length ? bar.el : null, shelf, items.length ? list : this.empty(isShows ? "TV shows" : "movies"));
+      items.length ? bar.el : null, shelf, items.length ? list : this.empty(isShows ? "TV shows" : "movies")].filter(Boolean));
     if (items.length) draw();
     this.cameFrom = isShows ? "#/shows" : "#/movies";
     document.title = `${isShows ? "TV shows" : "Movies"} – Hush`;
@@ -847,18 +1138,18 @@ const Catalog = {
               } catch (err) { toast(err.message); }
             } }, m.watched ? "Mark as not watched" : "Mark as watched"),
             m.scanned ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", ""), "Filter ready")
-              : h("button", { class: "btn subtle", type: "button", onclick: async (ev) => {
+              : h("button", { class: "btn subtle admin-only", type: "button", onclick: async (ev) => {
                 ev.currentTarget.disabled = true;
                 try { await api("/api/analyze", { method: "POST", body: { source_id: m.source_id, item_id: m.item_id, title: m.title } }); toast("Scanning"); Jobs.poll(); } catch (e) { toast(e.message); }
               } }, "Scan this title"),
-            h("button", { class: "btn ghost", type: "button", onclick: () => this.fixMatch(m, show) }, "Fix match")),
-          h("h3", {}, "Transcript"),
-          caps.transcript
+            h("button", { class: "btn ghost admin-only", type: "button", onclick: () => this.fixMatch(m, show) }, "Fix match")),
+          isKids() ? null : h("h3", {}, "Transcript"),
+          isKids() ? null : caps.transcript
             ? h("div", { class: "links" }, tlink("txt", "Text"), tlink("srt", "SRT"), tlink("vtt", "WebVTT"),
                 h("label", { class: "inline" }, mask, "Mask language"))
             : h("p", { class: "hint" }, "Scan this title and the transcript is built from the dialogue."),
-          h("h3", {}, "Captions and subtitles"),
-          caps.tracks.length
+          isKids() ? null : h("h3", {}, "Captions and subtitles"),
+          isKids() ? null : caps.tracks.length
             ? h("ul", { class: "links", style: "list-style:none;padding:0;margin:0" }, ...caps.tracks.map((t) => h("li", {},
                 `${t.label} (${t.where}) `, h("a", { href: `/api/subtitle/${m.source_id}/${m.item_id}/${t.id}?format=srt&download=1` }, "SRT"), " · ",
                 h("a", { href: `/api/subtitle/${m.source_id}/${m.item_id}/${t.id}?format=vtt&download=1` }, "WebVTT"))))
@@ -1080,13 +1371,16 @@ const video = $("#video");
 
 const Player = {
   src: null, item: null, info: null, mode: "direct", offset: 0, duration: 0,
-  filter: null, ranges: [], cats: new Set(), filterOn: store.get("filterOn", true),
-  bleep: store.get("mode", "mute") === "bleep", audioIndex: null, subCues: null,
+  filter: null, ranges: [], cats: new Set(), filterOn: true,
+  bleep: false, audioIndex: null, subCues: null,
   job: null, markStart: null, selected: null, pendingSeek: null,
 
   /* ---------- loading ---------- */
-  async open(sourceId, itemId) {
+  async open(sourceId, itemId, opts = {}) {
+    const keepMini = !!opts.mini;                      // switching channel or title from the mini player
+    const libraryWasHidden = $("#library").hidden;
     this.close(false);
+    if (keepMini) $("#library").hidden = libraryWasHidden;
     this.src = sourceId; this.item = itemId; this.triedTranscode = false;
     Queue.sync(sourceId, itemId);
     this.chan = Queue.list[Queue.pos]?.chan || null; this.reported = null;
@@ -1094,13 +1388,15 @@ const Player = {
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
     $("#guide-btn").hidden = !this.chan; guide.close();
     if (this.chan) Queue.banner();
-    $("#library").hidden = true; $("#player").hidden = false;
-    document.body.style.overflow = "hidden";
+    $("#player").hidden = false;
+    if (!keepMini) { $("#library").hidden = true; document.body.style.overflow = "hidden"; }
     this.message("Opening…");
+    if (keepMini) this.minimize();
     try {
       this.info = await api(`/api/media/${sourceId}/${itemId}`);
     } catch (err) { this.report(false); this.message(err.message, true); return; }
     const info = this.info;
+    if (this.mini) this.miniTitle();
     this.duration = info.probe.duration || 0;
     this.mode = info.mode;
     $("#now-title").textContent = info.title;
@@ -1127,6 +1423,7 @@ const Player = {
   },
 
   close(goBack = true) {
+    this.endMini();
     Progress.save(true); Progress.disarm();
     $("#resume-chip").hidden = true;
     video.pause(); video.removeAttribute("src"); video.load();
@@ -1136,7 +1433,7 @@ const Player = {
     $("#player").hidden = true; $("#library").hidden = false;
     document.body.style.overflow = "";
     document.title = "Hush";
-    if (document.fullscreenElement) document.exitFullscreen();
+    if (document.fullscreenElement && !IS_TV_DEVICE) document.exitFullscreen();   // a TV stays full screen for the session
     if (goBack) go(S.libraryHash || "#/");        // back to the library, not to whatever was open before
   },
 
@@ -1216,9 +1513,10 @@ const Player = {
       this.filter = null; this.ranges = [];
       if (err.status !== 404) toast(err.message);
     }
-    const saved = store.get("cats", null);
+    const saved = store.get(pk("cats"), null);
     const cats = this.categories();
-    this.cats = new Set(cats.filter((c) => saved ? saved.includes(c.id) : c.default).map((c) => c.id));
+    this.cats = isKids() ? new Set(cats.map((c) => c.id))           // a kids profile hears none of the flagged words
+      : new Set(cats.filter((c) => saved ? saved.includes(c.id) : c.default).map((c) => c.id));
     this.renderMarks(); this.Audio.reset();
   },
 
@@ -1307,6 +1605,68 @@ const Player = {
   },
 
   /* ---------- UI ---------- */
+  /* ---------- mini player: keep watching while you browse ---------- */
+  mini: false, forceMini: false,
+  keepPlaying() {
+    const force = this.forceMini; this.forceMini = false;
+    return force || (store.get("mini", true) && !!video.currentSrc && !video.paused && !video.ended && !!this.info);
+  },
+  /** Shrink to the slot above the sidebar (or the upper-left corner when there is no sidebar). */
+  minimize() {
+    this.mini = true;
+    const p = $("#player"); p.classList.add("mini", "playing-keep"); p.classList.toggle("playing", !video.paused);
+    document.body.style.overflow = "";
+    guide.close(); if (!$("#panel").hidden) togglePanel(false); $("#settings").hidden = true; $("#resume-chip").hidden = true;
+    this.miniTitle();
+    const many = Queue.list.length > 1;
+    $("#mini-prev").hidden = $("#mini-next").hidden = !many;
+    this.placeMini();
+  },
+  miniTitle() {
+    const queued = Queue.list[Queue.pos]?.title;
+    const name = this.chan ? (queued || this.info?.title || "") : (this.info?.title || queued || "");
+    $("#mini-title").textContent = this.chan ? splitTags(name).title : name;
+    $("#mini-title").title = name;
+  },
+  placeMini() {
+    if (!this.mini) return;
+    const p = $("#player"), slot = $("#mini-slot");
+    if (document.documentElement.classList.contains("tv")) {   // no sidebar on a TV: bottom right corner
+      slot.hidden = true; slot.style.height = "";
+      Object.assign(p.style, { left: "auto", top: "auto", right: "32px", bottom: "32px", width: "340px" });
+      return;
+    }
+    const rail = $(".rail");
+    const sidebar = !$("#library").hidden && rail && rail.offsetParent !== null && window.innerWidth > 760;
+    let left = 16, top = ($(".topbar")?.offsetHeight || 48) + 10, width = 240;
+    if (sidebar) {                                           // dock above the Movies link, under the Hush header
+      const r = rail.getBoundingClientRect();
+      left = r.left + 16; top = r.top + 20; width = Math.max(160, Math.round(r.width - 32));
+      slot.hidden = false; slot.style.height = `${Math.round(width * 9 / 16)}px`;
+    } else {
+      slot.hidden = true; slot.style.height = "";
+    }
+    Object.assign(p.style, { left: `${left}px`, top: `${top}px`, width: `${width}px`, right: "auto", bottom: "auto" });
+  },
+  expand() {
+    this.mini = false;
+    const p = $("#player"); p.classList.remove("mini", "playing-keep");
+    Object.assign(p.style, { left: "", top: "", width: "", right: "", bottom: "" });
+    $("#mini-slot").hidden = true;
+    $("#library").hidden = true; $("#tasks").hidden = true; document.body.style.overflow = "hidden";
+    const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
+    $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
+    if (this.chan) { $("#guide-btn").hidden = false; Queue.banner(); }
+  },
+  /** Leave mini mode without touching what is playing (used when the player closes or is replaced). */
+  endMini() {
+    if (!this.mini) return;
+    this.mini = false;
+    const p = $("#player"); p.classList.remove("mini", "playing-keep");
+    Object.assign(p.style, { left: "", top: "", width: "", right: "", bottom: "" });
+    $("#mini-slot").hidden = true;
+  },
+
   showResume(at) {
     const chip = $("#resume-chip");
     $("#resume-text").textContent = `Resumed at ${fmt(at)}`;
@@ -1434,7 +1794,7 @@ const Player = {
     $("#cat-list").replaceChildren(...this.categories().map((c) => h("label", { class: "chip" },
       h("input", { type: "checkbox", checked: this.cats.has(c.id), onchange: (e) => {
         e.target.checked ? this.cats.add(c.id) : this.cats.delete(c.id);
-        store.set("cats", [...this.cats]); this.renderMarks(); this.renderPanel(); this.Audio.reset();
+        store.set(pk("cats"), [...this.cats]); this.renderMarks(); this.renderPanel(); this.Audio.reset();
       } }), c.label, h("span", { class: "n" }, String(counts[c.id] || 0)))));
     this.renderRanges();
     $("#export-json").href = `/api/filters/${this.info.media_key}/export?format=json`;
@@ -1487,6 +1847,7 @@ const Player = {
   },
 
   mark() {
+    if (isKids()) return;
     const t = this.now();
     if (this.markStart == null) {
       this.markStart = t;
@@ -1642,15 +2003,29 @@ video.addEventListener("error", () => {
 
 $("#back10").addEventListener("click", () => Player.seek(Player.now() - 10));
 $("#fwd10").addEventListener("click", () => Player.seek(Player.now() + 10));
-$("#back-btn").addEventListener("click", () => Player.close());
+$("#back-btn").addEventListener("click", () => go(S.libraryHash || "#/"));
+/* ---- mini player buttons ---- */
+$("#mini-btn").addEventListener("click", () => { Player.forceMini = true; go(S.libraryHash || "#/"); });
+$("#mini-play").addEventListener("click", () => togglePlay());
+$("#mini-prev").addEventListener("click", () => Queue.prev());
+$("#mini-next").addEventListener("click", () => Queue.next());
+$("#mini-title").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
+$("#mini-expand").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
+$("#mini-close").addEventListener("click", () => Player.close(false));
+$("#player").addEventListener("dblclick", () => { if (Player.mini && Player.src) go(`#/p/${Player.src}/${Player.item}`); });
+$("#mini-toggle").checked = store.get("mini", true);
+$("#mini-toggle").addEventListener("change", (e) => { store.set("mini", e.target.checked); toast(e.target.checked ? "Mini player on" : "Mini player off"); });
+window.addEventListener("resize", () => Player.placeMini());
+   // route() keeps it playing in the mini player, or stops it
 $("#volume").value = store.get("volume", 1);
 $("#volume").addEventListener("input", (e) => { Player.Audio.volume(Number(e.target.value)); store.set("volume", Number(e.target.value)); });
 $("#filter-btn").addEventListener("click", () => {
-  Player.filterOn = !Player.filterOn; store.set("filterOn", Player.filterOn);
+  if (isKids()) return;                                          // the filter stays on for kids
+  Player.filterOn = !Player.filterOn; store.set(pk("filterOn"), Player.filterOn);
   Player.applyFilterButton(); Player.Audio.reset();
   toast(Player.filterOn ? "Filter on" : "Filter off. Every word will play.");
 });
-$("#mode-select").addEventListener("change", (e) => { Player.bleep = e.target.value === "bleep"; store.set("mode", e.target.value); Player.Audio.reset(); Player.renderPanel(); });
+$("#mode-select").addEventListener("change", (e) => { Player.bleep = e.target.value === "bleep"; store.set(pk("mode"), e.target.value); Player.Audio.reset(); Player.renderPanel(); });
 $("#sub-select").addEventListener("change", (e) => Player.loadSubs(e.target.value));
 $("#audio-select").addEventListener("change", async (e) => {
   const t = Player.now();
@@ -1665,7 +2040,21 @@ $("#audio-select").addEventListener("change", async (e) => {
 $("#settings-btn").addEventListener("click", (e) => {
   const s = $("#settings"); s.hidden = !s.hidden; e.currentTarget.setAttribute("aria-expanded", String(!s.hidden));
 });
-$("#fs-btn").addEventListener("click", () => document.fullscreenElement ? document.exitFullscreen() : $("#player").requestFullscreen?.());
+/* Full screen has to be requested inside a key press or click, so a TV asks on every one until it is granted. */
+function enterFullscreen() {
+  if (document.fullscreenElement || document.webkitFullscreenElement) return;
+  const el = document.documentElement;
+  try {
+    const p = (el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen)?.call(el);
+    p?.catch?.(() => {});
+    navigator.keyboard?.lock?.(["Escape"]).catch(() => {});
+  } catch { /* the browser refused; try again on the next key press */ }
+}
+function exitFullscreen() { (document.exitFullscreen || document.webkitExitFullscreen)?.call(document); }
+$("#fs-btn").addEventListener("click", () => (document.fullscreenElement || document.webkitFullscreenElement) ? exitFullscreen() : enterFullscreen());
+if (IS_TV_DEVICE) {
+  ["keydown", "click"].forEach((t) => document.addEventListener(t, enterFullscreen, true));
+}
 function togglePanel(open) {
   const p = $("#panel"); p.hidden = open === undefined ? !p.hidden : !open;
   $("#panel-btn").setAttribute("aria-expanded", String(!p.hidden));
@@ -1727,9 +2116,13 @@ const idle = {
 $("#player").addEventListener("pointermove", () => idle.bump());
 
 document.addEventListener("keydown", (e) => {
-  if ($("#player").hidden || e.target.matches("input:not([type=checkbox]):not([type=range]), select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (IS_TV_DEVICE || TV.on) hideCursorNow();                    // using the remote: the pointer is not needed
+  if (mediaKey(e)) return;
+  if ((TV.on || IS_TV_DEVICE) && TV.handleKey(e)) return;
+  if ($("#player").hidden || Player.mini || e.target.matches("input:not([type=checkbox]):not([type=range]), select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
   if (document.querySelector("dialog[open]")) return;
-  const k = e.key.toLowerCase();
+  const k = normKey(e).toLowerCase();
   if (Player.chan) {                                          // Live TV: use the keyboard like a remote control
     if (/^[0-9]$/.test(k)) { e.preventDefault(); Queue.digit(k); idle.bump(); return; }
     const zapKeys = { arrowup: () => Queue.zap(-1), pageup: () => Queue.zap(-1), arrowdown: () => Queue.zap(1), pagedown: () => Queue.zap(1),
@@ -1745,20 +2138,319 @@ document.addEventListener("keydown", (e) => {
   };
   if (e.target === $("#timeline") && (k === "arrowleft" || k === "arrowright")) return;
   if (map[k]) { e.preventDefault(); map[k](); idle.bump(); }
+}, true);
+
+/* ===================================================== big screen mode: made for a remote control */
+const TV = {
+  on: false,
+  init() {
+    this.on = store.get("tv", null) ?? TVUA.test(navigator.userAgent);   // a smart TV starts in big screen mode by itself
+    this.apply();
+    new MutationObserver(() => { clearTimeout(this.obsTimer); this.obsTimer = setTimeout(() => this.focusSoon(0), 350); })
+      .observe($("#app"), { childList: true, subtree: true });
+  },
+  set(on) {
+    this.on = on; store.set("tv", on); this.apply();
+    if (on && !location.hash.startsWith("#/p/")) go("#/home"); else route();
+  },
+  apply() {
+    document.documentElement.classList.toggle("tv", this.on);
+    $("#tv-toggle").setAttribute("aria-pressed", String(this.on));
+    Player.placeMini();
+    if (this.on) this.focusSoon(200);
+  },
+  navCurrent(view) {
+    const group = { home: "home", movies: "movies", title: Catalog.cameFrom?.replace("#/", "") || "movies", shows: "shows", show: "shows", live: "live", b: "folders", folders: "folders" }[view];
+    $$("#tv-nav a").forEach((a) => a.setAttribute("aria-current", String(a.hash === `#/${group}`)));
+  },
+
+  /* ---------- spatial navigation ---------- */
+  visible(el) {
+    if (!el.isConnected || el.hidden || el.closest("[hidden]")) return false;
+    const r = el.getBoundingClientRect(), st = getComputedStyle(el);
+    return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
+  },
+  roots() {
+    const dlg = document.querySelector("dialog[open]");
+    if (dlg) return [dlg];
+    if (!$("#guide").hidden) return [$("#guide")];
+    if (!$("#panel").hidden) return [$("#panel")];
+    if (!$("#player").hidden && !Player.mini) return [$("#controls")];
+    const r = [...document.querySelectorAll(".topbar, #tv-nav, #library:not([hidden]), #tasks:not([hidden])")];
+    if (Player.mini) r.push($("#player"));
+    return r;
+  },
+  focusables(roots) {
+    const sel = 'a[href], button:not([disabled]):not(.star):not(.x), input:not([type=hidden]):not([disabled]), select:not([disabled]), textarea, [tabindex]:not([tabindex="-1"])';
+    return roots.flatMap((root) => [...root.querySelectorAll(sel)]).filter((el) => this.visible(el));
+  },
+  focusFirst() {
+    const roots = this.roots();
+    const main = roots.filter((r) => r.matches?.("#library, #tasks, dialog, .guide, .panel, #controls"));
+    const list = this.focusables(main.length ? main : roots);
+    const target = list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
+    target?.focus({ preventScroll: true });
+  },
+  focusSoon(delay = 250) {
+    if (!this.on) return;
+    clearTimeout(this.focusTimer);
+    this.focusTimer = setTimeout(() => {
+      const a = document.activeElement;
+      if (a && a !== document.body && this.visible(a) && a.closest("#app")) return;      // keep where it is
+      if (!$("#player").hidden && !Player.mini) { $("#stage").focus({ preventScroll: true }); return; }
+      this.focusFirst();
+    }, delay);
+  },
+  move(dir) {
+    const cands = this.focusables(this.roots());
+    const cur = document.activeElement;
+    if (!cur || cur === document.body || !cands.includes(cur)) { this.focusFirst(); return; }
+    const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+    let best = null, bestScore = Infinity;
+    for (const el of cands) {
+      if (el === cur || cur.contains(el) || el.contains(cur)) continue;
+      const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
+      let primary, cross;
+      if (dir === "right") { if (r.left < c.right - c.width * 0.4 && dx <= 0) continue; if (dx <= 1) continue; primary = dx; cross = Math.abs(dy); }
+      else if (dir === "left") { if (dx >= -1) continue; primary = -dx; cross = Math.abs(dy); }
+      else if (dir === "down") { if (dy <= 1) continue; primary = dy; cross = Math.abs(dx); }
+      else { if (dy >= -1) continue; primary = -dy; cross = Math.abs(dx); }
+      const score = primary + cross * 2.4;
+      if (score < bestScore) { bestScore = score; best = el; }
+    }
+    if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: dir === "up" || dir === "down" ? "center" : "nearest", inline: "nearest" }); }
+    else if (dir === "down") window.scrollBy({ top: 220 });
+    else if (dir === "up") window.scrollBy({ top: -220 });
+  },
+
+  /* ---------- Back ---------- */
+  back() {
+    const dlg = document.querySelector("dialog[open]");
+    if (dlg) { dlg.close(); return; }
+    if (!$("#guide").hidden) { guide.close(); $("#guide-btn").focus(); return; }
+    if (!$("#panel").hidden) { togglePanel(false); return; }
+    if (!$("#settings").hidden) { $("#settings").hidden = true; return; }
+    if (!$("#player").hidden && !Player.mini) {
+      if (document.activeElement?.closest("#controls")) { $("#stage").focus(); return; }   // leave the control bar first
+      go(S.libraryHash || "#/home"); return;
+    }
+    const hash = location.hash.replace(/^#\/?/, "").split("/");
+    const [view, src] = [hash[0], hash[1]];
+    if (view === "title") go(Catalog.cameFrom && Catalog.cameFrom !== "#/title" ? Catalog.cameFrom : "#/movies");
+    else if (view === "show") go("#/shows");
+    else if (view === "b") {
+      const parent = S.dirParent[S.currentDir];
+      if (S.currentDir) go(parent ? `#/b/${S.source}/${parent}` : `#/b/${S.source}`); else go("#/folders");
+    } else if (view && view !== "home") go("#/home");
+  },
+
+  /** Returns true when the key was handled here. */
+  handleKey(e) {
+    const k = normKey(e);
+    const typing = e.target.matches?.("input:not([type=checkbox]):not([type=range]), textarea");
+    const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || (k === "Backspace" && !typing);
+    const overlay = document.querySelector("dialog[open]") || !$("#guide").hidden || !$("#panel").hidden || !$("#settings").hidden;
+    const playerOpen = !$("#player").hidden && !Player.mini;
+    if (isBack) { e.preventDefault(); this.back(); return true; }
+    const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[k];
+    if (!dir) {
+      if (k === "Enter" && playerOpen && !overlay && !document.activeElement?.closest("#controls")) {
+        e.preventDefault(); togglePlay(); idle.bump(); return true;           // OK on the picture = play / pause
+      }
+      return false;
+    }
+    if (typing && (dir === "left" || dir === "right")) return false;           // move the cursor in the search box
+    if (e.target.matches?.("select, input[type=range]")) return false;
+    if (playerOpen && !overlay) {
+      if (document.activeElement?.closest("#controls")) { e.preventDefault(); this.move(dir); idle.bump(); return true; }
+      if (!Player.chan && dir === "down") { e.preventDefault(); idle.show(); $("#play-btn").focus(); return true; }   // reach the buttons
+      if (!Player.chan && dir === "up") { e.preventDefault(); idle.bump(); return true; }
+      return false;                                                            // left/right seek, live: up/down change channel
+    }
+    e.preventDefault(); this.move(dir); return true;
+  },
+};
+$("#tv-toggle").addEventListener("click", () => TV.set(!TV.on));
+$("#tv-exit").addEventListener("click", () => TV.set(false));
+
+/* ===================================================== remote-control keys (TV remotes and keyboards with media keys) */
+const MEDIA_KEYCODES = { 415: "MediaPlay", 19: "MediaPause", 10252: "MediaPlayPause", 413: "MediaStop", 417: "MediaFastForward", 412: "MediaRewind",
+  427: "ChannelUp", 428: "ChannelDown", 33: "ChannelUp", 34: "ChannelDown", 457: "Info", 458: "Guide", 403: "ColorF0Red", 404: "ColorF1Green", 405: "ColorF2Yellow", 406: "ColorF3Blue" };
+/** Returns true when the key was a remote-control key and was used. Works only while something is playing. */
+function mediaKey(e) {
+  if (!video.currentSrc || !Player.info) return false;
+  const k = MEDIA_KEYCODES[e.keyCode] || e.key;
+  if ((e.keyCode === 33 || e.keyCode === 34) && (Player.mini || $("#player").hidden)) return false;   // Page Up/Down still scroll the library
+  const act = {
+    MediaPlayPause: () => togglePlay(), MediaPlay: () => video.paused && togglePlay(), MediaPause: () => !video.paused && togglePlay(),
+    MediaStop: () => Player.close(false), MediaTrackNext: () => Queue.next(), MediaTrackPrevious: () => Queue.prev(),
+    MediaFastForward: () => Player.seek(Player.now() + 30), MediaRewind: () => Player.seek(Player.now() - 30),
+    ChannelUp: () => Player.chan && Queue.zap(1), ChannelDown: () => Player.chan && Queue.zap(-1),
+    Info: () => Queue.banner(), Guide: () => Player.chan && guide.toggle(),
+    ColorF0Red: () => $("#filter-btn").click(), ColorF1Green: () => $("#panel-btn").click(),
+    ColorF2Yellow: () => Player.chan && guide.toggle(), ColorF3Blue: () => $("#mini-btn").click(),
+  }[k];
+  if (!act) return false;
+  e.preventDefault(); act(); idle.bump();
+  return true;
+}
+
+/* ===================================================== phone remote: this screen can be controlled from a phone */
+const Remote = {
+  ws: null, retry: 0, stateTimer: null, soonTimer: null, lastSent: "", status_: "",
+  enabled() { return store.get("remote", TVUA.test(UA)); },
+  name() { return store.get("screenName", "") || (TV.on ? "TV" : "Screen"); },
+  id() {
+    let i = store.get("screenId");
+    if (!i) { i = Math.random().toString(36).slice(2, 12); store.set("screenId", i); }
+    return i;
+  },
+  status(text) { this.status_ = text; const el = $("#remote-status"); if (el) el.textContent = text; },
+  start() {
+    if (!this.enabled()) { this.stop(); return; }
+    if (this.ws && this.ws.readyState <= 1) return;
+    this.connect();
+  },
+  stop() {
+    clearInterval(this.stateTimer);
+    if (this.ws) { this.ws.onclose = null; try { this.ws.close(); } catch { /* already closed */ } this.ws = null; }
+    this.status("Off");
+  },
+  connect() {
+    const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/remote/ws`);
+    this.ws = ws;
+    ws.onopen = () => {
+      this.retry = 0; this.lastSent = "";
+      ws.send(JSON.stringify({ type: "hello", role: "screen", id: this.id(), name: this.name() }));
+      this.push(true);
+      clearInterval(this.stateTimer); this.stateTimer = setInterval(() => this.push(false), 2000);
+      this.status(`Connected as "${this.name()}"`);
+    };
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch { return; }
+      if (m.type === "cmd") this.exec(m.cmd, m.args || {});
+    };
+    ws.onclose = () => {
+      clearInterval(this.stateTimer); this.ws = null;
+      this.status("Reconnecting…");
+      if (this.enabled()) setTimeout(() => this.start(), Math.min(15000, 1000 * 2 ** this.retry++));
+    };
+  },
+  state() {
+    const active = !!Player.info && !!video.currentSrc && !$("#player").hidden;
+    const q = Queue.list[Queue.pos];
+    const chan = active && Player.chan ? { num: Queue.pos + 1, name: q?.title || "", logo: q?.logo || null } : null;
+    return {
+      active, playing: active && !video.paused, live: active && !!Player.info?.live,
+      title: !active ? "" : chan ? splitTags(chan.name).title : (Player.info.title || ""),
+      mediaKey: active ? Player.info.media_key : null, position: active ? Math.round(Player.now() * 10) / 10 : 0,
+      duration: active ? Math.round(Player.duration || 0) : 0, volume: Number($("#volume").value), filterOn: Player.filterOn,
+      mini: Player.mini, channel: chan, tv: TV.on, view: location.hash, queue: Queue.list.length, shuffle: Queue.shuffle, repeat: Queue.repeat,
+    };
+  },
+  push(force) {
+    if (!this.ws || this.ws.readyState !== 1) return;
+    const s = JSON.stringify({ type: "state", state: this.state() });
+    if (!force && s === this.lastSent) return;
+    this.lastSent = s; this.ws.send(s);
+  },
+  soon() { clearTimeout(this.soonTimer); this.soonTimer = setTimeout(() => this.push(true), 150); },
+
+  pressKey(key) {
+    if (!TV.on && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(key) && $("#player").hidden) TV.set(true);   // arrows from a phone mean "use it like a TV"
+    const a = document.activeElement;
+    const target = a && a !== document.body ? a : document.body;
+    if (key === "Enter") {
+      const clickable = target.closest?.("a[href], button, summary, label, [role=button]");
+      if (clickable && !clickable.disabled) { clickable.click(); return; }
+    }
+    target.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }));
+  },
+  exec(cmd, a) {
+    const playing = !!video.currentSrc && !!Player.info;
+    const num = (v, d = 0) => (Number.isFinite(Number(v)) ? Number(v) : d);
+    switch (cmd) {
+      case "key": this.pressKey(String(a.key || "")); break;
+      case "playpause": if (playing) togglePlay(); break;
+      case "play": if (playing && video.paused) togglePlay(); break;
+      case "pause": if (playing && !video.paused) togglePlay(); break;
+      case "seek": if (playing) Player.seek(Player.now() + num(a.delta)); break;
+      case "seekto": if (playing) Player.seek(num(a.t)); break;
+      case "next": Queue.next(); break;
+      case "prev": Queue.prev(); break;
+      case "channel": if (Player.chan) Queue.zap(num(a.delta, 1) >= 0 ? 1 : -1); break;
+      case "digits": for (const d of String(a.digits || "").slice(0, 4)) if (/\d/.test(d)) Queue.digit(d); break;
+      case "volume": {
+        const v = a.value != null ? num(a.value) : Number($("#volume").value) + num(a.delta);
+        $("#volume").value = Math.max(0, Math.min(1, v)); $("#volume").dispatchEvent(new Event("input", { bubbles: true }));
+        break;
+      }
+      case "mute": { const vol = $("#volume"); if (Number(vol.value) > 0) { this.lastVolume = Number(vol.value); vol.value = 0; } else vol.value = this.lastVolume || 1; vol.dispatchEvent(new Event("input", { bubbles: true })); break; }
+      case "filter": if (playing) $("#filter-btn").click(); break;
+      case "stop": Player.close(false); break;
+      case "home": go("#/home"); break;
+      case "guide": if (Player.chan) guide.toggle(); break;
+      case "mini": if (playing) $("#mini-btn").click(); break;
+      case "tv": TV.set(a.on !== false); break;
+      case "nav": if (typeof a.hash === "string" && a.hash.startsWith("#/") && !a.hash.startsWith("#/p/")) go(a.hash); break;
+      case "open":
+        if (a.src && a.item) {
+          Queue.set([{ src: String(a.src), item: String(a.item), title: String(a.title || ""), chan: a.chan || null, logo: a.logo || null, groups: a.groups || [] }]);
+          Queue.loadMore = null;
+          go(`#/p/${a.src}/${a.item}`);
+        }
+        break;
+      default: break;
+    }
+    this.soon();
+  },
+};
+["play", "pause", "ended", "loadedmetadata", "volumechange"].forEach((ev) => video.addEventListener(ev, () => Remote.soon()));
+window.addEventListener("hashchange", () => Remote.soon());
+$("#remote-btn").addEventListener("click", () => {
+  $("#remote-enable").checked = Remote.enabled();
+  $("#remote-name").value = store.get("screenName", "") || "";
+  $("#remote-url").value = `${location.origin}/remote`;
+  Remote.status(Remote.enabled() ? (Remote.ws?.readyState === 1 ? `Connected as "${Remote.name()}"` : "Connecting…") : "Off");
+  $("#remote-dialog").showModal();
 });
+$("#remote-enable").addEventListener("change", (e) => { store.set("remote", e.target.checked); Remote.start(); });
+$("#remote-name").addEventListener("change", (e) => { store.set("screenName", e.target.value.trim()); if (Remote.enabled()) { Remote.stop(); Remote.start(); } });
+$("#remote-copy").addEventListener("click", async () => {
+  try { await navigator.clipboard.writeText($("#remote-url").value); toast("Address copied"); } catch { $("#remote-url").select(); toast("Press Ctrl+C to copy"); }
+});
+
+/* ---- the TV's mouse pointer: hide it while the remote is used; it comes back when the pointer is moved ---- */
+let cursorTimer;
+function hideCursorNow() { clearTimeout(cursorTimer); document.documentElement.classList.add("hide-cursor"); }
+function showCursorBriefly() {
+  document.documentElement.classList.remove("hide-cursor");
+  clearTimeout(cursorTimer);
+  if (IS_TV_DEVICE || TV.on) cursorTimer = setTimeout(hideCursorNow, 3500);
+}
+document.addEventListener("mousemove", showCursorBriefly, { passive: true });
+if (IS_TV_DEVICE) hideCursorNow();
 
 /* ===================================================== routing */
 function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
 async function route() {
+  requestAnimationFrame(() => Player.placeMini());           // the sidebar may have appeared or gone
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   const [view, src, id] = [parts[0], parts[1], parts.slice(2).join("/")];
+  TV.navCurrent(view);
+  if (!view) { go("#/home"); return; }                       // Home is where everyone lands
+  if (isKids() && (["b", "tasks", "folders", "profiles"].includes(view) || (view === "live" && !S.profile?.settings?.allow_live))) { go("#/home"); return; }
   $("#tasks").hidden = view !== "tasks";
   if (view !== "p") S.libraryHash = location.hash || "#/";
-  if (view === "p" && src && id) { Player.open(src, id); return; }
-  if (!$("#player").hidden) Player.close(false);
+  if (view === "p" && src && id) {
+    if (Player.mini && src === Player.src && id === Player.item) Player.expand();   // "open the player" from the mini player
+    else Player.open(src, id);
+    return;
+  }
+  if (!$("#player").hidden && !Player.mini) { if (Player.keepPlaying()) Player.minimize(); else Player.close(false); }
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   $("#library").hidden = false;
-  const inCatalog = ["movies", "shows", "show", "title", "live"].includes(view);
+  const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;
   $$("#rail-links a").forEach((a) => { if (!inCatalog) a.removeAttribute("aria-current"); });
   if (inCatalog) { Catalog.open(view, src); return; }
@@ -1773,15 +2465,21 @@ async function route() {
 window.addEventListener("hashchange", route);
 
 async function start() {
-  $("#login").hidden = true; $("#app").hidden = false;
+  $("#login").hidden = true;
+  try { await Profiles.load(); } catch { return; }
+  if (Profiles.data.needs_pick) { Profiles.show(true); return; }        // more than one profile and no choice yet: ask
+  $("#app").hidden = false;
+  Profiles.apply();
   try {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
   } catch { return; }
   route();
   Jobs.poll();
+  Remote.start();
 }
 
 (async () => {
+  TV.init();
   try {
     const s = await api("/api/session");
     S.authRequired = s.auth_required;

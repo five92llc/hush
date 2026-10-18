@@ -111,12 +111,20 @@ class TMDBProvider:
             hit = best(self.search_movies(title, None), title, year)
         return self.movie_detail(hit["id"]) if hit else None
 
+    def _cert(self, path: str, pick) -> str | None:
+        try:
+            return pick(self._get(path))
+        except (httpx.HTTPError, KeyError, StopIteration):
+            return None
+
     def movie_detail(self, mid: str) -> dict:
         d = self._get(f"/movie/{mid}")
+        cert = self._cert(f"/movie/{mid}/release_dates", lambda j: next(
+            (rd["certification"] for res in j["results"] if res["iso_3166_1"] == "US" for rd in res["release_dates"] if rd.get("certification")), None))
         return {"provider": "tmdb", "id": str(d["id"]), "title": d["title"], "year": _year(d.get("release_date")),
                 "overview": d.get("overview") or "", "genres": [g["name"] for g in d.get("genres", [])],
                 "rating": d.get("vote_average") or None, "runtime": d.get("runtime") or None,
-                "poster_url": self._poster(d.get("poster_path")),
+                "poster_url": self._poster(d.get("poster_path")), "cert": cert,
                 "ids": {"tmdb": str(d["id"]), **({"imdb": d["imdb_id"]} if d.get("imdb_id") else {})}}
 
     def search_shows(self, title: str, year: int | None) -> list[dict]:
@@ -133,9 +141,11 @@ class TMDBProvider:
 
     def show_detail(self, sid: str) -> dict:
         d = self._get(f"/tv/{sid}")
+        cert = self._cert(f"/tv/{sid}/content_ratings", lambda j: next(
+            (r["rating"] for r in j["results"] if r["iso_3166_1"] == "US" and r.get("rating")), None))
         return {"provider": "tmdb", "id": str(d["id"]), "title": d["name"], "year": _year(d.get("first_air_date")),
                 "overview": d.get("overview") or "", "genres": [g["name"] for g in d.get("genres", [])],
-                "rating": d.get("vote_average") or None, "poster_url": self._poster(d.get("poster_path")),
+                "rating": d.get("vote_average") or None, "poster_url": self._poster(d.get("poster_path")), "cert": cert,
                 "ids": {"tmdb": str(d["id"])}}
 
     def episodes(self, sid: str, season: int) -> dict[tuple[int, int], dict]:

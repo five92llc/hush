@@ -3,20 +3,22 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 
-from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, media, stream
+from . import discover, media, profiles as rules, stream
 from .hls import HLSError, HLSManager
 from .live import LiveTV
+from .remote import RemoteHub
 from .analysis.jobs import Analyzer
 from .auth import COOKIE, SESSION_TTL, Auth
 from .config import Config, load_config
@@ -31,6 +33,29 @@ from .sources.base import enc
 
 log = logging.getLogger("hush")
 WEB = Path(__file__).parent / "web"
+
+
+class FreshStatic(StaticFiles):
+    """Static files that browsers must re-check on every use (cheap: unchanged files answer 304).
+    Without this Safari kept running an old app.js after an update."""
+
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
+_STATIC_REF = re.compile(r'((?:src|href)=")/static/([^"?#]+)(")')
+
+
+def versioned_page(name: str) -> HTMLResponse:
+    """An HTML page whose /static/... links carry the file's change time, so an updated script or style
+    sheet is fetched at once instead of being taken from the browser's cache."""
+    def stamp(m):
+        f = WEB / m.group(2)
+        v = int(f.stat().st_mtime) if f.is_file() else 0
+        return f"{m.group(1)}/static/{m.group(2)}?v={v}{m.group(3)}"
+    return HTMLResponse(_STATIC_REF.sub(stamp, (WEB / name).read_text(encoding="utf-8")), headers={"Cache-Control": "no-cache"})
 CACHE_TTL = 600
 
 
@@ -63,6 +88,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     library = MetadataService(cfg, db, registry)
     hls = HLSManager(cfg.data_dir / "hls")
     livetv = LiveTV(cfg, db, registry)
+    remote = RemoteHub()
     renamer = Renamer(db, registry)
     renamer.cache_dir, renamer.art_dir = cfg.cache_dir, library.art_dir
     tasks = TaskManager(cfg, db, registry, analyzer, library, livetv)
@@ -102,6 +128,81 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     need = Depends(auth.require)
 
+    # ---- profiles: who is watching ------------------------------------------------------
+    PROFILE_COOKIE = "hush_profile"
+
+    def default_profile() -> dict:
+        everyone = db.list_profiles()
+        return next((p for p in everyone if not p["kids"]), everyone[0])
+
+    def get_profile(request: Request) -> dict:
+        pid = request.cookies.get(PROFILE_COOKIE)
+        return (db.get_profile(pid) if pid else None) or default_profile()
+
+    def need_adult(prof: dict = Depends(get_profile)) -> dict:
+        if prof["kids"]:
+            raise HTTPException(403, "Ask a grown-up to do that")
+        return prof
+
+    def title_ok(prof: dict, key: str) -> bool:
+        return not prof["kids"] or rules.approved(prof, db.title_facts(key))
+
+    def episode_ok(prof: dict, row: dict, show_cert: str | None) -> bool:
+        return rules.approved(prof, {"cert": row.get("cert"), "show_cert": show_cert, "flags": row.get("flags"), "scanned": row.get("scanned")})
+
+    KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
+                    "/api/notifications", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
+                    "/api/browse", "/api/live/playlists", "/api/transcript")
+    ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
+
+    def kids_refusal(prof: dict, method: str, path: str) -> str | None:
+        """Why a kids profile may not make this request, or None. Backs up the hidden buttons: the server decides."""
+        cfg = rules.kid_settings(prof)
+        if path.startswith(KIDS_BLOCKED):
+            return "That is for grown-ups"
+        if path.startswith("/api/sources") and method != "GET":
+            return "That is for grown-ups"
+        if path.startswith("/api/live") and not cfg["allow_live"]:
+            return "Live TV is switched off for this profile"
+        if path.startswith("/api/library/title/") and method != "GET":
+            return "That is for grown-ups"
+        segs = path.split("/")                       # ['', 'api', kind, a, b, ...]
+        kind = segs[2] if len(segs) > 2 else ""
+        src = item = None
+        if kind in ITEM_PATHS and len(segs) > 4:
+            src, item = segs[3], segs[4].removesuffix(".mkv")
+        elif kind == "hls" and len(segs) > 5 and segs[3] == "start":
+            src, item = segs[4], segs[5]
+        if src is not None:
+            if src == "url" and cfg["allow_live"]:
+                return None
+            return None if title_ok(prof, media_key(src, item)) else "This title is not available on this profile"
+        if kind == "filters" and len(segs) > 3:
+            if method != "GET" or len(segs) > 4:
+                return "That is for grown-ups"
+            return None if title_ok(prof, segs[3]) else "This title is not available on this profile"
+        if kind == "progress" and len(segs) > 3 and segs[3] != "recent":
+            return None if title_ok(prof, segs[3]) else "This title is not available on this profile"
+        if kind == "art" and len(segs) > 3:
+            key = segs[3].removesuffix(".jpg")
+            if db.title_facts(key):
+                return None if title_ok(prof, key) else "Not available"
+            eps = [e for e in db.episode_facts() if e["show_key"] == key]
+            show = db.get_show(key) or {}
+            return None if any(rules.approved(prof, {**e, "show_cert": show.get("cert")}) for e in eps) else "Not available"
+        return None
+
+    @app.middleware("http")
+    async def profile_guard(request: Request, call_next):
+        path = request.url.path
+        if path.startswith("/api/") and not path.startswith(("/api/session", "/api/login", "/api/logout", "/api/profiles", "/api/config", "/api/client-error")):
+            prof = get_profile(request)
+            if prof["kids"]:
+                why = await run_in_threadpool(kids_refusal, prof, request.method, path)
+                if why:
+                    return JSONResponse({"detail": why}, status_code=403)
+        return await call_next(request)
+
     # ---- helpers --------------------------------------------------------
     def resolve(source_id: str, item_id: str):
         key = ("ref", source_id, item_id)
@@ -122,11 +223,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(502, f"Could not read media: {exc}")
 
     # ---- pages & session ------------------------------------------------
-    app.mount("/static", StaticFiles(directory=WEB), name="static")
+    app.mount("/static", FreshStatic(directory=WEB), name="static")
 
     @app.get("/", include_in_schema=False)
     def index():
-        return FileResponse(WEB / "index.html", headers={"Cache-Control": "no-cache"})
+        return versioned_page("index.html")
 
     @app.get("/api/session")
     def session(request: Request):
@@ -171,8 +272,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     # ---- sources --------------------------------------------------------
     @app.get("/api/sources", dependencies=[need])
-    def list_sources():
-        return registry.list()
+    def list_sources(prof: dict = Depends(get_profile)):
+        return [] if prof["kids"] else registry.list()
 
     @app.post("/api/sources", dependencies=[need])
     def add_source(body: dict = Body(...)):
@@ -192,11 +293,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return discover_dlna()
 
     @app.get("/api/browse/{source_id}", dependencies=[need])
-    def browse(source_id: str, dir: str = ""):
+    def browse(source_id: str, dir: str = "", prof: dict = Depends(get_profile)):
         entries = [e.to_dict(source_id) for e in registry.get(source_id).browse(dir)]
         keys = [e["media_key"] for e in entries if "media_key" in e]
         done = db.filtered_keys(keys)
-        prog = db.progress_map(keys)
+        prog = db.progress_map(prof["id"], keys)
         for e in entries:
             if "media_key" in e:
                 e["filtered"] = e["media_key"] in done
@@ -219,12 +320,12 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     # ---- media ----------------------------------------------------------
     @app.get("/api/media/{source_id}/{item_id}", dependencies=[need])
-    def media_info(source_id: str, item_id: str, audio: int | None = None):
+    def media_info(source_id: str, item_id: str, audio: int | None = None, prof: dict = Depends(get_profile)):
         ref = resolve(source_id, item_id)
         p = probe(source_id, item_id)
         key = media_key(source_id, item_id)
         f = db.get_filter(key)
-        prog = db.get_progress(key)
+        prog = db.get_progress(prof["id"], key)
         resume = ({"position": prog["position"], "finished": bool(prog["finished"])}
                   if prog and not ref.live else None)
         return {"title": ref.title, "kind": "video" if p.video else "audio", "name": ref.name,
@@ -465,13 +566,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return m
 
     @app.get("/api/library/movies", dependencies=[need])
-    def library_movies():
-        return [_card(m) for m in db.list_movies()]
+    def library_movies(prof: dict = Depends(get_profile)):
+        return [_card(m) for m in db.list_movies(prof["id"]) if not prof["kids"] or rules.approved(prof, m)]
 
     @app.get("/api/library/shows", dependencies=[need])
-    def library_shows():
+    def library_shows(prof: dict = Depends(get_profile)):
+        shown_eps: dict[str, int] = {}
+        if prof["kids"]:                                     # a show is there only for the episodes this profile may watch
+            certs = {s["show_key"]: s.get("cert") for s in db.list_shows(prof["id"])}
+            for e in db.episode_facts():
+                if rules.approved(prof, {**e, "show_cert": certs.get(e["show_key"])}):
+                    shown_eps[e["show_key"]] = shown_eps.get(e["show_key"], 0) + 1
         out = []
-        for s in db.list_shows():
+        for s in db.list_shows(prof["id"]):
+            if prof["kids"]:
+                if not shown_eps.get(s["show_key"]):
+                    continue
+                s["episodes"] = shown_eps[s["show_key"]]
             s["art_url"] = f"/api/art/{s['show_key']}.jpg" if s.get("art") else None
             s["scanned"] = int(s.get("scanned") or 0)
             s["watched"] = int(s.get("watched") or 0)
@@ -479,20 +590,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return out
 
     @app.get("/api/library/shows/{show_key}", dependencies=[need])
-    def library_show(show_key: str):
+    def library_show(show_key: str, prof: dict = Depends(get_profile)):
         show = db.get_show(show_key)
         if not show:
             raise HTTPException(404)
+        eps = [e for e in db.episodes_of(show_key, prof["id"]) if not prof["kids"] or episode_ok(prof, e, show.get("cert"))]
+        if prof["kids"] and not eps:
+            raise HTTPException(404)
         show["art_url"] = f"/api/art/{show_key}.jpg" if show.get("art") else None
-        return {"show": show, "episodes": [_card(e) for e in db.episodes_of(show_key)]}
+        return {"show": show, "episodes": [_card(e) for e in eps]}
 
     @app.get("/api/library/title/{key}", dependencies=[need])
-    def library_title(key: str):
+    def library_title(key: str, prof: dict = Depends(get_profile)):
         m = db.get_meta(key)
-        if not m:
+        if not m or not title_ok(prof, key):
             raise HTTPException(404)
         m["scanned"] = bool(db.get_filter(key))
-        pr = db.get_progress(key) or {}
+        pr = db.get_progress(prof["id"], key) or {}
         m["position"], m["duration"], m["watched"] = pr.get("position"), pr.get("duration"), bool(pr.get("finished"))
         return _card(m)
 
@@ -535,9 +649,153 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 for i, x in enumerate(ref.subtitle_paths)]
         return {"tracks": out, "transcript": tr.load_words(cfg.cache_dir, key) is not None, "key": key}
 
+    # ---- errors from browsers (a smart TV has no console) ------------------------------------
+    recent_client_errors: dict[str, list[float]] = {}
+
+    @app.post("/api/client-error", include_in_schema=False)
+    async def client_error(request: Request):
+        """Scripts in the browser report their errors here, so a blank TV screen shows up in the server log.
+        No login needed (it can fail before one); small, rate limited, and only logged."""
+        ip = request.client.host if request.client else "?"
+        now = time.time()
+        stamps = [t for t in recent_client_errors.get(ip, []) if now - t < 60]
+        if len(stamps) >= 20:
+            return Response(status_code=204)
+        recent_client_errors[ip] = stamps + [now]
+        try:
+            data = json.loads((await request.body())[:4000])
+            info = {k: str(data.get(k, ""))[:400] for k in ("kind", "message", "file", "line", "col", "stack", "ua", "hash")}
+        except (ValueError, AttributeError):
+            return Response(status_code=204)
+        log.warning("client error from %s: %s", ip, json.dumps(info))
+        return Response(status_code=204)
+
+    # ---- profiles ---------------------------------------------------------------------
+    def _set_profile_cookie(resp, request: Request, pid: str) -> None:
+        resp.set_cookie(PROFILE_COOKIE, pid, max_age=365 * 86400, httponly=True, samesite="lax", secure=request.url.scheme == "https")
+
+    @app.get("/api/profiles", dependencies=[need])
+    def profiles_list(request: Request):
+        everyone = db.list_profiles()
+        cookie = request.cookies.get(PROFILE_COOKIE)
+        valid = any(p["id"] == cookie for p in everyone)
+        current = next((p for p in everyone if p["id"] == cookie), None) or default_profile()
+        return {"profiles": [rules.public(p) for p in everyone], "current": rules.public(current),
+                "needs_pick": len(everyone) > 1 and not valid, "can_manage": not current["kids"],
+                "lock": bool(db.get_setting("profiles_lock", False)) and auth.enabled,
+                "categories": list(rules.CATEGORIES), "colors": list(rules.COLORS), "avatars": list(rules.AVATARS)}
+
+    @app.post("/api/profiles/select", dependencies=[need])
+    def profiles_select(request: Request, body: dict = Body(...)):
+        target = db.get_profile(str(body.get("id", "")))
+        if not target:
+            raise HTTPException(404, "No such profile")
+        here = get_profile(request)
+        if (here["kids"] and not target["kids"] and here["id"] != target["id"]
+                and db.get_setting("profiles_lock", False) and auth.enabled):
+            if not auth.check_password(str(body.get("password", "")), request.client.host if request.client else "?"):
+                raise HTTPException(403, "Enter the Hush password to leave a kids profile")
+        resp = JSONResponse({"ok": True, "profile": rules.public(target)})
+        _set_profile_cookie(resp, request, target["id"])
+        return resp
+
+    def _profile_fields(body: dict, existing: dict | None = None) -> tuple[str, bool, str, dict, str]:
+        name = str(body.get("name", existing["name"] if existing else "")).strip()[:24]
+        if not name:
+            raise HTTPException(400, "Give the profile a name")
+        kids = bool(body.get("kids", existing["kids"] if existing else False))
+        color = str(body.get("color") or (existing or {}).get("color") or rules.COLORS[len(db.list_profiles()) % len(rules.COLORS)])
+        if color not in rules.COLORS:
+            color = rules.COLORS[0]
+        settings = dict((existing or {}).get("settings") or {})
+        if kids and isinstance(body.get("settings"), dict):
+            try:
+                settings.update(rules.clean_settings(body["settings"]))
+            except (TypeError, ValueError):
+                raise HTTPException(400, "Those settings are not valid")
+        avatar = str(body.get("avatar", (existing or {}).get("avatar") or ""))
+        if avatar and avatar not in rules.AVATARS:
+            raise HTTPException(400, "Pick one of the pictures")
+        return name, kids, color, settings if kids else {}, avatar
+
+    @app.post("/api/profiles", dependencies=[need])
+    def profiles_create(body: dict = Body(...), _adult: dict = Depends(need_adult)):
+        if len(db.list_profiles()) >= 12:
+            raise HTTPException(400, "That is the most profiles Hush keeps (12)")
+        name, kids, color, settings, avatar = _profile_fields(body)
+        if any(p["name"].lower() == name.lower() for p in db.list_profiles()):
+            raise HTTPException(400, "A profile with that name already exists")
+        pid = "p" + uuid.uuid4().hex[:8]
+        db.save_profile(pid, name, kids, color, settings, avatar)
+        return rules.public(db.get_profile(pid))
+
+    @app.put("/api/profiles/lock", dependencies=[need])
+    def profiles_lock(body: dict = Body(...), _adult: dict = Depends(need_adult)):
+        db.set_setting("profiles_lock", bool(body.get("lock")))
+        return {"lock": bool(body.get("lock")) and auth.enabled}
+
+    @app.put("/api/profiles/{pid}", dependencies=[need])
+    def profiles_update(pid: str, body: dict = Body(...), _adult: dict = Depends(need_adult)):
+        existing = db.get_profile(pid)
+        if not existing:
+            raise HTTPException(404)
+        name, kids, color, settings, avatar = _profile_fields(body, existing)
+        if kids and not existing["kids"] and not any(p["id"] != pid and not p["kids"] for p in db.list_profiles()):
+            raise HTTPException(400, "There must be at least one grown-up profile")
+        if any(p["id"] != pid and p["name"].lower() == name.lower() for p in db.list_profiles()):
+            raise HTTPException(400, "A profile with that name already exists")
+        db.save_profile(pid, name, kids, color, settings, avatar)
+        return rules.public(db.get_profile(pid))
+
+    @app.delete("/api/profiles/{pid}", dependencies=[need])
+    def profiles_delete(pid: str, _adult: dict = Depends(need_adult)):
+        victim = db.get_profile(pid)
+        if not victim:
+            raise HTTPException(404)
+        if not victim["kids"] and not any(p["id"] != pid and not p["kids"] for p in db.list_profiles()):
+            raise HTTPException(400, "There must be at least one grown-up profile")
+        db.delete_profile(pid)
+        return {"ok": True}
+
+    # ---- phone remote ---------------------------------------------------------------
+    @app.get("/remote", include_in_schema=False)
+    def remote_page():
+        return versioned_page("remote.html")
+
+    @app.websocket("/api/remote/ws")
+    async def remote_ws(ws: WebSocket):
+        if auth.enabled and not auth.valid_session(ws.cookies.get(COOKIE)):
+            await ws.close(code=4401)
+            return
+        await ws.accept()
+        role, sid = None, None
+        try:
+            while True:
+                msg = await ws.receive_json()
+                kind = msg.get("type") if isinstance(msg, dict) else None
+                if kind == "hello" and role is None:
+                    role = "screen" if msg.get("role") == "screen" else "remote"
+                    sid = remote.clean_id(msg.get("id"))
+                    if role == "screen":
+                        await remote.add_screen(sid, str(msg.get("name") or "Screen"), ws)
+                    else:
+                        await remote.add_remote(ws)
+                elif kind == "state" and role == "screen" and isinstance(msg.get("state"), dict):
+                    await remote.update_state(sid, msg["state"])
+                elif kind == "cmd" and role == "remote":
+                    ok = await remote.send_cmd(str(msg.get("to", "")), str(msg.get("cmd", "")), msg.get("args") or {})
+                    if not ok:
+                        await ws.send_json({"type": "error", "message": "That screen is not connected", "to": msg.get("to")})
+                elif kind == "ping":
+                    await ws.send_json({"type": "pong"})
+        except (WebSocketDisconnect, RuntimeError, ValueError):
+            pass
+        finally:
+            await remote.remove(ws, role, sid)
+
     # ---- playback progress ------------------------------------------------------
     @app.post("/api/progress/{key}", dependencies=[need])
-    def progress_save(key: str, body: dict = Body(...)):
+    def progress_save(key: str, body: dict = Body(...), prof: dict = Depends(get_profile)):
         """Remember where someone is in a title. A POST so the browser can send it as the page closes."""
         if not key.isalnum():
             raise HTTPException(404)
@@ -551,32 +809,36 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         sid, iid = str(body.get("source_id", "")), str(body.get("item_id", ""))
         if not sid or not iid or media_key(sid, iid) != key:
             raise HTTPException(400, "source_id/item_id do not match this title")
-        return db.save_progress(key, sid, iid, str(body.get("title", ""))[:300], pos, dur)
+        return db.save_progress(prof["id"], key, sid, iid, str(body.get("title", ""))[:300], pos, dur)
 
     @app.post("/api/progress/{key}/watched", dependencies=[need])
-    def progress_watched(key: str, body: dict = Body(...)):
+    def progress_watched(key: str, body: dict = Body(...), prof: dict = Depends(get_profile)):
         """Mark a title watched or unwatched by hand."""
         m = db.get_meta(key) or {}
         if body.get("watched"):
             sid, iid = body.get("source_id") or m.get("source_id"), body.get("item_id") or m.get("item_id")
             if not sid or not iid or media_key(sid, iid) != key:
                 raise HTTPException(400, "unknown title")
-            existing = db.get_progress(key) or {}
+            existing = db.get_progress(prof["id"], key) or {}
             dur = existing.get("duration") or 1.0
-            return db.save_progress(key, sid, iid, m.get("title") or str(body.get("title", ""))[:300], dur, dur)
-        db.clear_progress(key)
+            return db.save_progress(prof["id"], key, sid, iid, m.get("title") or str(body.get("title", ""))[:300], dur, dur)
+        db.clear_progress(prof["id"], key)
         return {"position": 0.0, "finished": 0}
 
     @app.delete("/api/progress/{key}", dependencies=[need])
-    def progress_clear(key: str):
-        db.clear_progress(key)
+    def progress_clear(key: str, prof: dict = Depends(get_profile)):
+        db.clear_progress(prof["id"], key)
         return {"ok": True}
 
     @app.get("/api/progress/recent", dependencies=[need])
-    def progress_recent(limit: int = Query(20, ge=1, le=60)):
+    def progress_recent(limit: int = Query(20, ge=1, le=60), prof: dict = Depends(get_profile)):
         """Titles to pick up again, newest first, with the artwork and names the library has."""
         out = []
-        for p in db.recent_progress(limit):
+        for p in db.recent_progress(prof["id"], limit * 3 if prof["kids"] else limit):
+            if prof["kids"] and not title_ok(prof, p["media_key"]):
+                continue
+            if len(out) >= limit:
+                break
             m = db.get_meta(p["media_key"]) or {}
             show = db.get_show(m["show_key"]) if m.get("show_key") else None
             title = (show["title"] if show else (m.get("title") or p["title"] or "Untitled"))
@@ -666,12 +928,12 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/live/channels", dependencies=[need])
     def live_channels(q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,
                       letter: str = Query("", max_length=1), recent: bool = False,
-                      limit: int = Query(120, ge=1, le=500), offset: int = Query(0, ge=0)):
-        q = q.strip()
-        rows = db.list_channels(q, group, favorites, hide_dead, limit, offset, letter.upper(), recent)
+                      limit: int = Query(120, ge=1, le=500), offset: int = Query(0, ge=0), prof: dict = Depends(get_profile)):
+        q, pid = q.strip(), prof["id"]
+        rows = db.list_channels(q, group, favorites, hide_dead, limit, offset, letter.upper(), recent, pid)
         return {"channels": [_channel(c) for c in rows],
-                "total": db.count_channels(q, group, favorites, hide_dead, letter.upper(), recent),
-                "letters": db.letter_counts(q, group, favorites, hide_dead), "stats": db.channel_stats()}
+                "total": db.count_channels(q, group, favorites, hide_dead, letter.upper(), recent, pid),
+                "letters": db.letter_counts(q, group, favorites, hide_dead, pid), "stats": db.channel_stats(pid)}
 
     @app.get("/api/live/groups", dependencies=[need])
     def live_groups():
@@ -687,15 +949,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return FileResponse(f, media_type="image/png", headers={"Cache-Control": "private, max-age=604800"})
 
     @app.post("/api/live/channels/{key}/favorite", dependencies=[need])
-    def live_favorite(key: str, body: dict = Body(...)):
+    def live_favorite(key: str, body: dict = Body(...), prof: dict = Depends(get_profile)):
         if not db.get_channel(key):
             raise HTTPException(404)
-        db.set_favorite(key, bool(body.get("favorite")))
+        db.set_favorite(key, bool(body.get("favorite")), prof["id"])
         return {"ok": True}
 
     @app.post("/api/live/channels/{key}/report", dependencies=[need])
-    def live_report(key: str, body: dict = Body(...)):
-        db.report_channel(key, bool(body.get("ok")))
+    def live_report(key: str, body: dict = Body(...), prof: dict = Depends(get_profile)):
+        db.report_channel(key, bool(body.get("ok")), prof["id"])
         return {"ok": True}
 
     @app.get("/api/live/playlists", dependencies=[need])

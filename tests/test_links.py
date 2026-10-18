@@ -673,3 +673,97 @@ def test_letter_buckets_and_channel_letter_filters(tmp_path):
         assert again.letter_counts() == {"A": 2, "B": 1, "3": 1, "T": 1, "Z": 1}
     finally:
         srv.shutdown()
+
+
+# ---- phone remote ------------------------------------------------------------------------------
+def test_remote_relay_between_screen_and_phone(tmp_path):
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    with c.websocket_connect("/api/remote/ws") as phone:
+        phone.send_json({"type": "hello", "role": "remote"})
+        assert phone.receive_json() == {"type": "screens", "screens": []}
+        with c.websocket_connect("/api/remote/ws") as tv:
+            tv.send_json({"type": "hello", "role": "screen", "id": "living room!", "name": "Living room TV"})
+            screens = phone.receive_json()
+            assert screens["screens"] == [{"id": "livingroom", "name": "Living room TV", "state": {}}]    # the id was cleaned
+            tv.send_json({"type": "state", "state": {"title": "Heat", "playing": True, "position": 12.5}})
+            assert phone.receive_json() == {"type": "state", "id": "livingroom", "state": {"title": "Heat", "playing": True, "position": 12.5}}
+            phone.send_json({"type": "cmd", "to": "livingroom", "cmd": "seek", "args": {"delta": 10}})
+            assert tv.receive_json() == {"type": "cmd", "cmd": "seek", "args": {"delta": 10}}
+            phone.send_json({"type": "cmd", "to": "livingroom", "cmd": "rm -rf", "args": {}})              # unknown commands are refused
+            assert phone.receive_json()["type"] == "error"
+            phone.send_json({"type": "cmd", "to": "nobody", "cmd": "playpause", "args": {}})
+            assert phone.receive_json()["message"] == "That screen is not connected"
+            tv.send_json({"type": "cmd", "to": "livingroom", "cmd": "stop", "args": {}})                  # a screen cannot command screens
+            phone.send_json({"type": "ping"})
+            assert phone.receive_json() == {"type": "pong"}
+        assert phone.receive_json() == {"type": "screens", "screens": []}                                   # the TV went away
+
+
+def test_remote_needs_a_login_when_a_password_is_set(tmp_path):
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="secret", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    with pytest.raises(WebSocketDisconnect):
+        with c.websocket_connect("/api/remote/ws"):
+            pass
+    assert c.post("/api/login", json={"password": "secret"}).status_code == 200
+    with c.websocket_connect("/api/remote/ws") as ws:
+        ws.send_json({"type": "hello", "role": "remote"})
+        assert ws.receive_json()["type"] == "screens"
+
+
+def test_pages_force_fresh_scripts_and_styles(tmp_path):
+    """After an update, browsers must not keep using an old app.js or styles.css."""
+    import re
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    for page, assets in (("/", ("app.js", "styles.css")), ("/remote", ("remote.js", "remote.css"))):
+        r = c.get(page)
+        assert r.headers["cache-control"] == "no-cache"
+        for a in assets:
+            m = re.search(rf'/static/{re.escape(a)}\?v=(\d+)"', r.text)
+            assert m and int(m.group(1)) > 0, f"{a} is not versioned on {page}"
+    js = c.get("/static/app.js")
+    assert js.status_code == 200 and js.headers["cache-control"] == "no-cache"        # and is re-checked every time
+    assert c.get("/static/app.js", headers={"If-None-Match": js.headers["etag"]}).status_code == 304
+
+
+def test_browser_errors_reach_the_server_log(tmp_path, caplog):
+    import logging
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="secret", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    c = TestClient(create_app(cfg))                                                   # not signed in: a TV can fail before login
+    with caplog.at_level(logging.WARNING, logger="hush"):
+        r = c.post("/api/client-error", json={"kind": "error", "message": "replaceChildren is not a function\nsecond line", "file": "app.js",
+                                              "line": 1042, "ua": "Mozilla/5.0 (Linux; NetCast; U) Chrome/79"})
+        assert r.status_code == 204
+        for _ in range(30):
+            c.post("/api/client-error", json={"message": "spam"})                      # rate limited
+    lines = [rec.getMessage() for rec in caplog.records if "client error" in rec.getMessage()]
+    assert 1 <= len(lines) <= 20
+    assert "replaceChildren is not a function" in lines[0] and "NetCast" in lines[0] and "\n" not in lines[0]   # one safe line per error
+    assert c.post("/api/client-error", content=b"not json").status_code == 204
+
+
+def test_pages_load_the_compatibility_script_first(tmp_path):
+    import re
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    for page, main in (("/", "app.js"), ("/remote", "remote.js")):
+        html = c.get(page).text
+        assert html.index("diag.js") < html.index(main), page          # errors in the main script are then caught too

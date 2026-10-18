@@ -360,10 +360,23 @@ def test_library_cards_carry_watched_and_progress(lib_service):
     svc, db = lib_service
     svc.process_library()
     movie = next(m for m in db.list_movies())
-    db.save_progress(movie["media_key"], movie["source_id"], movie["item_id"], movie["title"], 100.0, 1000.0)
-    again = next(m for m in db.list_movies() if m["media_key"] == movie["media_key"])
+    db.save_progress("p1", movie["media_key"], movie["source_id"], movie["item_id"], movie["title"], 100.0, 1000.0)
+    again = next(m for m in db.list_movies("p1") if m["media_key"] == movie["media_key"])
     assert (again["position"], again["duration"], again["watched"]) == (100.0, 1000.0, 0)
     for s in db.list_shows():
         eps = db.episodes_of(s["show_key"])
-        db.save_progress(eps[0]["media_key"], eps[0]["source_id"], eps[0]["item_id"], "e", 1000.0, 1000.0)
-        assert next(x for x in db.list_shows() if x["show_key"] == s["show_key"])["watched"] == 1
+        db.save_progress("p1", eps[0]["media_key"], eps[0]["source_id"], eps[0]["item_id"], "e", 1000.0, 1000.0)
+        assert next(x for x in db.list_shows("p1") if x["show_key"] == s["show_key"])["watched"] == 1
+
+
+def test_ratings_are_backfilled_from_nfo_files_once(lib_service):
+    svc, db = lib_service
+    svc.process_library()
+    movie = next(m for m in db.list_movies("p1") if m["title"] == "Backrooms")
+    assert movie["cert"] is None                                                   # the fixture's NFO has no <mpaa>
+    nfo = next(f for f in svc.registry.get("m").roots[0].rglob("movie.nfo"))
+    nfo.write_text("<movie><title>Backrooms</title><year>2026</year><mpaa>Rated PG-13</mpaa></movie>")
+    db.set_setting("certs_backfilled", False)
+    assert svc.backfill_certs() == 1
+    assert next(m for m in db.list_movies("p1") if m["title"] == "Backrooms")["cert"] == "Rated PG-13"
+    assert svc.backfill_certs() == 0                                               # done once

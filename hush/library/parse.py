@@ -99,7 +99,8 @@ def read_nfo(path: Path) -> dict:
             ids.setdefault(name, g(tag))
     year = g("year") or g("premiered")[:4] or g("releasedate")[:4]
     rating = root.findtext("rating") or (root.find("ratings/rating/value").text if root.find("ratings/rating/value") is not None else "")
-    out = {"root": root.tag, "title": g("title"), "overview": g("plot"),
+    cert = g("mpaa") or g("contentrating") or g("certification")
+    out = {"root": root.tag, "title": g("title"), "overview": g("plot"), "cert": cert,
            "year": int(year) if year.isdigit() else None,
            "genres": [e.text.strip() for e in root.findall("genre") if e.text],
            "runtime": int(g("runtime")) if g("runtime").isdigit() else None,

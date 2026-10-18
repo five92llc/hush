@@ -127,6 +127,26 @@ Tips:
 - **FFmpeg access.** FFmpeg reads SMB files through a loopback endpoint that requires a per-process random token.
 - **Browser hardening.** The UI sends a strict CSP, has no third-party requests, and bundles its fonts (SIL OFL), so it works fully offline on a LAN.
 
+## Profiles
+
+Everyone in the house can have a profile: a name, a colour and a picture (pick from 16 built-in drawings such as a cat, panda or robot, or keep the first letter), with no password. Hush asks **Who's watching?** when you open it, remembers the choice in that browser, and the name in the top bar switches profile. Each profile keeps its own place in movies and shows (**Continue watching**), favorite and recently watched channels, and filter choices. Your existing history became the first profile, **Main**.
+
+A **kids profile** only shows titles that are safe for children. A title appears only when it has been **scanned**, the scan found **no flagged language** (you can allow mild language instead), and it has a **rating** (from the `.nfo` file or TMDB) that is not above the limit you pick (G, PG or PG-13). A clean language scan says nothing about violence or explicit scenes, so titles with no known rating are hidden unless you tick *Also show titles with no known rating*. Titles that were never scanned are hidden too, so run **Scan all** on your library first. Live TV is off unless you allow it, because live channels cannot be checked. Kids also never see raw folders, Tasks, scans, settings or the phone-remote page, the filter stays on for every word category so anything that slips through is muted, and the server refuses those requests even if someone types the address. Set it up under **Profiles** in the sidebar (grown-up profiles only).
+
+This is for family use, not security: with no password anyone can switch to another profile. If you set a Hush password, turn on **Ask for the Hush password to leave a kids profile** on the Profiles page so a child cannot switch back without it.
+
+## Big screen mode (TV)
+
+Press **Big screen** in the top bar to switch to a layout made for a TV and a remote: larger text, a top navigation bar, a high-contrast focus ring, and a **Home** page of shelves (Continue watching, recently watched and favorite channels, Movies, TV shows). A smart TV or Chromecast browser starts in this mode by itself. On a TV the app takes over the remote's arrow keys (including remotes that only report old numeric key codes) and hides the browser's slow mouse pointer while you use the remote; the pointer comes back for a few seconds if you move it.
+
+Use the remote's arrow keys to move between items, **OK** to open, and **Back** to go up one level (it also closes panels, leaves the player, and goes to the parent folder). In the player, **OK** plays or pauses, **←/→** skip 10 seconds, **↓** reaches the control bar, and on Live TV **↑/↓** or **Channel +/−** change channel. Media keys (play/pause, stop, next, previous, rewind, fast-forward), the coloured buttons (red: filter, green: language panel, yellow: channels, blue: mini player), **Info** and **Guide** work too. Leaving a playing title with Back keeps it playing in a **mini player**: in the top-left above the sidebar normally, bottom-right in big screen mode. Turn that off in the player settings if you prefer it to stop.
+
+## Phone remote
+
+Open **Phone remote** on the screen (the TV or computer), switch it on and name it. On your phone open `http://<your server>/remote` (for example `http://hush.local/remote`) and use *Add to Home Screen* to keep it like an app. The remote shows what is playing and has play/pause, skip, volume, the filter switch, channel up/down with a number pad, arrow keys, and Continue / Movies / Shows / Live TV lists: tap one to play it on the screen. Several screens can be controlled by choosing one at the top. The remote needs the same password as Hush. Behind nginx or another proxy, WebSocket upgrades must be allowed for `/api/remote/ws`.
+
+The remote is a small protocol (JSON over one WebSocket, described at the top of `hush/remote.py`), so a native app can use it later.
+
 ## Finding things: A–Z and 0–9
 
 Movies, TV shows, Live TV and long folders have a row of **A–Z** and **1–0** buttons at the top. Pick one to see only titles starting with it (pick it again, or **All**, to clear). Letters with nothing under them are dimmed, and the counts follow your other filters, such as the Live TV group. "The", "A" and "An" are ignored for movies and shows, so *The Matrix* files under M. The … button holds titles in other alphabets.

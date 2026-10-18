@@ -1,0 +1,8 @@
+{
+  "name": "Hush Remote",
+  "short_name": "Remote",
+  "start_url": "/remote",
+  "display": "standalone",
+  "background_color": "#191A2C",
+  "theme_color": "#191A2C"
+}

@@ -115,7 +115,7 @@ class MetadataService:
 
     def _enrich_movie(self, m: dict, nfo: dict, movies, parsed: dict) -> None:
         if nfo.get("title"):
-            m.update({k: nfo[k] for k in ("title", "year", "overview", "genres", "runtime", "rating", "ids") if k in nfo})
+            m.update({k: nfo[k] for k in ("title", "year", "overview", "genres", "runtime", "rating", "ids", "cert") if k in nfo})
             m["provider"] = "nfo"
         if movies and (not m["overview"] or m["provider"] != "nfo"):
             hit = movies.movie(m["title"], m["year"])
@@ -123,7 +123,7 @@ class MetadataService:
                 if m["provider"] != "nfo":
                     m["title"], m["year"] = hit["title"], hit.get("year") or m["year"]
                     m["provider"] = hit["provider"]
-                for k in ("overview", "genres", "runtime", "rating"):
+                for k in ("overview", "genres", "runtime", "rating", "cert"):
                     if not m.get(k) and hit.get(k):
                         m[k] = hit[k]
                 m["ids"] = {**hit.get("ids", {}), **m["ids"]}
@@ -145,14 +145,14 @@ class MetadataService:
                 m[k] = nfo[k]
         if nfo.get("overview"):
             m["overview"], m["provider"] = nfo["overview"], "nfo"
-        for k in ("runtime", "rating"):
+        for k in ("runtime", "rating", "cert"):
             if nfo.get(k):
                 m[k] = nfo[k]
         show = self.db.get_show(key)
         if show is None:
             show = {"show_key": key, "title": show_title, "year": show_year, "overview": snfo.get("overview", ""),
                     "genres": snfo.get("genres", []), "rating": snfo.get("rating"), "ids": snfo.get("ids", {}),
-                    "provider": "nfo" if snfo.get("title") else "name", "art": 0}
+                    "cert": snfo.get("cert"), "provider": "nfo" if snfo.get("title") else "name", "art": 0}
             self.db.save_show(show)
         found = None
         if shows and not show.get("locked"):
@@ -183,7 +183,7 @@ class MetadataService:
         if show["provider"] != "nfo":
             show["title"], show["year"] = hit["title"], hit.get("year") or show["year"]
         show["provider"] = hit["provider"] if show["provider"] != "nfo" else "nfo"
-        for k in ("overview", "genres", "rating"):
+        for k in ("overview", "genres", "rating", "cert"):
             if not show.get(k) and hit.get(k):
                 show[k] = hit[k]
         show["ids"] = {**hit.get("ids", {}), **show.get("ids", {})}
@@ -209,7 +209,33 @@ class MetadataService:
                     self.db.save_show(full)
                     break
 
+    def backfill_certs(self) -> int:
+        """Titles saved before ratings were read get theirs from the .nfo files next to them (once)."""
+        if self.db.get_setting("certs_backfilled", False):
+            return 0
+        n = 0
+        for m in self.db._all("SELECT media_key, source_id, item_id, kind, show_key, cert FROM meta"):
+            if m["cert"]:
+                continue
+            try:
+                path = self.registry.get(m["source_id"]).resolve(m["item_id"]).path
+            except Exception:  # noqa: BLE001 - a source that is offline: try again next time
+                return n
+            if not path:
+                continue
+            nfo = nfo_for(Path(path))
+            if nfo.get("cert"):
+                self.db._exec("UPDATE meta SET cert=? WHERE media_key=?", (nfo["cert"], m["media_key"]))
+                n += 1
+            if m["kind"] == "episode" and m["show_key"]:
+                snfo = show_nfo_for(Path(path))
+                if snfo.get("cert"):
+                    self.db._exec("UPDATE shows SET cert=? WHERE show_key=? AND (cert IS NULL OR cert='')", (snfo["cert"], m["show_key"]))
+        self.db.set_setting("certs_backfilled", True)
+        return n
+
     def process_library(self, retry_unmatched: bool = True) -> dict:
+        self.backfill_certs()
         rows = self.db.library_without_meta()
         if retry_unmatched:
             cutoff = time.time() - RETRY_UNMATCHED_AFTER
