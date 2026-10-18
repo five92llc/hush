@@ -205,7 +205,8 @@ Run the tests with `pip install pytest && pytest`.
 ## Posters, guide and channel extras
 
 - **Artwork without a key.** Posters, summaries and episode stills come from Cinemeta (IMDb data), Wikipedia and TVmaze. A TMDB key (Settings in the library page) still gives the best matches. Titles without artwork are retried automatically.
-- **Programme guide.** If a playlist advertises an XMLTV guide (`url-tvg` on its first line), Live TV shows "Now / Next" on channel cards and in the channel banner. It refreshes with the Live TV task.
+- **Programme guide.** Live TV shows "Now / Next" on channel cards and in the channel banner. Add guides under Live TV → Playlists → Programme guide (free ones are suggested: EPGShare01, epg.pw, Pluto TV, Samsung TV Plus, Roku), or a playlist can advertise its own (`url-tvg`). Guide channels are matched to yours by tvg-id, by an id inside the stream address, or by name, so a guide that fits your playlist works best (a Pluto playlist with the Pluto guide matches almost completely). It refreshes with the Live TV task.
+- **Upcoming episodes.** The "Upcoming episodes" task asks TVmaze about every show in the library; Home gets a "Coming up" row and each show page lists its next episodes.
 - **Channel previews.** Rest on a channel card for a moment to see a still from the live stream.
 - **Backup sources.** If a channel stops answering, Hush tries another working channel with the same name.
 - **Fast zapping.** Channels are scanned briefly, neighbouring channels are prepared in advance, and probe results are remembered across restarts.

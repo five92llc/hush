@@ -48,7 +48,26 @@ class LiveTV:
 
     def guide_async(self) -> None:
         """Fetch the programme guide in the background; it can be large."""
-        threading.Thread(target=lambda: epg.refresh(self.db, self.db.epg_urls()), name="epg", daemon=True).start()
+        threading.Thread(target=lambda: epg.refresh(self.db, self.guide_urls()), name="epg", daemon=True).start()
+
+    def guide_urls(self) -> list[str]:
+        """Guides you added, plus any a playlist advertises itself."""
+        return [*self.db.get_setting("epg_urls", []), *self.db.epg_urls()]
+
+    def add_guide(self, url: str) -> list[str]:
+        url = url.strip()
+        if scheme(url) not in ("http", "https"):
+            raise SourceError("A guide address starts with http:// or https://")
+        urls = self.db.get_setting("epg_urls", [])
+        if url not in urls:
+            self.db.set_setting("epg_urls", [*urls, url])
+        self.guide_async()
+        return self.db.get_setting("epg_urls", [])
+
+    def remove_guide(self, url: str) -> list[str]:
+        urls = [u for u in self.db.get_setting("epg_urls", []) if u != url]
+        self.db.set_setting("epg_urls", urls)
+        return urls
 
     def import_sources(self) -> int:
         """Playlists already saved under Add a source → Web folder or links become Live TV playlists."""
@@ -107,7 +126,7 @@ class LiveTV:
                 total += self.sync(p["id"])
             except (SourceError, KeyError):
                 failed += 1
-        guide = epg.refresh(self.db, self.db.epg_urls())
+        guide = epg.refresh(self.db, self.guide_urls())["programmes"]
         return (f"{total} channels from {len(pls)} playlist{'s' if len(pls) != 1 else ''}" + (f", {failed} could not be read" if failed else "")
                 + (f", {guide} programmes in the guide" if guide else ""))
 

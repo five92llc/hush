@@ -71,23 +71,32 @@ def test_cinemeta_finds_a_poster_and_episodes():
     assert Chain(prov)._owner("tt1") is prov
 
 
-def test_guide_keeps_only_wanted_channels_and_finds_now_and_next(tmp_path):
-    import io, time
+def test_guide_matches_channels_by_id_url_and_name_and_finds_now_and_next(tmp_path):
+    import io
     from datetime import datetime, timedelta, timezone
     from hush import epg
     from hush.db import DB
     now = datetime.now(timezone.utc)
     f = lambda d: d.strftime("%Y%m%d%H%M%S +0000")  # noqa: E731
-    xml = (f'<tv><channel id="a"/><programme start="{f(now - timedelta(minutes=30))}" stop="{f(now + timedelta(minutes=30))}" channel="a">'
-           f'<title>News</title></programme><programme start="{f(now + timedelta(minutes=30))}" stop="{f(now + timedelta(hours=1))}" channel="a">'
-           f'<title>Weather</title></programme><programme start="{f(now)}" stop="{f(now + timedelta(hours=1))}" channel="zzz"><title>Other</title></programme></tv>')
-    rows = epg.parse(io.BytesIO(xml.encode()), {"a"})
-    assert [r[3] for r in rows] == ["News", "Weather"]
+    prog = lambda ch, a, b, t: f'<programme start="{f(now + a)}" stop="{f(now + b)}" channel="{ch}"><title>{t}</title></programme>'  # noqa: E731
+    xml = ('<tv><channel id="ABC.us"><display-name>ABC</display-name></channel>'
+           '<channel id="pluto1234567890"><display-name>Pluto Movies</display-name></channel>'
+           '<channel id="x9"><display-name>Cool Channel HD</display-name></channel>'
+           '<channel id="nomatch"><display-name>Nothing</display-name></channel>'
+           + prog("ABC.us", timedelta(minutes=-30), timedelta(minutes=30), "News") + prog("ABC.us", timedelta(minutes=30), timedelta(hours=1), "Weather")
+           + prog("pluto1234567890", timedelta(minutes=-5), timedelta(hours=1), "Film") + prog("x9", timedelta(0), timedelta(hours=1), "Show")
+           + prog("nomatch", timedelta(0), timedelta(hours=1), "Other") + "</tv>")
     db = DB(tmp_path / "g.db")
-    db.replace_channels("pl", [("k1", "One", ";", "", "http://x/1", "id1", "a")])
-    db.replace_programmes(rows)
-    got = db.epg_now_next(["k1"])["k1"]
-    assert got["now"]["title"] == "News" and got["next"]["title"] == "Weather"
+    db.replace_channels("pl", [("k1", "One", ";", "", "http://x/1", "i1", "ABC.us@SD"),
+                               ("k2", "Two", ";", "", "http://jmp2.uk/plu-pluto1234567890.m3u8", "i2", ""),
+                               ("k3", "Cool Channel", ";", "", "http://x/3", "i3", "")])
+    rows, mapping = epg.parse(io.BytesIO(xml.encode()), epg.Matcher(db._all("SELECT chan_key, name, url, tvg_id FROM channels")), tag="0:")
+    assert mapping == {"k1": "0:ABC.us", "k2": "0:pluto1234567890", "k3": "0:x9"}
+    assert "Other" not in [r[3] for r in rows]
+    db.replace_programmes(rows, mapping)
+    got = db.epg_now_next(["k1", "k2", "k3"])
+    assert got["k1"]["now"]["title"] == "News" and got["k1"]["next"]["title"] == "Weather"
+    assert got["k2"]["now"]["title"] == "Film" and got["k3"]["now"]["title"] == "Show"
 
 
 def test_playlist_header_advertises_its_guide():
@@ -109,3 +118,27 @@ def test_artwork_follows_redirects_only_between_trusted_hosts(tmp_path, monkeypa
     client = httpx.Client(transport=httpx.MockTransport(handler))
     assert art.from_url("ffmpeg", "https://static.tvmaze.com/a.jpg", tmp_path / "x.jpg", client)
     assert not art.from_url("ffmpeg", "https://static.tvmaze.com/evil.jpg", tmp_path / "y.jpg", client)
+
+
+def test_upcoming_episodes_are_kept_for_library_shows(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from hush import upcoming
+    from hush.db import DB
+    soon = (datetime.now(timezone.utc) + timedelta(days=3)).isoformat()
+    old = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/lookup/shows":
+            return httpx.Response(200, json={"id": 77})
+        if req.url.path == "/shows/77/episodes":
+            return httpx.Response(200, json=[
+                {"season": 1, "number": 1, "name": "Old", "airstamp": old, "summary": "<p>x</p>", "runtime": 45},
+                {"season": 1, "number": 2, "name": "Soon", "airstamp": soon, "summary": "<p>Next <b>one</b></p>", "runtime": 45}])
+        return httpx.Response(404)
+    db = DB(tmp_path / "u.db")
+    db.save_show({"show_key": "sk", "title": "Show", "year": 2026, "overview": "", "genres": [], "rating": None,
+                  "ids": {"imdb": "tt1"}, "provider": "nfo", "art": 0})
+    msg = upcoming.refresh(db, httpx.Client(transport=httpx.MockTransport(handler)))
+    got = db.list_upcoming()
+    assert "1 upcoming" in msg and [g["title"] for g in got] == ["Soon"] and got[0]["overview"] == "Next one"
+    assert db.get_show("sk")["ids"]["tvmaze"] == "77"

@@ -18,6 +18,15 @@ const h = (tag, attrs = {}, ...kids) => {
 
 /** Grids use a smaller copy of an image (the server makes and keeps it): the cards load much faster on a TV. */
 const thumb = (url, w = 320) => (url ? `${url}${url.includes("?") ? "&" : "?"}w=${w}` : url);
+/** "Tonight 8:00 PM", "Tomorrow", "Mon, Oct 26": when something airs, in words. */
+const when = (t) => {
+  const d = new Date(t * 1000), now = new Date(), days = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (days < 0) return `Aired ${d.toLocaleDateString([], { weekday: "short" })} ${time}`;
+  if (days === 0) return `${d.getHours() >= 18 ? "Tonight" : "Today"} ${time}`;
+  if (days === 1) return `Tomorrow ${time}`;
+  return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${time}`;
+};
 const hm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 const ICONS = {
@@ -841,6 +850,34 @@ const Catalog = {
     return !document.activeElement?.matches?.("input, textarea, select");
   },
 
+  /** The programme-guide part of the playlist manager: sources, status and a refresh button. */
+  guidesBox() {
+    const box = h("div", { class: "guides" });
+    const render = async () => {
+      let g;
+      try { g = await api("/api/live/guides"); } catch { return; }
+      const st = g.status;
+      const input = h("input", { type: "text", placeholder: "https://…/guide.xml.gz", "aria-label": "Guide address", spellcheck: "false" });
+      const sel = h("select", { "aria-label": "Suggested guides" }, h("option", { value: "" }, "Pick a free guide…"),
+        ...g.presets.map((p) => h("option", { value: p.url }, p.name)));
+      const add = async (url) => {
+        try { await api("/api/live/guides", { method: "POST", body: { url } }); toast("Guide added. Reading it can take a minute."); render(); } catch (err) { toast(err.message); }
+      };
+      box.replaceChildren(
+        h("strong", {}, "Programme guide"),
+        h("p", { class: "hint" }, st
+          ? `${plural(st.matched, "channel")} matched · ${plural(st.programmes, "programme")} · updated ${new Date(st.at * 1000).toLocaleString()}${st.errors?.length ? ` · ${st.errors.join("; ")}` : ""}`
+          : "No guide yet. Add one so channels can show what is on now and next."),
+        ...[...g.urls, ...g.advertised].map((u) => h("div", { class: "row" }, h("span", { class: "grow hint", title: u }, u.replace(/^https?:\/\//, "")),
+          g.urls.includes(u) ? h("button", { class: "btn ghost", type: "button", onclick: async () => { await api(`/api/live/guides?url=${encodeURIComponent(u)}`, { method: "DELETE" }); render(); } }, "Remove") : h("span", { class: "hint" }, "from playlist"))),
+        h("form", { class: "row", onsubmit: (e) => { e.preventDefault(); if (input.value.trim()) add(input.value.trim()); } }, input, h("button", { class: "btn subtle", type: "submit" }, "Add guide")),
+        h("div", { class: "row" }, sel, h("button", { class: "btn subtle", type: "button", onclick: () => sel.value && add(sel.value) }, "Add"),
+          h("button", { class: "btn ghost", type: "button", onclick: async (e) => { e.currentTarget.disabled = true; await api("/api/live/guides/refresh", { method: "POST" }).catch(() => {}); toast("Refreshing the guide…"); setTimeout(render, 15000); } }, "Refresh now")));
+    };
+    render();
+    return box;
+  },
+
   /* ---------- Live TV: channels from IPTV playlists ---------- */
   async live() {
     const st = this.liveState ||= { q: "", group: "", favorites: false, hideDead: true, panel: false, letter: "" };
@@ -967,6 +1004,7 @@ const Catalog = {
         try { await api("/api/live/playlists", { method: "POST", body: { name: addName.value, url: addUrl.value } }); toast("Playlist added"); reloadAll(); }
         catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Add playlist"; }
       } }, addName, addUrl, h("button", { class: "btn primary", type: "submit" }, "Add playlist")),
+      this.guidesBox(),
       h("div", { class: "row" }, h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
         e.currentTarget.disabled = true; e.currentTarget.textContent = "Importing…";
         try { const r = await api("/api/live/playlists/import", { method: "POST" }); toast(r.imported ? `Imported ${plural(r.imported, "playlist")}` : "No saved playlists found"); } catch (err) { toast(err.message); }
@@ -1005,9 +1043,9 @@ const Catalog = {
     this.cameFrom = "#/home";
     document.title = "Home – Hush";
     const get = (p, f = (x) => x) => api(p).then(f).catch(() => []);
-    const [cont, recent, favs, movies, shows] = await Promise.all([
+    const [cont, recent, favs, movies, shows, soon] = await Promise.all([
       get("/api/progress/recent?limit=12"), get("/api/live/channels?recent=true&limit=12", (r) => r.channels),
-      get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows")]);
+      get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows"), get("/api/library/upcoming")]);
     const chan = (list) => (c) => h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => {
       Queue.set(list.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups }))); Queue.loadMore = null;
     } }, h("div", { class: "logo" }, c.logo_url ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))),
@@ -1023,6 +1061,9 @@ const Catalog = {
           it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null),
         h("span", { class: "name" }, it.title),
         h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))))),
+      this.shelf("Coming up", null, soon.slice(0, 16).map((u) => h("a", { class: "card", href: `#/show/${u.show_key}` },
+        h("div", { class: "art" }, u.art_url ? h("img", { src: thumb(u.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, u.show_title)),
+        h("span", { class: "name" }, u.show_title), h("span", { class: "sub" }, `S${u.season}E${u.episode} · ${when(u.airs_at)}`)))),
       this.shelf("Live TV: recently watched", "#/live", recent.map(chan(recent))),
       this.shelf("Live TV: favorites", "#/live", favs.map(chan(favs))),
       this.shelf("Movies", "#/movies", movies.slice(0, 18).map(poster(false, movies))),
@@ -1169,7 +1210,7 @@ const Catalog = {
   },
 
   async show(key) {
-    const { show, episodes } = await api(`/api/library/shows/${key}`);
+    const { show, episodes, upcoming = [] } = await api(`/api/library/shows/${key}`);
     const seasons = {};
     for (const e of episodes) (seasons[e.season ?? 0] ||= []).push(e);
     this.cameFrom = "#/shows";
@@ -1182,6 +1223,10 @@ const Catalog = {
           h("div", { class: "facts" }, ...[show.genres?.join(", "), show.rating ? `★ ${show.rating.toFixed(1)}` : "", plural(episodes.length, "episode")].filter(Boolean).map((t) => h("span", {}, t))),
           show.overview ? h("p", { class: "overview" }, show.overview) : null,
           h("div", { class: "actions" }, h("button", { class: "btn subtle", type: "button", onclick: () => this.scanAll(episodes) }, "Scan all episodes")))),
+      upcoming.length ? h("section", { class: "season" }, h("h3", {}, "Coming up"),
+        h("ul", { class: "eps" }, ...upcoming.slice(0, 8).map((u) => h("li", { class: "ep" },
+          h("div", {}, h("div", { class: "ep-title" }, `S${u.season}E${u.episode}${u.title ? ` · ${u.title}` : ""}`, h("span", { class: "badge", style: "margin-left:.5rem" }, when(u.airs_at))),
+            u.overview ? h("div", { class: "ep-sub" }, u.overview) : null))))) : null,
       ...Object.entries(seasons).map(([n, eps]) => h("section", { class: "season" },
         h("h3", {}, n === "0" ? "Specials" : `Season ${n}`),
         h("ul", { class: "eps" }, ...eps.map((e) => h("li", { class: "ep" },

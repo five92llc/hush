@@ -17,7 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, hw, media, profiles as rules, stream
+from . import discover, epg, hw, media, profiles as rules, stream
 from .hls import HLSError, HLSManager
 from .live import LiveTV
 from .remote import RemoteHub
@@ -624,6 +624,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             out.append(s)
         return out
 
+    def _upc(rows: list[dict]) -> list[dict]:
+        return [{"show_key": r["show_key"], "show_title": r["show_title"], "season": r["season"], "episode": r["episode"],
+                 "title": r["title"], "airs_at": r["airs_at"], "overview": r["overview"], "runtime": r["runtime"],
+                 "art_url": f"/api/art/{r['show_key']}.jpg" if r.get("show_art") else None} for r in rows]
+
+    @app.get("/api/library/upcoming", dependencies=[need])
+    def library_upcoming(prof: dict = Depends(get_profile)):
+        """Episodes of the shows in the library that have not aired yet, soonest first."""
+        visible = {s["show_key"] for s in library_shows(prof)}
+        return _upc([r for r in db.list_upcoming(limit=200) if r["show_key"] in visible])[:40]
+
     @app.get("/api/library/shows/{show_key}", dependencies=[need])
     def library_show(show_key: str, prof: dict = Depends(get_profile)):
         show = db.get_show(show_key)
@@ -633,7 +644,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if prof["kids"] and not eps:
             raise HTTPException(404)
         show["art_url"] = f"/api/art/{show_key}.jpg" if show.get("art") else None
-        return {"show": show, "episodes": [_card(e) for e in eps]}
+        return {"show": show, "episodes": [_card(e) for e in eps], "upcoming": _upc(db.list_upcoming(show_key))}
 
     @app.get("/api/library/title/{key}", dependencies=[need])
     def library_title(key: str, prof: dict = Depends(get_profile)):
@@ -991,6 +1002,27 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return {"channels": [_channel(c) for c in rows],
                 "total": db.count_channels(q, group, favorites, hide_dead, letter.upper(), recent, pid),
                 "letters": db.letter_counts(q, group, favorites, hide_dead, pid), "stats": db.channel_stats(pid)}
+
+    @app.get("/api/live/guides", dependencies=[need])
+    def live_guides():
+        return {"urls": db.get_setting("epg_urls", []), "advertised": db.epg_urls(), "presets": epg.PRESETS,
+                "status": db.get_setting("epg_status", None)}
+
+    @app.post("/api/live/guides", dependencies=[need])
+    def live_guide_add(body: dict = Body(...)):
+        try:
+            return {"urls": livetv.add_guide(str(body.get("url", "")))}
+        except SourceError as exc:
+            raise HTTPException(400, str(exc))
+
+    @app.delete("/api/live/guides", dependencies=[need])
+    def live_guide_remove(url: str):
+        return {"urls": livetv.remove_guide(url)}
+
+    @app.post("/api/live/guides/refresh", dependencies=[need])
+    def live_guide_refresh():
+        livetv.guide_async()
+        return {"ok": True}
 
     @app.get("/api/live/epg", dependencies=[need])
     def live_epg(keys: str = ""):

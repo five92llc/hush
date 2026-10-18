@@ -9,6 +9,7 @@ import logging
 import threading
 import time
 
+from . import upcoming
 from .analysis.walk import walk
 from .sources import media_key
 
@@ -29,6 +30,10 @@ CATALOG = {
         "name": "Live TV channels",
         "description": "Re-reads your Live TV playlists so new channels appear and removed ones go away. "
                        "Your favorites are kept.",
+    },
+    "upcoming": {
+        "name": "Upcoming episodes",
+        "description": "Checks TVmaze for new episodes of the shows in your library, so Home can show what is coming up.",
     },
     "cleanup": {
         "name": "Clean up",
@@ -197,6 +202,9 @@ class TaskManager:
         left = len(self.db.library_without_meta())
         return f"{r['processed']} titles filled in" + (f", {r['failed']} failed" if r["failed"] else "") + \
                (f", {left} still waiting" if left else "")
+
+    def _upcoming(self, opts: dict) -> str:
+        return upcoming.refresh(self.db)
 
     def _livetv(self, opts: dict) -> str:
         return self.live.sync_all() if self.live else "Not available"

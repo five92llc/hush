@@ -163,6 +163,16 @@ CREATE TABLE IF NOT EXISTS programmes (
     descr       TEXT
 );
 CREATE INDEX IF NOT EXISTS programmes_chan ON programmes(tvg_id, start);
+CREATE TABLE IF NOT EXISTS upcoming (
+    show_key    TEXT NOT NULL,
+    season      INTEGER NOT NULL,
+    episode     INTEGER NOT NULL,
+    title       TEXT,
+    airs_at     REAL NOT NULL,
+    overview    TEXT,
+    runtime     INTEGER,
+    PRIMARY KEY (show_key, season, episode)
+);
 CREATE TABLE IF NOT EXISTS settings (
     key         TEXT PRIMARY KEY,
     value       TEXT NOT NULL
@@ -252,6 +262,8 @@ class DB:
             c.execute("UPDATE filters SET flags=? WHERE media_key=?", (json.dumps(_flag_counts(data)), media_key))
         if "tvg_id" not in self._columns("channels"):
             c.execute("ALTER TABLE channels ADD COLUMN tvg_id TEXT")
+        if "epg_id" not in self._columns("channels"):
+            c.execute("ALTER TABLE channels ADD COLUMN epg_id TEXT")
         if "epg_url" not in self._columns("playlists"):
             c.execute("ALTER TABLE playlists ADD COLUMN epg_url TEXT")
         for table in ("meta", "shows"):
@@ -604,6 +616,20 @@ class DB:
         self._exec("INSERT INTO playlists(id,name,url) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, url=excluded.url",
                    (pid, name, url))
 
+    def replace_upcoming(self, show_key: str, rows: list[tuple]) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM upcoming WHERE show_key=?", (show_key,))
+            self._conn.executemany("INSERT OR REPLACE INTO upcoming(show_key,season,episode,title,airs_at,overview,runtime) VALUES(?,?,?,?,?,?,?)", rows)
+            self._conn.commit()
+
+    def list_upcoming(self, show_key: str = "", since: float | None = None, limit: int = 60) -> list[dict]:
+        since = time.time() - 6 * 3600 if since is None else since
+        where, args = "u.airs_at>=?", [since]
+        if show_key:
+            where += " AND u.show_key=?"; args.append(show_key)
+        return self._all(f"SELECT u.*, s.title AS show_title, s.art AS show_art FROM upcoming u JOIN shows s ON s.show_key=u.show_key "
+                         f"WHERE {where} ORDER BY u.airs_at LIMIT ?", (*args, limit))
+
     def set_playlist_epg(self, pid: str, urls: list[str]) -> None:
         self._exec("UPDATE playlists SET epg_url=? WHERE id=?", (",".join(urls), pid))
 
@@ -611,11 +637,15 @@ class DB:
         return [u for r in self._all("SELECT epg_url FROM playlists WHERE epg_url IS NOT NULL AND epg_url != ''")
                 for u in r["epg_url"].split(",") if u]
 
-    def replace_programmes(self, rows: list[tuple]) -> None:
+    def replace_programmes(self, rows: list[tuple], mapping: dict[str, str]) -> None:
+        """rows = (guide id, start, stop, title, description); mapping = {chan_key: guide id}."""
         with self._lock:
-            self._conn.execute("DELETE FROM programmes")
-            self._conn.executemany("INSERT INTO programmes(tvg_id,start,stop,title,descr) VALUES(?,?,?,?,?)", rows)
-            self._conn.commit()
+            c = self._conn
+            c.execute("DELETE FROM programmes")
+            c.executemany("INSERT INTO programmes(tvg_id,start,stop,title,descr) VALUES(?,?,?,?,?)", rows)
+            c.execute("UPDATE channels SET epg_id=NULL")
+            c.executemany("UPDATE channels SET epg_id=? WHERE chan_key=?", [(g, k) for k, g in mapping.items()])
+            c.commit()
 
     def epg_now_next(self, keys: list[str], now: float | None = None) -> dict[str, dict]:
         """{chan_key: {"now": {...}, "next": {...}}} for the channels that have guide data."""
@@ -624,7 +654,7 @@ class DB:
             return {}
         marks = ",".join("?" * len(keys))
         rows = self._all(
-            f"SELECT c.chan_key k, p.title, p.descr, p.start, p.stop FROM channels c JOIN programmes p ON p.tvg_id=c.tvg_id "
+            f"SELECT c.chan_key k, p.title, p.descr, p.start, p.stop FROM channels c JOIN programmes p ON p.tvg_id=c.epg_id "
             f"WHERE c.chan_key IN ({marks}) AND p.stop>? ORDER BY p.start", (*keys, now))
         out: dict[str, dict] = {}
         for r in rows:
