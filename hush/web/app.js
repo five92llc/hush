@@ -904,11 +904,19 @@ const Catalog = {
       let s;
       try { s = await api("/api/qbit"); } catch (err) { listBox.replaceChildren(h("p", { class: "error" }, err.message)); return; }
       this.qbPublic = s;
+      // Redraw only what changed: rebuilding the form every few seconds wiped whatever was being typed into it.
+      const connSig = JSON.stringify([s.connected, s.configured, s.url, s.version, s.error]);
+      if (connSig !== conn.dataset.sig) {
+      conn.dataset.sig = connSig;
       conn.replaceChildren(
         h("p", { class: s.connected ? "hint" : s.configured ? "error" : "hint" },
           s.connected ? `Connected to qBittorrent ${s.version} at ${s.url}` : s.configured ? (s.error || "Not connected") : "Connect Hush to the qBittorrent you already run. Hush only watches its downloads and RSS rules; qBittorrent decides what is saved and where."),
         s.connected ? h("button", { class: "btn ghost", type: "button", onclick: () => { conn.querySelector("form")?.remove() || conn.append(form()); } }, "Change connection") : form());
+      }
       if (!s.connected) { listBox.replaceChildren(); rssBox.replaceChildren(); return; }
+      const listSig = JSON.stringify(s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed]));
+      if (listSig === listBox.dataset.sig) return;
+      listBox.dataset.sig = listSig;
       listBox.replaceChildren(h("h2", {}, "Downloads"), ...(s.torrents.length ? s.torrents.map((t) => h("div", { class: "dl" },
         h("div", { class: "dl-top" }, h("strong", { class: "dl-name", title: t.name }, t.name),
           h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))),
@@ -936,6 +944,7 @@ const Catalog = {
     await refreshList(); refreshRss();
     this.dlTimer = setInterval(() => {                                 // keep the progress fresh while this page is open
       if (location.hash !== "#/downloads" || document.hidden) { if (location.hash !== "#/downloads") clearInterval(this.dlTimer); return; }
+      if (conn.contains(document.activeElement) && document.activeElement.matches("input")) return;     // someone is typing: leave the page alone
       refreshList();
     }, 5000);
   },
