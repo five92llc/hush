@@ -1,10 +1,9 @@
 name: Release apps
 
-# Publish a version of the TV apps by pushing a tag:   git tag android-v1.0.1 && git push origin android-v1.0.1
-# The Android app (TV, Fire TV, tablet) checks these releases and offers the update by itself.
+# Optional cloud build. Most people just run android/release.sh on their Mac, so this only runs when started by hand
+# (Actions tab -> Release apps -> Run workflow, with a tag already pushed) and needs the four signing secrets.
 on:
-  push:
-    tags: ["android-v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write

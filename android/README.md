@@ -17,25 +17,20 @@ On first start the app asks for **your Hush server's address** (for example `htt
 
 The app asks GitHub for a newer release when it starts (at most every 6 hours). If there is one it offers **Update now**; it downloads the APK, checks its checksum and hands it to Android's installer, which shows one **Install** confirmation. Android does not let an app replace itself silently. The first time, Android asks you to allow Hush to install apps (Settings → *Install unknown apps* → Hush). *Menu → Check for updates* checks on demand.
 
-## Publish a new version
+## Publish a new version (from your Mac)
+
+The app is built on your Mac (it already has the tools and the signing key) and GitHub only hosts the release file:
 
 ```bash
-git tag android-v1.0.1 && git push origin android-v1.0.1
+git push                      # make sure the code is on GitHub
+./android/release.sh 1.0.0    # builds the Android APK and the LG package, publishes them as a GitHub release
 ```
 
-GitHub Actions (`.github/workflows/release-apps.yml`) builds the signed APK and the LG package and attaches both to the release; every installed app then offers the update. **Version numbers must go up.**
+The version number must go up each time (1.0.0, then 1.0.1...). Installed apps check GitHub when they start and offer the update.
 
-### One-time setup: the signing key
-Every update must be signed with the **same key**, or Android refuses to install it over the old version. The key lives in `android/keystore/` (never committed; keep a backup of this folder somewhere safe!). Add these four **repository secrets** in GitHub (Settings → Secrets and variables → Actions) so the cloud build signs with it:
+**The signing key** is in `android/keystore/` (never committed). Every update must be signed with the same key, or Android refuses to install it over the old one, so **back that folder up somewhere safe**. The optional cloud build in `.github/workflows/release-apps.yml` is only needed if you want GitHub to build instead of your Mac; it needs four repository secrets (`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`).
 
-| Secret | Value |
-|---|---|
-| `ANDROID_KEYSTORE_BASE64` | `base64 -i android/keystore/hush-release.jks \| pbcopy` |
-| `ANDROID_KEYSTORE_PASSWORD` | `storePassword` from `android/keystore/keystore.properties` |
-| `ANDROID_KEY_ALIAS` | `keyAlias` from the same file (`hush`) |
-| `ANDROID_KEY_PASSWORD` | `keyPassword` from the same file |
-
-## Build it yourself
+## Build without publishing
 
 ```bash
 cd android
