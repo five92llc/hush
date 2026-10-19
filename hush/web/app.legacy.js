@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 a82cb9ffae1ce7620d9518ca8c70896bd5c6c79e79967ea8eac90c80d5e7ecbe) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 477ca9f5dc55083e1fac2ac8b10357055efd2e018f0acf922a5cfe3a5b74b378) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -3907,6 +3907,56 @@ document.addEventListener("keydown", (e) => {
     idle.bump();
   }
 }, true);
+const TVSelect = {
+  el: null,
+  select: null,
+  active() {
+    return IS_TV_DEVICE || TV.on;
+  },
+  open(select) {
+    var _a, _b, _c;
+    if (this.el) return;
+    const host = select.closest("dialog") || document.body;
+    const label = select.getAttribute("aria-label") || ((_b = (_a = select.closest("label")) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim()) || "Choose";
+    const opts = [...select.options].filter((o) => !o.disabled);
+    this.select = select;
+    const list = h("div", { class: "tvsel-list", role: "listbox" }, ...opts.map((o) => h("button", {
+      class: "tvsel-opt",
+      type: "button",
+      role: "option",
+      "aria-selected": String(o.value === select.value),
+      onclick: () => this.choose(o.value)
+    }, o.textContent)));
+    this.el = h("div", { class: "tvsel", role: "dialog", "aria-label": label }, h("div", { class: "tvsel-box" }, h("h2", {}, label), list));
+    host.append(this.el);
+    (_c = list.querySelector('[aria-selected="true"]') || list.firstChild) == null ? void 0 : _c.focus({ preventScroll: false });
+  },
+  choose(value) {
+    const s = this.select;
+    if (s && s.value !== value) {
+      s.value = value;
+      s.dispatchEvent(new Event("input", { bubbles: true }));
+      s.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+    this.close();
+  },
+  close() {
+    var _a;
+    const s = this.select;
+    (_a = this.el) == null ? void 0 : _a.remove();
+    this.el = null;
+    this.select = null;
+    s == null ? void 0 : s.focus({ preventScroll: true });
+  }
+};
+document.addEventListener("mousedown", (e) => {
+  var _a, _b;
+  const s = (_b = (_a = e.target).closest) == null ? void 0 : _b.call(_a, "select");
+  if (s && TVSelect.active() && !s.disabled) {
+    e.preventDefault();
+    TVSelect.open(s);
+  }
+}, true);
 const TV = {
   on: false,
   init() {
@@ -3944,6 +3994,7 @@ const TV = {
     return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
   },
   roots() {
+    if (TVSelect.el) return [TVSelect.el];
     const dlg = document.querySelector("dialog[open]");
     if (dlg) return [dlg];
     for (const id of ["#profile-picker", "#login"]) if (!$(id).hidden) return [$(id)];
@@ -4027,6 +4078,10 @@ const TV = {
   /* ---------- Back ---------- */
   back() {
     var _a;
+    if (TVSelect.el) {
+      TVSelect.close();
+      return;
+    }
     if (!$("#profile-picker").hidden) {
       if (!$("#profiles-cancel").hidden) $("#profiles-cancel").click();
       return;
@@ -4074,6 +4129,11 @@ const TV = {
     const k = normKey(e);
     const typing = (_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || k === "Backspace" && !typing;
+    if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) {
+      e.preventDefault();
+      TVSelect.open(e.target);
+      return true;
+    }
     const overlay = document.querySelector("dialog[open]") || !$("#guide").hidden || !$("#panel").hidden || !$("#settings").hidden;
     const playerOpen = !$("#player").hidden && !Player.mini;
     if (isBack) {
@@ -4092,7 +4152,7 @@ const TV = {
       return false;
     }
     if (typing && (dir === "left" || dir === "right")) return false;
-    if ((_e = (_d = e.target).matches) == null ? void 0 : _e.call(_d, "select, input[type=range]")) return false;
+    if ((_e = (_d = e.target).matches) == null ? void 0 : _e.call(_d, "input[type=range]")) return false;
     if (playerOpen && !overlay) {
       if ((_f = document.activeElement) == null ? void 0 : _f.closest("#controls")) {
         e.preventDefault();

@@ -675,3 +675,11 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .catalog.has-fanart::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 24rem; z-index: 0; pointer-events: none;
   background-image: linear-gradient(to bottom, rgba(25, 26, 44, .35), var(--ink) 96%), var(--fanart); background-size: cover; background-position: center top; }
 .catalog.has-fanart > * { position: relative; z-index: 1; }
+
+/* ---- big screen drop-down list (TVSelect) ---- */
+.tvsel { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; background: rgba(10, 11, 22, .82); display: flex; align-items: center; justify-content: center; }
+.tvsel-box { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1.2rem 1.4rem; width: min(34rem, 86%); max-height: 82%; display: flex; flex-direction: column; }
+.tvsel-box h2 { font-size: var(--s1); margin: 0 0 .8rem; }
+.tvsel-list { overflow-y: auto; display: flex; flex-direction: column; gap: .35rem; }
+.tvsel-opt { text-align: left; font: inherit; font-size: var(--s0); color: var(--linen); background: var(--dusk-2); border: 2px solid transparent; border-radius: var(--r-sm); padding: .65rem .9rem; cursor: pointer; }
+.tvsel-opt[aria-selected="true"] { border-color: var(--hush); }
