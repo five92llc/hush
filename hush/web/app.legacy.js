@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 53c86e71fb9a9b01717d1da143fcd4abb0f33bc6b172332e606d8a7c100edd5e) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 3f934a451fdbbafea8bf6a0c2210e893f5a7d32bc75560da246c143ff160e357) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -80,6 +80,7 @@ const store = {
   }
 };
 const UA = navigator.userAgent;
+const IS_LG = /Web0S|webOS|NetCast/i.test(UA);
 const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /iP(hone|ad|od)/.test(UA) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
 const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|HushTV|Android.*\bTV\b/i;
 const IS_TV_DEVICE = TVUA.test(UA);
@@ -2923,7 +2924,7 @@ const Player = {
     if (this.mode !== "direct") q.set("mode", this.mode);
     return `/api/stream/${this.src}/${this.item}?${q}`;
   },
-  hls: IS_WEBKIT,
+  hls: IS_WEBKIT || IS_LG,
   hlsSig: "",
   hlsTimer: null,
   /** True when the server (not the browser) is muting the filtered words. */
@@ -2952,6 +2953,7 @@ const Player = {
   async startAt(t, initial = false) {
     var _a;
     const wasPlaying = !video.paused || initial;
+    const tok = this.openToken;
     if (this.mode === "direct") {
       if (initial) {
         video.src = `/api/raw/${this.src}/${this.item}`;
@@ -2970,7 +2972,16 @@ const Player = {
       }
       this.offset = landing;
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
-      video.src = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      let url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      if (IS_LG && this.hls) {
+        try {
+          const r = await fetch(url, { credentials: "same-origin" });
+          if (r.ok && r.url) url = r.url;
+        } catch (e) {
+        }
+      }
+      if (tok !== this.openToken) return;
+      video.src = url;
     }
     this.message(this.serverMuted() || ((_a = this.info) == null ? void 0 : _a.live) ? "Preparing the stream…" : null);
     this.Audio.reset();
@@ -3043,7 +3054,7 @@ const Player = {
         (_a = this.ctx) == null ? void 0 : _a.resume();
         return;
       }
-      if (IS_WEBKIT) this.fallback = true;
+      if (IS_WEBKIT || IS_LG) this.fallback = true;
       else try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
         const source = ctx.createMediaElementSource(video);
@@ -3250,7 +3261,8 @@ const Player = {
       } catch (e) {
       }
       if (video.videoWidth > 0 && (frames === null || frames > 0)) return;
-      (_d = window.hushReport) == null ? void 0 : _d.call(window, { kind: "no-picture", message: `playing without a picture (mode ${this.mode}, codec ${p.video[0].codec}, ${video.videoWidth}x${video.videoHeight}, frames ${frames})` });
+      const box = video.getBoundingClientRect();
+      (_d = window.hushReport) == null ? void 0 : _d.call(window, { kind: "no-picture", message: `playing without a picture (mode ${this.mode}${this.hls ? ", hls" : ""}, codec ${p.video[0].codec}, video ${video.videoWidth}x${video.videoHeight}, shown ${Math.round(box.width)}x${Math.round(box.height)}, frames ${frames}, readyState ${video.readyState})` });
       if (this.mode === "remux" && !this.triedTranscode) {
         this.triedTranscode = true;
         this.mode = "transcode";

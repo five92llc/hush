@@ -70,6 +70,7 @@ const store = {
 
 /* Safari and every iOS browser use WebKit, which cannot play a live MP4 stream: they get HLS instead. */
 const UA = navigator.userAgent;
+const IS_LG = /Web0S|webOS|NetCast/i.test(UA);               // LG TVs play HLS in their own media player; a copied MP4 stream often shows no picture there
 const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /iP(hone|ad|od)/.test(UA)
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 /* Smart TVs (LG webOS/NetCast, Samsung Tizen, Android TV, ...). On these the remote's arrow keys move a slow mouse pointer
@@ -1859,7 +1860,7 @@ const Player = {
     return `/api/stream/${this.src}/${this.item}?${q}`;
   },
 
-  hls: IS_WEBKIT, hlsSig: "", hlsTimer: null,
+  hls: IS_WEBKIT || IS_LG, hlsSig: "", hlsTimer: null,
   /** True when the server (not the browser) is muting the filtered words. */
   serverMuted() { return this.hls && this.mode !== "direct"; },
   sig() {
@@ -1883,6 +1884,7 @@ const Player = {
 
   async startAt(t, initial = false) {
     const wasPlaying = !video.paused || initial;
+    const tok = this.openToken;                      // if another title or channel is opened while this waits, drop this one
     if (this.mode === "direct") {
       if (initial) {
         video.src = `/api/raw/${this.src}/${this.item}`;
@@ -1896,7 +1898,12 @@ const Player = {
       }
       this.offset = landing;
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
-      video.src = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      let url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      if (IS_LG && this.hls) {                      // LG's player is happier with the playlist address itself than with a redirect to it
+        try { const r = await fetch(url, { credentials: "same-origin" }); if (r.ok && r.url) url = r.url; } catch { /* use the start address */ }
+      }
+      if (tok !== this.openToken) return;
+      video.src = url;
     }
     this.message(this.serverMuted() || this.info?.live ? "Preparing the stream…" : null);
     this.Audio.reset();
@@ -1944,7 +1951,7 @@ const Player = {
     ctx: null, mute: null, master: null, toneGain: null, scheduled: new Set(), timer: null, fallback: false,
     ensure() {
       if (this.ctx || this.fallback) { this.ctx?.resume(); return; }
-      if (IS_WEBKIT) this.fallback = true;     // WebKit's Web Audio is silent for HLS, so it is not used at all
+      if (IS_WEBKIT || IS_LG) this.fallback = true;     // Web Audio is silent (WebKit) or unreliable (LG) for HLS, so it is not used at all
       else try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: "interactive" });
         const source = ctx.createMediaElementSource(video);
@@ -2101,7 +2108,8 @@ const Player = {
       let frames = null;
       try { const q = video.getVideoPlaybackQuality?.(); frames = q ? q.totalVideoFrames : null; } catch { /* not offered */ }
       if (video.videoWidth > 0 && (frames === null || frames > 0)) return;                     // a picture is on its way
-      window.hushReport?.({ kind: "no-picture", message: `playing without a picture (mode ${this.mode}, codec ${p.video[0].codec}, ${video.videoWidth}x${video.videoHeight}, frames ${frames})` });
+      const box = video.getBoundingClientRect();
+      window.hushReport?.({ kind: "no-picture", message: `playing without a picture (mode ${this.mode}${this.hls ? ", hls" : ""}, codec ${p.video[0].codec}, video ${video.videoWidth}x${video.videoHeight}, shown ${Math.round(box.width)}x${Math.round(box.height)}, frames ${frames}, readyState ${video.readyState})` });
       if (this.mode === "remux" && !this.triedTranscode) {
         this.triedTranscode = true; this.mode = "transcode";
         this.message("No picture. Switching to a compatible stream…");
