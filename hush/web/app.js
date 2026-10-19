@@ -2027,7 +2027,7 @@ const Player = {
     const p = $("#player"), slot = $("#mini-slot");
     if (document.documentElement.classList.contains("tv")) {   // no sidebar on a TV: bottom right corner
       slot.hidden = true; slot.style.height = "";
-      Object.assign(p.style, { left: "auto", top: "auto", right: "32px", bottom: "32px", width: "340px" });
+      Object.assign(p.style, { left: "auto", top: "auto", right: "2.5vw", bottom: "4vh", width: "22vw" });
       return;
     }
     const rail = $(".rail");

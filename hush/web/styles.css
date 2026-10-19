@@ -498,7 +498,9 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 /* ---- Big screen (TV) mode: bigger, high contrast, no sidebar, made for a remote ---- */
 .hide-cursor, .hide-cursor * { cursor: none !important; }
 .tv-nav { display: none; }
-html.tv { font-size: 150%; }
+/* Big screen text scales with the screen, not with the browser's pixel density: an Android TV's browser reports a
+   960 px wide page on a 1080p TV (2 device pixels per CSS pixel) while an LG reports 1920, and both must look alike. */
+html.tv { font-size: clamp(10px, 1.25vw, 26px); }
 .tv .rail, .tv #rail-links { display: none; }
 .tv .library { grid-template-columns: 1fr; }
 .tv .browser { padding-inline: 2rem; }
@@ -511,7 +513,7 @@ html.tv { font-size: 150%; }
 .tv .profile-chip { font-size: var(--s0); border-color: var(--line); }
 .tv .profile-chip .avatar { width: 2.2rem; height: 2.2rem; }
 .tv #tv-toggle { border-color: var(--hush); }
-.tv :focus { outline: 4px solid var(--lamp); outline-offset: 3px; box-shadow: none; border-radius: 12px; }
+.tv :focus { outline: .2rem solid var(--lamp); outline-offset: .15rem; box-shadow: none; border-radius: 12px; }
 .tv #stage:focus, .tv video:focus { outline: none; }
 .tv .card:focus, .tv .chan:focus { transform: scale(1.05); transition: transform .12s; z-index: 2; }
 .tv .card:focus .art, .tv .chan:focus .logo { border-color: var(--lamp); }
