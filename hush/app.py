@@ -49,7 +49,7 @@ class FreshStatic(StaticFiles):
         return resp
 
 
-_STATIC_REF = re.compile(r'((?:src|href)=")/static/([^"?#]+)(")')
+_STATIC_REF = re.compile(r'((?:src|href|data-modern|data-legacy)=")/static/([^"?#]+)(")')
 
 
 def versioned_page(name: str) -> HTMLResponse:

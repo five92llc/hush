@@ -281,3 +281,29 @@ def test_qbit_adds_into_a_category_or_folder_and_rejects_unknown_ones(tmp_path):
             assert False, bad
         except QbitError:
             pass
+
+
+def test_legacy_bundle_matches_app_js_and_the_page_picks_between_them():
+    import hashlib
+    import re
+    from pathlib import Path
+    web = Path(__file__).resolve().parent.parent / "hush" / "web"
+    app = (web / "app.js").read_bytes()
+    legacy = (web / "app.legacy.js").read_text(encoding="utf-8")
+    m = re.search(r"sha256 ([0-9a-f]{64})", legacy[:300])
+    assert m and m.group(1) == hashlib.sha256(app).hexdigest(), "app.legacy.js is out of date: run scripts/build-legacy.sh"
+    assert not re.search(r"\w\?\.\w|\?\?[^?]", legacy.split("*/", 1)[1].replace("'?.'", "")), "newer syntax left in the legacy bundle"
+    html = (web / "index.html").read_text(encoding="utf-8")
+    assert 'data-modern="/static/app.js"' in html and 'data-legacy="/static/app.legacy.js"' in html
+
+
+def test_the_page_stamps_both_script_versions():
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    import tempfile
+    from pathlib import Path
+    d = Path(tempfile.mkdtemp())
+    cfg = Config(password="", secret_key="k" * 32, data_dir=d / "d"); cfg.data_dir.mkdir(); cfg.cache_dir.mkdir()
+    body = TestClient(create_app(cfg)).get("/").text
+    assert 'data-modern="/static/app.js?v=' in body and 'data-legacy="/static/app.legacy.js?v=' in body

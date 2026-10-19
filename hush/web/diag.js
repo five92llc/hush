@@ -27,6 +27,7 @@
   }
   window.addEventListener("error", function (e) {
     if (!e.message) return;                                   // a failed image or script load, not a script error
+    if (window.__hushTrying && /SyntaxError/.test(e.message)) { e.preventDefault(); return; }   // boot.js is about to load the translated copy
     if (/^ResizeObserver loop/.test(e.message)) { e.stopImmediatePropagation(); return; }   // a harmless browser notice, not a fault
     report({ kind: "error", message: String(e.message).slice(0, 300), file: String(e.filename || "").split("/").pop(), line: e.lineno, col: e.colno,
       stack: String((e.error && e.error.stack) || "").slice(0, 700) });
@@ -50,6 +51,17 @@
     E.replaceChildren = rc; DocumentFragment.prototype.replaceChildren = rc;
   }
   if (!String.prototype.replaceAll) String.prototype.replaceAll = function (a, b) { return a instanceof RegExp ? this.replace(a, b) : this.split(a).join(b); };
+  if (!Array.prototype.flat) Array.prototype.flat = function (d) {
+    d = d === undefined ? 1 : Math.floor(d);
+    return (function f(a, n) { return a.reduce(function (o, v) { return o.concat(Array.isArray(v) && n > 0 ? f(v, n - 1) : [v]); }, []); })(this, d);
+  };
+  if (!Array.prototype.flatMap) Array.prototype.flatMap = function (fn, t) { return Array.prototype.map.call(this, fn, t).flat(); };
+  if (!Object.fromEntries) Object.fromEntries = function (it) { var o = {}; Array.from(it).forEach(function (kv) { o[kv[0]] = kv[1]; }); return o; };
+  if (!String.prototype.matchAll) String.prototype.matchAll = function (re) {
+    var g = new RegExp(re.source, re.flags.indexOf("g") < 0 ? re.flags + "g" : re.flags), out = [], m;
+    while ((m = g.exec(this)) !== null) { out.push(m); if (m[0] === "") g.lastIndex++; }
+    return out[Symbol.iterator]();
+  };
   if (!Array.prototype.at) Array.prototype.at = function (i) { i = Math.trunc(i) || 0; if (i < 0) i += this.length; return this[i]; };
   if (!Element.prototype.append) Element.prototype.append = function () { for (var i = 0; i < arguments.length; i++) this.appendChild(arguments[i] && arguments[i].nodeType ? arguments[i] : document.createTextNode(String(arguments[i]))); };
 

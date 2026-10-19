@@ -1,3 +1,4 @@
+window.__hushBooted = true;      // tells boot.js this script could be read by this browser
 /* Hush web client — no build step, no dependencies. */
 "use strict";
 

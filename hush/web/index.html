@@ -9,7 +9,8 @@
 <link rel="stylesheet" href="/static/styles.css">
 <script src="/static/diag.js"></script>
 <script src="/static/avatars.js" defer></script>
-<script src="/static/app.js" defer></script>
+<!-- Old TV browsers (LG webOS 5 and older) cannot read the newest JavaScript, so they get a copy translated for them (app.legacy.js). -->
+<script id="boot" src="/static/boot.js" data-modern="/static/app.js" data-legacy="/static/app.legacy.js"></script>
 </head>
 <body>
 

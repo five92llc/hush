@@ -500,7 +500,7 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .tv-nav { display: none; }
 /* Big screen text scales with the screen, not with the browser's pixel density: an Android TV's browser reports a
    960 px wide page on a 1080p TV (2 device pixels per CSS pixel) while an LG reports 1920, and both must look alike. */
-html.tv { font-size: clamp(10px, 1.25vw, 26px); }
+html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* the first line is for TVs too old to know clamp() */
 .tv .rail, .tv #rail-links { display: none; }
 .tv .library { grid-template-columns: 1fr; }
 .tv .browser { padding-inline: 2rem; }

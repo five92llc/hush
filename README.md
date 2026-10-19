@@ -219,3 +219,7 @@ Run the tests with `pip install pytest && pytest`.
 ## TV and tablet apps
 
 An Android app (Android TV / Google TV such as TCL, Fire TV, Android tablets) and an LG webOS app are in `android/` and `webos/`. They load Hush from your server (each device asks for the server address once) and the Android app updates itself from GitHub releases. See `android/README.md`.
+
+## Old TVs (LG webOS 5 and older)
+
+Older TV browsers cannot read modern JavaScript, so Hush also ships `hush/web/app.legacy.js`, a translated copy of `app.js`. The page starts the normal script and falls back to the copy on its own when the browser cannot read it (`boot.js`). **After changing `app.js`, run `scripts/build-legacy.sh`** (needs Node); a test fails when the copy is out of date.
