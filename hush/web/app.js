@@ -67,7 +67,7 @@ const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /
   || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 /* Smart TVs (LG webOS/NetCast, Samsung Tizen, Android TV, ...). On these the remote's arrow keys move a slow mouse pointer
    unless the page claims them, so the app handles them itself and hides the pointer. */
-const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|Android.*\bTV\b/i;
+const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|HushTV|Android.*\bTV\b/i;
 const IS_TV_DEVICE = TVUA.test(UA);
 /** What video this screen can play without the server re-encoding it: 0 none, 1 HEVC, 2 HEVC 10-bit. (Safari gets HLS instead.) */
 const HEVC = (() => {
@@ -430,6 +430,8 @@ const Refresh = {
   },
 };
 ["#refresh-btn", "#refresh-btn2"].forEach((id) => $(id).addEventListener("click", () => Refresh.start()));
+$("#app-update-btn").addEventListener("click", () => window.HushApp?.checkForUpdate());
+$("#app-server-btn").addEventListener("click", () => window.HushApp?.changeServer());
 $("#pl-settings-btn").addEventListener("click", () => {
   Catalog.liveState = { q: "", group: "", favorites: false, hideDead: true, letter: "", ...(Catalog.liveState || {}), panel: true };
   go("#/live");
@@ -2870,6 +2872,9 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
+    const app = window.HushApp;                                       // present only inside the Android app
+    $("#app-card").hidden = !app;
+    if (app) $("#app-info").textContent = `Hush app ${app.version()} · connected to ${app.server()}`;
     const e = S.config?.encoder;
     $("#enc-info").textContent = !e ? "Unknown"
       : e.encoder === "libx264" ? "The processor (CPU) re-encodes video when a screen can't play a file as it is. No GPU was found; with one, set video_encoder: auto."

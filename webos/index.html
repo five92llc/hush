@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hush</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #191A2C; color: #F4EEE3; font-family: sans-serif; }
+  body { display: -webkit-flex; display: flex; -webkit-align-items: center; align-items: center; -webkit-justify-content: center; justify-content: center; text-align: center; }
+  .card { width: 40rem; max-width: 90%; }
+  h1 { font-size: 3rem; margin: 0 0 .5rem; }
+  p { font-size: 1.4rem; color: #bdb8cf; margin: .5rem 0 1.5rem; }
+  input { width: 100%; box-sizing: border-box; font-size: 1.8rem; padding: .7rem 1rem; border-radius: .5rem; border: 2px solid #3a3b57; background: #11121f; color: #fff; }
+  button { font-size: 1.6rem; padding: .7rem 2rem; margin: 1rem .5rem 0; border-radius: .5rem; border: 3px solid transparent; background: #2a2b45; color: #F4EEE3; }
+  button.primary { background: #F0B04A; color: #191A2C; }
+  :focus { outline: 4px solid #F0B04A; outline-offset: 3px; }
+</style>
+</head>
+<body>
+<div class="card" id="card"></div>
+<script>
+/* Hush for LG webOS: this page only remembers where your Hush server is and opens it.
+   Everything else is the Hush web app itself, so it updates whenever the server does. */
+(function () {
+  var KEY = "hush.server";
+  var card = document.getElementById("card");
+  var saved = ""; try { saved = localStorage.getItem(KEY) || ""; } catch (e) {}
+
+  function ask(note) {
+    card.innerHTML = '<h1>Hush</h1><p>' + (note || 'Type the address of your Hush server, for example http://192.168.100.228') + '</p>' +
+      '<input id="addr" type="text" value="' + (saved || "http://hush.local") + '" autocomplete="off" spellcheck="false"><br>' +
+      '<button class="primary" id="go">Connect</button>';
+    var input = document.getElementById("addr"), go = document.getElementById("go");
+    input.focus();
+    go.onclick = function () {
+      var v = input.value.replace(/^\s+|\s+$/g, "").replace(/\/+$/, "");
+      if (!v) return;
+      if (!/^https?:\/\//i.test(v)) v = "http://" + v;
+      try { localStorage.setItem(KEY, v); } catch (e) {}
+      saved = v; open_(v);
+    };
+    input.onkeydown = function (e) { if (e.keyCode === 13) go.onclick(); };
+  }
+
+  function open_(url) {
+    var timer = null;
+    card.innerHTML = '<h1>Hush</h1><p>Opening ' + url + '…</p><button id="change">Change server</button>';
+    var change = document.getElementById("change");
+    change.onclick = function () { clearTimeout(timer); ask(); };
+    timer = setTimeout(function () { location.replace(url); }, 1500);   // a moment to press "Change server" if the address is wrong
+  }
+
+  document.addEventListener("keydown", function (e) { if (e.keyCode === 461 && saved) { ask(); } });   // Back on this page = change server
+  if (saved) open_(saved); else ask();
+})();
+</script>
+</body>
+</html>

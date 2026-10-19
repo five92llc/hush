@@ -1,0 +1,58 @@
+name: Release apps
+
+# Publish a version of the TV apps by pushing a tag:   git tag android-v1.0.1 && git push origin android-v1.0.1
+# The Android app (TV, Fire TV, tablet) checks these releases and offers the update by itself.
+on:
+  push:
+    tags: ["android-v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  apps:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from the tag
+        run: echo "VERSION=${GITHUB_REF_NAME#android-v}" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Signing key
+        run: |
+          mkdir -p android/keystore
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > android/keystore/hush-release.jks
+          test -s android/keystore/hush-release.jks || { echo "Add the ANDROID_KEYSTORE_BASE64 secret first (see android/README.md)"; exit 1; }
+
+      - name: Build the Android app
+        working-directory: android
+        env:
+          HUSH_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HUSH_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          HUSH_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease -PversionName="$VERSION"
+          cp app/build/outputs/apk/release/app-release.apk "../hush-tv-$VERSION.apk"
+
+      - name: Build the LG webOS app
+        run: |
+          sed -i "s/\"version\": \"[0-9.]*\"/\"version\": \"$VERSION\"/" webos/appinfo.json
+          npx -y -p @webos-tools/cli ares-package webos -o .
+          ls -la
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Hush apps ${{ env.VERSION }}
+          body: |
+            Android app (TVs, Fire TV, tablets): `hush-tv-${{ env.VERSION }}.apk`. Installed apps offer this update by themselves.
+            LG webOS app: `com.hush.app_${{ env.VERSION }}_all.ipk`.
+          files: |
+            hush-tv-${{ env.VERSION }}.apk
+            com.hush.app_${{ env.VERSION }}_all.ipk

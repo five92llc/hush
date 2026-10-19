@@ -1,0 +1,15 @@
+{
+  "id": "com.hush.app",
+  "version": "1.0.0",
+  "vendor": "Hush",
+  "type": "web",
+  "main": "index.html",
+  "title": "Hush",
+  "icon": "icon.png",
+  "largeIcon": "largeIcon.png",
+  "bgColor": "#191A2C",
+  "iconColor": "#191A2C",
+  "uiRevision": 2,
+  "disableBackHistoryAPI": true,
+  "requiredACG": []
+}
