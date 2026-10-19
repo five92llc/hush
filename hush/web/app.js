@@ -1238,7 +1238,7 @@ const Catalog = {
         h("button", { class: "btn ghost", type: "button", onclick: async () => {
           if (!confirm(`Remove "${p.name}" and its channels from Live TV?`)) return;
           await api(`/api/live/playlists/${p.id}`, { method: "DELETE" }); reloadAll();
-        } }, "Remove")))) : null,
+        } }, "Remove")))) : "",
       h("form", { class: "row", onsubmit: async (e) => {
         e.preventDefault();
         const btn = e.submitter; btn.disabled = true; btn.textContent = "Reading…";

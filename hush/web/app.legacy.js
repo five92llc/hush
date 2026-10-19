@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 477ca9f5dc55083e1fac2ac8b10357055efd2e018f0acf922a5cfe3a5b74b378) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 95a7aedef4af68a9c4079abcadd5381837de8466f74f9638abce8e865223df70) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -1840,7 +1840,7 @@ const Catalog = {
           await api(`/api/live/playlists/${p.id}`, { method: "DELETE" });
           reloadAll();
         } }, "Remove")
-      ))) : null,
+      ))) : "",
       h("form", { class: "row", onsubmit: async (e) => {
         e.preventDefault();
         const btn = e.submitter;
