@@ -4,7 +4,7 @@
   "use strict";
   var sent = 0;
   function report(info) {
-    if (sent++ > 6) return;
+    if (sent++ > 12) return;
     info.ua = navigator.userAgent; info.hash = location.hash;
     try {
       var x = new XMLHttpRequest();
@@ -25,6 +25,7 @@
       el.textContent = "Hush hit a problem on this screen: " + text + "  (it was reported to the server)";
     } catch (e) { /* body not ready */ }
   }
+  window.hushReport = report;                                 // lets app.js tell the server about things like a missing picture
   window.addEventListener("error", function (e) {
     if (!e.message) return;                                   // a failed image or script load, not a script error
     if (window.__hushTrying && /SyntaxError/.test(e.message)) { e.preventDefault(); return; }   // boot.js is about to load the translated copy

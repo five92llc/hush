@@ -4,10 +4,16 @@ window.__hushBooted = true;      // tells boot.js this script could be read by t
 
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+/** Older TV browsers (before Chrome 76) ignore loading="lazy" and would fetch every poster and logo on a page at once. */
+const LAZY_FALLBACK = !("loading" in HTMLImageElement.prototype) && "IntersectionObserver" in window;
+const lazyImages = LAZY_FALLBACK ? new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) { e.target.src = e.target.dataset.src; lazyImages.unobserve(e.target); }
+}, { rootMargin: "400px" }) : null;
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
+    if (tag === "img" && k === "src" && LAZY_FALLBACK && attrs.loading === "lazy") { el.dataset.src = v; lazyImages.observe(el); continue; }
     if (k === "class") el.className = v;
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "html") el.innerHTML = v; // only used with static icon markup
@@ -1165,7 +1171,7 @@ const Catalog = {
 
     const fetchPage = async (reset) => {
       if (reset) { loaded = []; grid.replaceChildren(); }
-      const q = new URLSearchParams({ q: st.q, group: st.group, favorites: st.favorites, hide_dead: st.hideDead, letter: st.letter, limit: 120, offset: loaded.length });
+      const q = new URLSearchParams({ q: st.q, group: st.group, favorites: st.favorites, hide_dead: st.hideDead, letter: st.letter, limit: (IS_TV_DEVICE || TV.on) ? 48 : 120, offset: loaded.length });
       const r = await api(`/api/live/channels?${q}`);
       total = r.total; stats = r.stats;
       const first = loaded.length;
@@ -2085,6 +2091,25 @@ const Player = {
     } catch { return false; }
   },
 
+  /** Sound but no picture (a TV that cannot show the copied video): after a few seconds, say so and switch to the compatible stream. */
+  watchPicture() {
+    clearTimeout(this.pictureTimer);
+    const key = `${this.src}/${this.item}/${this.mode}`;
+    this.pictureTimer = setTimeout(() => {
+      const p = this.info?.probe;
+      if (this.mini || video.paused || !p?.video?.length || `${this.src}/${this.item}/${this.mode}` !== key) return;
+      let frames = null;
+      try { const q = video.getVideoPlaybackQuality?.(); frames = q ? q.totalVideoFrames : null; } catch { /* not offered */ }
+      if (video.videoWidth > 0 && (frames === null || frames > 0)) return;                     // a picture is on its way
+      window.hushReport?.({ kind: "no-picture", message: `playing without a picture (mode ${this.mode}, codec ${p.video[0].codec}, ${video.videoWidth}x${video.videoHeight}, frames ${frames})` });
+      if (this.mode === "remux" && !this.triedTranscode) {
+        this.triedTranscode = true; this.mode = "transcode";
+        this.message("No picture. Switching to a compatible stream…");
+        this.startAt(this.now()).then(() => video.play().catch(() => {}));
+      }
+    }, 5000);
+  },
+
   report(ok) {
     if (!this.chan || this.reported === ok) return;
     this.reported = ok;
@@ -2368,7 +2393,7 @@ video.addEventListener("pause", () => { $("#player").classList.remove("playing")
 video.addEventListener("seeked", () => Player.Audio.reset());
 video.addEventListener("ratechange", () => Player.Audio.reset());
 video.addEventListener("waiting", () => Player.Audio.reset());
-video.addEventListener("playing", () => { Player.message(null); Player.Audio.reset(); Player.report(true); if (!Progress.armed) Progress.arm(); });
+video.addEventListener("playing", () => { Player.message(null); Player.Audio.reset(); Player.report(true); if (!Progress.armed) Progress.arm(); Player.watchPicture(); });
 video.addEventListener("pause", () => { if (!video.ended) Progress.save(true); });
 $("#resume-restart").addEventListener("click", () => {
   $("#resume-chip").hidden = true; Player.seek(0); setTimeout(() => Progress.save(true), 600);
@@ -2622,9 +2647,10 @@ const TV = {
 
   /* ---------- spatial navigation ---------- */
   visible(el) {
-    if (!el.isConnected || el.hidden || el.closest("[hidden]")) return false;
-    const r = el.getBoundingClientRect(), st = getComputedStyle(el);
-    return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
+    // Called for every focusable thing on a key press (hundreds of channel cards), so it avoids getComputedStyle.
+    if (!el.isConnected || el.hidden) return false;
+    if (el.offsetParent === null && !el.getClientRects().length) return false;        // hidden itself or by an ancestor
+    return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
   },
   roots() {
     if (TVSelect.el) return [TVSelect.el];

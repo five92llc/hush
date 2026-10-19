@@ -1,12 +1,24 @@
-/* app.legacy.js - built from app.js (sha256 95a7aedef4af68a9c4079abcadd5381837de8466f74f9638abce8e865223df70) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 53c86e71fb9a9b01717d1da143fcd4abb0f33bc6b172332e606d8a7c100edd5e) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
 const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const LAZY_FALLBACK = !("loading" in HTMLImageElement.prototype) && "IntersectionObserver" in window;
+const lazyImages = LAZY_FALLBACK ? new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.isIntersecting) {
+    e.target.src = e.target.dataset.src;
+    lazyImages.unobserve(e.target);
+  }
+}, { rootMargin: "400px" }) : null;
 const h = (tag, attrs = {}, ...kids) => {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
     if (v == null || v === false) continue;
+    if (tag === "img" && k === "src" && LAZY_FALLBACK && attrs.loading === "lazy") {
+      el.dataset.src = v;
+      lazyImages.observe(el);
+      continue;
+    }
     if (k === "class") el.className = v;
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else if (k === "html") el.innerHTML = v;
@@ -1717,7 +1729,7 @@ const Catalog = {
         loaded = [];
         grid.replaceChildren();
       }
-      const q = new URLSearchParams({ q: st.q, group: st.group, favorites: st.favorites, hide_dead: st.hideDead, letter: st.letter, limit: 120, offset: loaded.length });
+      const q = new URLSearchParams({ q: st.q, group: st.group, favorites: st.favorites, hide_dead: st.hideDead, letter: st.letter, limit: IS_TV_DEVICE || TV.on ? 48 : 120, offset: loaded.length });
       const r = await api(`/api/live/channels?${q}`);
       total = r.total;
       stats = r.stats;
@@ -3223,6 +3235,31 @@ const Player = {
       return false;
     }
   },
+  /** Sound but no picture (a TV that cannot show the copied video): after a few seconds, say so and switch to the compatible stream. */
+  watchPicture() {
+    clearTimeout(this.pictureTimer);
+    const key = `${this.src}/${this.item}/${this.mode}`;
+    this.pictureTimer = setTimeout(() => {
+      var _a, _b, _c, _d;
+      const p = (_a = this.info) == null ? void 0 : _a.probe;
+      if (this.mini || video.paused || !((_b = p == null ? void 0 : p.video) == null ? void 0 : _b.length) || `${this.src}/${this.item}/${this.mode}` !== key) return;
+      let frames = null;
+      try {
+        const q = (_c = video.getVideoPlaybackQuality) == null ? void 0 : _c.call(video);
+        frames = q ? q.totalVideoFrames : null;
+      } catch (e) {
+      }
+      if (video.videoWidth > 0 && (frames === null || frames > 0)) return;
+      (_d = window.hushReport) == null ? void 0 : _d.call(window, { kind: "no-picture", message: `playing without a picture (mode ${this.mode}, codec ${p.video[0].codec}, ${video.videoWidth}x${video.videoHeight}, frames ${frames})` });
+      if (this.mode === "remux" && !this.triedTranscode) {
+        this.triedTranscode = true;
+        this.mode = "transcode";
+        this.message("No picture. Switching to a compatible stream…");
+        this.startAt(this.now()).then(() => video.play().catch(() => {
+        }));
+      }
+    }, 5e3);
+  },
   report(ok) {
     if (!this.chan || this.reported === ok) return;
     this.reported = ok;
@@ -3600,6 +3637,7 @@ video.addEventListener("playing", () => {
   Player.Audio.reset();
   Player.report(true);
   if (!Progress.armed) Progress.arm();
+  Player.watchPicture();
 });
 video.addEventListener("pause", () => {
   if (!video.ended) Progress.save(true);
@@ -3989,9 +4027,9 @@ const TV = {
   },
   /* ---------- spatial navigation ---------- */
   visible(el) {
-    if (!el.isConnected || el.hidden || el.closest("[hidden]")) return false;
-    const r = el.getBoundingClientRect(), st = getComputedStyle(el);
-    return r.width > 0 && r.height > 0 && st.visibility !== "hidden" && st.display !== "none";
+    if (!el.isConnected || el.hidden) return false;
+    if (el.offsetParent === null && !el.getClientRects().length) return false;
+    return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
   },
   roots() {
     if (TVSelect.el) return [TVSelect.el];
