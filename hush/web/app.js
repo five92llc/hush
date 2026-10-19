@@ -2594,6 +2594,7 @@ const TV = {
   roots() {
     const dlg = document.querySelector("dialog[open]");
     if (dlg) return [dlg];
+    for (const id of ["#profile-picker", "#login"]) if (!$(id).hidden) return [$(id)];     // "Who's watching?" and sign-in sit above everything
     if (!$("#guide").hidden) return [$("#guide")];
     if (!$("#panel").hidden) return [$("#panel")];
     if (!$("#player").hidden && !Player.mini) return [$("#controls")];
@@ -2646,6 +2647,8 @@ const TV = {
 
   /* ---------- Back ---------- */
   back() {
+    if (!$("#profile-picker").hidden) { if (!$("#profiles-cancel").hidden) $("#profiles-cancel").click(); return; }
+    if (!$("#login").hidden) return;
     const dlg = document.querySelector("dialog[open]");
     if (dlg) { dlg.close(); return; }
     if (!$("#guide").hidden) { guide.close(); $("#guide-btn").focus(); return; }
