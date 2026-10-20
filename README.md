@@ -228,6 +228,10 @@ Older TV browsers cannot read modern JavaScript, so Hush also ships `hush/web/ap
 
 A live channel plays about **10 seconds behind the broadcast** when the filter is on (it is always on for kids profiles). Hush pulls the channel, reads its closed captions (CEA-608/708, carried inside many broadcast streams), matches them against the word list and silences the flagged words before they reach the screen. Only the audio of segments that need it is re-encoded; the video is copied. Captions only say roughly when a word was spoken (live captions run 1-2 seconds late), so the silence is a short window around the word rather than a precise bleep.
 
-- **Channels without captions** cannot be filtered: an adult profile is told and the channel plays unfiltered; a kids profile is refused. In a sample of 26 channels about 1 in 8 carried captions, so check a channel before relying on it. Live speech recognition (Whisper) for the rest is the next step.
+- **Channels without captions** are listened to instead: Hush recognises the speech with a small Whisper model (`live_whisper_model`, default `small.en`) on the server's processor, in short overlapping windows, and silences flagged words with tight windows. In a sample of 26 channels only about 1 in 8 carried captions, so most channels use this. Each channel being recognised uses roughly half of 6-8 processor threads; at most `live_asr_sessions` (default 2) channels are recognised at once, and a GPU would raise that a lot. An adult profile on a channel that cannot be checked hears it unfiltered (and is told); a kids profile is refused rather than ever hearing unchecked audio.
 - **Starting a channel takes about 15-20 seconds** with the filter on, because of the delay. Turn the filter off (adults) to flip through channels quickly; flipping back to a recent channel is quick.
 - Kids profiles can no longer open a live channel unfiltered at all.
+
+## The tuning-in screen
+
+While a channel or title opens, the player shows a Hush-themed screen instead of black: the time, the date, the weather and a count-up with a progress bar (and "Starting the language filter" while a filtered channel starts). Set your town under Settings → Tuning-in screen; the weather comes from Open-Meteo (free, no key). Titles that open in under a second never show it.

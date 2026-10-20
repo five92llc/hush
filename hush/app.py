@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, epg, hw, media, mylist, profiles as rules, stream
+from . import discover, epg, hw, media, mylist, profiles as rules, stream, weather
 from .hls import HLSError, HLSManager
 from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
@@ -164,7 +164,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
                     "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
-                    "/api/browse", "/api/live/playlists", "/api/transcript")
+                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -407,6 +407,38 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if name.endswith(".m3u8"):
             return FileResponse(f, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
         return FileResponse(f, media_type="video/mp2t", headers={"Cache-Control": "private, max-age=300"})
+
+    # ---- weather for the "tuning in" screen ----------------------------------------------
+    @app.get("/api/weather", dependencies=[need])
+    def weather_now():
+        loc = db.get_setting("weather", None)
+        if not loc:
+            return {"configured": False}
+        try:
+            return {"configured": True, "place": loc["name"], "lat": loc["lat"], "lon": loc["lon"], **weather.current(loc["lat"], loc["lon"], loc.get("unit", "c"))}
+        except httpx.HTTPError:
+            return {"configured": True, "place": loc["name"], "unavailable": True}
+
+    @app.get("/api/weather/search", dependencies=[need])
+    def weather_search(q: str):
+        if len(q.strip()) < 2:
+            return []
+        try:
+            return weather.search(q.strip())
+        except httpx.HTTPError:
+            raise HTTPException(502, "Could not reach the weather service")
+
+    @app.put("/api/weather/location", dependencies=[need])
+    def weather_location(body: dict = Body(...)):
+        if not body.get("name"):
+            db.set_setting("weather", None)
+            return {"configured": False}
+        try:
+            loc = {"name": str(body["name"])[:80], "lat": float(body["lat"]), "lon": float(body["lon"]), "unit": "f" if body.get("unit") == "f" else "c"}
+        except (KeyError, ValueError):
+            raise HTTPException(400, "Choose a place from the list")
+        db.set_setting("weather", loc)
+        return weather_now()
 
     # ---- live TV language filter (captions) ----------------------------------------------
     @app.post("/api/livefilter/open", dependencies=[need])

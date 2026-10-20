@@ -144,6 +144,14 @@
         <button id="app-server-btn" class="btn subtle" type="button">Change server</button></div>
     </div>
     <div class="prefs-card admin-only">
+      <h2>Tuning-in screen</h2>
+      <div class="pref"><div><strong>Weather</strong><p id="weather-info" class="hint">Not set. Pick your town to show the weather while a channel opens.</p></div>
+        <select id="weather-unit" aria-label="Temperature unit"><option value="c">°C</option><option value="f">°F</option></select></div>
+      <form id="weather-form" class="row"><input id="weather-q" type="search" placeholder="Search for your town or city" aria-label="Town or city" autocomplete="off">
+        <button class="btn subtle" type="submit">Search</button><button id="weather-clear" class="btn ghost" type="button">Remove</button></form>
+      <div id="weather-results" class="found"></div>
+    </div>
+    <div class="prefs-card admin-only">
       <h2>Server</h2>
       <div class="pref"><div><strong>Video encoding</strong><p id="enc-info" class="hint">Checking…</p></div></div>
     </div>
@@ -172,6 +180,14 @@
         <h2 id="audio-title"></h2>
       </div>
       <div id="subs" class="subs" aria-live="off"></div>
+      <div id="wait-screen" class="wait-screen" hidden aria-live="polite">
+        <div class="wait-brand">Hush</div>
+        <div class="wait-clock" id="wait-clock"></div>
+        <div class="wait-date" id="wait-date"></div>
+        <div class="wait-weather" id="wait-weather"></div>
+        <div class="wait-status"><span id="wait-label">Opening…</span> <span id="wait-count">0:00</span></div>
+        <div class="wait-bar"><i id="wait-fill"></i></div>
+      </div>
       <div id="stage-msg" class="stage-msg" hidden></div>
       <div id="mini-bar" class="mini-bar">
         <button id="mini-title" class="t" type="button" title="Open the player">&nbsp;</button>

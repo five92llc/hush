@@ -412,6 +412,36 @@ function jobText(j) {
   if (j.status === "queued") return "Waiting to start";
   return `${j.stage[0].toUpperCase()}${j.stage.slice(1)}, ${Math.round(j.progress * 100)}%`;
 }
+/** Settings -> Tuning-in screen: where you live, for the weather shown while a channel opens. */
+const WeatherCard = {
+  loc: null,
+  async load() {
+    let w;
+    try { w = await api("/api/weather"); } catch { return; }
+    this.loc = w.configured ? w : null;
+    $("#weather-info").textContent = w.configured ? (w.unavailable ? `${w.place} (the weather service is not answering)` : `${w.place}: ${w.temp}${w.unit}, ${w.text.toLowerCase()}`)
+      : "Not set. Pick your town to show the weather while a channel opens.";
+    if (w.configured) $("#weather-unit").value = w.unit === "°F" ? "f" : "c";
+  },
+  async save(place) {
+    try { await api("/api/weather/location", { method: "PUT", body: place }); toast(place.name ? "Weather location saved" : "Weather removed"); $("#weather-results").replaceChildren(); WaitScreen.weather = null; this.load(); }
+    catch (err) { toast(err.message); }
+  },
+};
+$("#weather-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = $("#weather-q").value.trim(), box = $("#weather-results");
+  if (q.length < 2) return;
+  try {
+    const rs = await api(`/api/weather/search?q=${encodeURIComponent(q)}`);
+    box.replaceChildren(...(rs.length ? rs.map((r) => h("div", { class: "found-row" },
+      h("div", {}, h("strong", {}, r.name), h("div", { class: "hint" }, [r.region, r.country].filter(Boolean).join(", "))),
+      h("button", { class: "btn subtle", type: "button", onclick: () => WeatherCard.save({ name: [r.name, r.region].filter(Boolean).join(", "), lat: r.lat, lon: r.lon, unit: $("#weather-unit").value }) }, "Use this"))) : [h("p", { class: "hint" }, "Nothing found")]));
+  } catch (err) { box.replaceChildren(h("p", { class: "error" }, err.message)); }
+});
+$("#weather-clear").addEventListener("click", () => WeatherCard.save({}));
+$("#weather-unit").addEventListener("change", () => { const l = WeatherCard.loc; if (l) WeatherCard.save({ name: l.place, lat: l.lat, lon: l.lon, unit: $("#weather-unit").value }); });
+
 /** The Refresh button: starts a full look through the sources and follows it until it is done. */
 const Refresh = {
   async start() {
@@ -1783,8 +1813,11 @@ const Player = {
     if (this.chan) Queue.banner();
     $("#player").hidden = false;
     if (!keepMini) { $("#library").hidden = true; document.body.style.overflow = "hidden"; }
-    this.message("Opening…");
-    if (keepMini) this.minimize();
+    if (keepMini) { this.message("Opening…"); this.minimize(); }
+    else {
+      const nm = splitTags(Queue.list[Queue.pos]?.title || "").title;
+      WaitScreen.start(this.chan ? `Tuning in${nm ? " to " + nm : ""}` : `Opening${nm ? " " + nm : ""}`, this.chan && (isKids() || this.filterOn) ? 18 : 8);
+    }
     let info;
     try {
       info = await api(`/api/media/${sourceId}/${itemId}?hevc=${HEVC}`, { signal: abort.signal });
@@ -1825,6 +1858,7 @@ const Player = {
   },
 
   close(goBack = true) {
+    WaitScreen.stop();
     this.releaseLiveFilter();
     this.endMini();
     Progress.save(true); Progress.disarm();
@@ -1876,13 +1910,15 @@ const Player = {
   /** Tells the person what the filter found, once: no captions means nothing can be filtered on that channel. */
   watchLiveFilter(sid, first) {
     clearTimeout(this.lfTimer);
-    let told = false;
+    let told = false, warned = false;
     const look = async (st) => {
       if (this.liveSid !== sid) return;
       try { st = st || await api(`/api/livefilter/${sid}/status`); } catch { return; }
-      if (st.state === "nocaptions" && !told && !isKids()) { told = true; toast("This channel has no captions, so the language filter can't work on it. It is playing unfiltered."); }
-      else if (st.captions && !told) { told = true; toast("Language filter on: captions found (the picture is about 10 seconds behind live)."); }
-      this.lfTimer = setTimeout(() => look(), told ? 60000 : 8000);
+      if (st.state === "nocaptions" && !told && !isKids()) { told = true; toast("This channel has no captions and can't be listened to, so the language filter can't work on it. It is playing unfiltered."); }
+      else if (st.mode === "asr" && !told) { told = true; toast("No captions on this channel, so Hush is listening to it instead (about 10 seconds behind live; a little less precise)."); }
+      else if (st.mode === "captions" && !told) { told = true; toast("Language filter on: captions found (about 10 seconds behind live)."); }
+      if (st.behind && !warned) { warned = true; toast("The filter fell behind on this channel for a moment, so a few words may not have been filtered."); }
+      this.lfTimer = setTimeout(() => look(), told ? 30000 : 6000);
     };
     this.lfTimer = setTimeout(() => look(first), 6000);
   },
@@ -1928,6 +1964,7 @@ const Player = {
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
       let url;
       if (this.wantsLiveFilter()) {
+        WaitScreen.label("Starting the language filter", 18);
         this.message("Starting the language filter (about 15 seconds)…");
         try { url = await this.openLiveFilter(); this.liveFiltered = true; }
         catch (err) { if (tok === this.openToken) this.message(err.message, true); return; }
@@ -2161,6 +2198,7 @@ const Player = {
   },
 
   message(text, isError = false) {
+    if (isError) WaitScreen.stop();
     const m = $("#stage-msg");
     m.hidden = !text; m.textContent = text || ""; m.classList.toggle("error", isError);
   },
@@ -2437,7 +2475,7 @@ video.addEventListener("pause", () => { $("#player").classList.remove("playing")
 video.addEventListener("seeked", () => Player.Audio.reset());
 video.addEventListener("ratechange", () => Player.Audio.reset());
 video.addEventListener("waiting", () => Player.Audio.reset());
-video.addEventListener("playing", () => { Player.message(null); Player.Audio.reset(); Player.report(true); if (!Progress.armed) Progress.arm(); Player.watchPicture(); });
+video.addEventListener("playing", () => { WaitScreen.stop(); Player.message(null); Player.Audio.reset(); Player.report(true); if (!Progress.armed) Progress.arm(); Player.watchPicture(); });
 video.addEventListener("pause", () => { if (!video.ended) Progress.save(true); });
 $("#resume-restart").addEventListener("click", () => {
   $("#resume-chip").hidden = true; Player.seek(0); setTimeout(() => Progress.save(true), 600);
@@ -2636,6 +2674,40 @@ document.addEventListener("keydown", (e) => {
 }, true);
 
 /* ===================================================== big screen mode: made for a remote control */
+/** The "tuning in" screen: a Hush-themed display with the time, date, weather and a count-up, so opening a channel is never a black screen. */
+const WaitScreen = {
+  timer: null, showTimer: null, t0: 0, expected: 10, weather: null, weatherAt: 0,
+  start(label, expected = 10) {
+    this.stop();
+    if (Player.mini) return;
+    this.t0 = Date.now(); this.expected = expected;
+    $("#wait-label").textContent = label;
+    this.showTimer = setTimeout(() => {                                    // a title that opens in under a second never shows it
+      $("#wait-screen").hidden = false; this.tick(); this.loadWeather();
+      this.timer = setInterval(() => this.tick(), 1000);
+    }, 700);
+  },
+  label(text, expected) { $("#wait-label").textContent = text; if (expected) this.expected = expected; },
+  tick() {
+    const now = new Date(), s = Math.floor((Date.now() - this.t0) / 1000);
+    $("#wait-clock").textContent = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("#wait-date").textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    $("#wait-count").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    $("#wait-fill").style.width = `${Math.min(95, (s / Math.max(1, this.expected)) * 100)}%`;
+  },
+  async loadWeather() {
+    if (!this.weather || Date.now() - this.weatherAt > 600000) {
+      try { this.weather = await api("/api/weather"); this.weatherAt = Date.now(); } catch { this.weather = null; }
+    }
+    const w = this.weather, el = $("#wait-weather");
+    el.textContent = w && w.configured && !w.unavailable ? `${w.place}: ${w.temp}${w.unit}, ${w.text.toLowerCase()} · high ${w.high}° low ${w.low}°` : "";
+  },
+  stop() {
+    clearTimeout(this.showTimer); clearInterval(this.timer); this.timer = this.showTimer = null;
+    const el = $("#wait-screen"); if (el) el.hidden = true;
+  },
+};
+
 /** On a TV a drop-down opens as a big list of buttons the remote can move through and Back can close; the browser's own
     pop-up cannot be left with a remote (it swallows the keys). Used for every <select> while in big screen mode. */
 const TVSelect = {
@@ -3015,6 +3087,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
+    WeatherCard.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = !app;
     if (app) $("#app-info").textContent = `Hush app ${app.version()} · connected to ${app.server()}`;

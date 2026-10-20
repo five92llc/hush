@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 8fa7c88b1391421b800ed7fff261cc217d9d665125fdf0f861194da25dc57d60) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 9fd906e337f17cdd25b3ad3c74afdf118aee3c2388b125200ffc020de7cd6adb) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -561,6 +561,52 @@ function jobText(j) {
   if (j.status === "queued") return "Waiting to start";
   return `${j.stage[0].toUpperCase()}${j.stage.slice(1)}, ${Math.round(j.progress * 100)}%`;
 }
+const WeatherCard = {
+  loc: null,
+  async load() {
+    let w;
+    try {
+      w = await api("/api/weather");
+    } catch (e) {
+      return;
+    }
+    this.loc = w.configured ? w : null;
+    $("#weather-info").textContent = w.configured ? w.unavailable ? `${w.place} (the weather service is not answering)` : `${w.place}: ${w.temp}${w.unit}, ${w.text.toLowerCase()}` : "Not set. Pick your town to show the weather while a channel opens.";
+    if (w.configured) $("#weather-unit").value = w.unit === "°F" ? "f" : "c";
+  },
+  async save(place) {
+    try {
+      await api("/api/weather/location", { method: "PUT", body: place });
+      toast(place.name ? "Weather location saved" : "Weather removed");
+      $("#weather-results").replaceChildren();
+      WaitScreen.weather = null;
+      this.load();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+};
+$("#weather-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = $("#weather-q").value.trim(), box = $("#weather-results");
+  if (q.length < 2) return;
+  try {
+    const rs = await api(`/api/weather/search?q=${encodeURIComponent(q)}`);
+    box.replaceChildren(...rs.length ? rs.map((r) => h(
+      "div",
+      { class: "found-row" },
+      h("div", {}, h("strong", {}, r.name), h("div", { class: "hint" }, [r.region, r.country].filter(Boolean).join(", "))),
+      h("button", { class: "btn subtle", type: "button", onclick: () => WeatherCard.save({ name: [r.name, r.region].filter(Boolean).join(", "), lat: r.lat, lon: r.lon, unit: $("#weather-unit").value }) }, "Use this")
+    )) : [h("p", { class: "hint" }, "Nothing found")]);
+  } catch (err) {
+    box.replaceChildren(h("p", { class: "error" }, err.message));
+  }
+});
+$("#weather-clear").addEventListener("click", () => WeatherCard.save({}));
+$("#weather-unit").addEventListener("change", () => {
+  const l = WeatherCard.loc;
+  if (l) WeatherCard.save({ name: l.place, lat: l.lat, lon: l.lon, unit: $("#weather-unit").value });
+});
 const Refresh = {
   async start() {
     try {
@@ -2813,7 +2859,7 @@ const Player = {
   pendingSeek: null,
   /* ---------- loading ---------- */
   async open(sourceId, itemId, opts = {}) {
-    var _a, _b;
+    var _a, _b, _c;
     const keepMini = !!opts.mini;
     const libraryWasHidden = $("#library").hidden;
     this.close(false);
@@ -2839,8 +2885,13 @@ const Player = {
       $("#library").hidden = true;
       document.body.style.overflow = "hidden";
     }
-    this.message("Opening…");
-    if (keepMini) this.minimize();
+    if (keepMini) {
+      this.message("Opening…");
+      this.minimize();
+    } else {
+      const nm = splitTags(((_c = Queue.list[Queue.pos]) == null ? void 0 : _c.title) || "").title;
+      WaitScreen.start(this.chan ? `Tuning in${nm ? " to " + nm : ""}` : `Opening${nm ? " " + nm : ""}`, this.chan && (isKids() || this.filterOn) ? 18 : 8);
+    }
     let info;
     try {
       info = await api(`/api/media/${sourceId}/${itemId}?hevc=${HEVC}`, { signal: abort.signal });
@@ -2881,6 +2932,7 @@ const Player = {
     this.renderPanel();
   },
   close(goBack = true) {
+    WaitScreen.stop();
     this.releaseLiveFilter();
     this.endMini();
     Progress.save(true);
@@ -2947,7 +2999,7 @@ const Player = {
   /** Tells the person what the filter found, once: no captions means nothing can be filtered on that channel. */
   watchLiveFilter(sid, first) {
     clearTimeout(this.lfTimer);
-    let told = false;
+    let told = false, warned = false;
     const look = async (st) => {
       if (this.liveSid !== sid) return;
       try {
@@ -2957,12 +3009,19 @@ const Player = {
       }
       if (st.state === "nocaptions" && !told && !isKids()) {
         told = true;
-        toast("This channel has no captions, so the language filter can't work on it. It is playing unfiltered.");
-      } else if (st.captions && !told) {
+        toast("This channel has no captions and can't be listened to, so the language filter can't work on it. It is playing unfiltered.");
+      } else if (st.mode === "asr" && !told) {
         told = true;
-        toast("Language filter on: captions found (the picture is about 10 seconds behind live).");
+        toast("No captions on this channel, so Hush is listening to it instead (about 10 seconds behind live; a little less precise).");
+      } else if (st.mode === "captions" && !told) {
+        told = true;
+        toast("Language filter on: captions found (about 10 seconds behind live).");
       }
-      this.lfTimer = setTimeout(() => look(), told ? 6e4 : 8e3);
+      if (st.behind && !warned) {
+        warned = true;
+        toast("The filter fell behind on this channel for a moment, so a few words may not have been filtered.");
+      }
+      this.lfTimer = setTimeout(() => look(), told ? 3e4 : 6e3);
     };
     this.lfTimer = setTimeout(() => look(first), 6e3);
   },
@@ -3020,6 +3079,7 @@ const Player = {
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
       let url;
       if (this.wantsLiveFilter()) {
+        WaitScreen.label("Starting the language filter", 18);
         this.message("Starting the language filter (about 15 seconds)…");
         try {
           url = await this.openLiveFilter();
@@ -3338,6 +3398,7 @@ const Player = {
     });
   },
   message(text, isError = false) {
+    if (isError) WaitScreen.stop();
     const m = $("#stage-msg");
     m.hidden = !text;
     m.textContent = text || "";
@@ -3704,6 +3765,7 @@ video.addEventListener("seeked", () => Player.Audio.reset());
 video.addEventListener("ratechange", () => Player.Audio.reset());
 video.addEventListener("waiting", () => Player.Audio.reset());
 video.addEventListener("playing", () => {
+  WaitScreen.stop();
   Player.message(null);
   Player.Audio.reset();
   Player.report(true);
@@ -4022,6 +4084,57 @@ document.addEventListener("keydown", (e) => {
     idle.bump();
   }
 }, true);
+const WaitScreen = {
+  timer: null,
+  showTimer: null,
+  t0: 0,
+  expected: 10,
+  weather: null,
+  weatherAt: 0,
+  start(label, expected = 10) {
+    this.stop();
+    if (Player.mini) return;
+    this.t0 = Date.now();
+    this.expected = expected;
+    $("#wait-label").textContent = label;
+    this.showTimer = setTimeout(() => {
+      $("#wait-screen").hidden = false;
+      this.tick();
+      this.loadWeather();
+      this.timer = setInterval(() => this.tick(), 1e3);
+    }, 700);
+  },
+  label(text, expected) {
+    $("#wait-label").textContent = text;
+    if (expected) this.expected = expected;
+  },
+  tick() {
+    const now = /* @__PURE__ */ new Date(), s = Math.floor((Date.now() - this.t0) / 1e3);
+    $("#wait-clock").textContent = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("#wait-date").textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    $("#wait-count").textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    $("#wait-fill").style.width = `${Math.min(95, s / Math.max(1, this.expected) * 100)}%`;
+  },
+  async loadWeather() {
+    if (!this.weather || Date.now() - this.weatherAt > 6e5) {
+      try {
+        this.weather = await api("/api/weather");
+        this.weatherAt = Date.now();
+      } catch (e) {
+        this.weather = null;
+      }
+    }
+    const w = this.weather, el = $("#wait-weather");
+    el.textContent = w && w.configured && !w.unavailable ? `${w.place}: ${w.temp}${w.unit}, ${w.text.toLowerCase()} · high ${w.high}° low ${w.low}°` : "";
+  },
+  stop() {
+    clearTimeout(this.showTimer);
+    clearInterval(this.timer);
+    this.timer = this.showTimer = null;
+    const el = $("#wait-screen");
+    if (el) el.hidden = true;
+  }
+};
 const TVSelect = {
   el: null,
   select: null,
@@ -4652,6 +4765,7 @@ async function route() {
     $("#library").hidden = true;
     $("#prefs").hidden = false;
     TV.focusSoon();
+    WeatherCard.load();
     const app = window.HushApp;
     $("#app-card").hidden = !app;
     if (app) $("#app-info").textContent = `Hush app ${app.version()} · connected to ${app.server()}`;

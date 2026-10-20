@@ -37,6 +37,9 @@ class AnalysisConfig:
     whisper_cpu_threads: int = 0     # CPU threads per scan; 0 = library default (4)
     whisper_beam_size: int = 5       # 1 is about twice as fast, slightly less accurate
     language: str | None = "en"
+    live_whisper_model: str = "small.en"   # speech recognition for live channels without captions (must keep up with real time)
+    live_whisper_threads: int = 6    # CPU threads for it
+    live_asr_sessions: int = 2       # live channels that can be recognised at once
     pad_before: float = 0.12         # seconds of extra mute before a word
     pad_after: float = 0.15          # seconds of extra mute after a word
     merge_gap: float = 0.35          # merge ranges closer than this

@@ -49,7 +49,6 @@ def volume_of(path):
 
 def test_live_run_delays_mutes_and_keeps_the_rest(tmp_path, monkeypatch):
     monkeypatch.setattr(livefilter, "DELAY", 2.0)
-    monkeypatch.setattr(livefilter, "NO_CAPTIONS_AFTER", 999)
     feed = tmp_path / "feed.mp4"
     subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=15",
                     "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "24", "-c:v", "libx264", "-g", "30", "-pix_fmt", "yuv420p",
@@ -89,6 +88,7 @@ def test_a_backlog_at_the_start_does_not_make_the_viewer_watch_old_content(tmp_p
     monkeypatch.setattr(livefilter, "DELAY", 0.5)
     live = livefilter.LiveFilter(Config(data_dir=tmp_path), WordList(), tmp_path / "lf")
     s = livefilter.Session(live, "k", tmp_path / "lf" / "abc", [], None, False)
+    s.mode = "captions"
     published = []
     s._publish = lambda seg: published.append(seg["seq"]) or s.published.append({"name": seg["name"], "dur": seg["dur"], "seq": seg["seq"]})
     now = time.time()
@@ -99,4 +99,71 @@ def test_a_backlog_at_the_start_does_not_make_the_viewer_watch_old_content(tmp_p
     time.sleep(1.2)
     s.stop_event.set()
     assert published and published[0] >= 26                  # starts near the newest, not at segment 0
+    live.stop_all()
+
+
+class FakeASR:
+    """Stands in for Whisper: every 8 s window "hears" the same two words at the same places inside it."""
+    def __init__(self):
+        self.active, self.calls = 0, 0
+
+    def available(self):
+        return True
+
+    def claim(self):
+        self.active += 1
+        return True
+
+    def release(self):
+        self.active -= 1
+
+    def words(self, wav):
+        from hush.analysis.matcher import Word
+        self.calls += 1
+        return [Word("well", 1.0, 1.3), Word("shit", 3.0, 3.4), Word("okay", 5.0, 5.3)]
+
+
+def test_a_channel_without_captions_is_filtered_by_speech_recognition(tmp_path, monkeypatch):
+    monkeypatch.setattr(livefilter, "DELAY", 2.0)
+    monkeypatch.setattr(livefilter, "CC_PROBE_SECONDS", 1.0)
+    feed = tmp_path / "feed.mp4"
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=15",
+                    "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "26", "-c:v", "libx264", "-g", "30", "-pix_fmt", "yuv420p",
+                    "-c:a", "aac", "-shortest", str(feed)], check=True)
+    asr = FakeASR()
+    live = livefilter.LiveFilter(Config(data_dir=tmp_path), WordList(), tmp_path / "lf", realtime_inputs=True, asr=asr)
+    try:
+        sess = livefilter.Session(live, "k|*|0", tmp_path / "lf" / "manual", ["-i", str(feed)], None, False)
+        live.sessions["k|*|0"] = sess
+        sess.start()
+        end = time.time() + 40
+        while time.time() < end and len(sess.published) < 7:
+            time.sleep(0.5)
+        st = sess.status()
+        assert st["mode"] == "asr" and st["words"] > 0 and not st["behind"], st
+        assert sess.muted >= 1 and asr.calls >= 2, (st, asr.calls)
+        assert asr.active == 1
+        assert sess.covered_until >= sess.segments[sess.published[-1]["seq"]]["t0"], "published audio that was never checked"
+    finally:
+        live.stop_all()
+    assert asr.active == 0                                   # the recognition slot is given back
+
+
+def test_a_kids_session_is_refused_when_nothing_can_check_the_audio(tmp_path, monkeypatch):
+    monkeypatch.setattr(livefilter, "DELAY", 0.3)
+    monkeypatch.setattr(livefilter, "CC_PROBE_SECONDS", 0.5)
+    monkeypatch.setattr(livefilter, "STRICT_GIVE_UP", 3.0)
+
+    class NoASR(FakeASR):
+        def available(self):
+            return False
+    live = livefilter.LiveFilter(Config(data_dir=tmp_path), WordList(), tmp_path / "lf", asr=NoASR())
+    s = livefilter.Session(live, "k", tmp_path / "lf" / "abc", [], None, True)
+    s.segments.append({"seq": 0, "name": "s000000.ts", "dur": 2.0, "t0": 0.0, "ready": time.time() - 5, "extracted": True})
+    import threading
+    threading.Thread(target=s._publish_loop, daemon=True).start()
+    s.started = time.time() - 4                              # nothing has been decided for longer than a kids session will wait
+    s._decide_mode()
+    time.sleep(1.0)
+    assert s.stop_event.is_set() and s.state == "nocaptions" and s.published == []
     live.stop_all()

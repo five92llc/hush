@@ -21,13 +21,12 @@ import uuid
 from pathlib import Path
 
 from .analysis import subtitles
-from .analysis.matcher import build_ranges
+from .analysis.matcher import Word, build_ranges, normalize
 
 log = logging.getLogger("hush.livefilter")
 
 DELAY = 10.0                 # seconds the viewer is behind the broadcast
 PAD_BEFORE, PAD_AFTER, MERGE_GAP = 2.2, 0.7, 1.0     # measured on a real channel: a caption word is estimated 1-1.7 s after it was spoken
-NO_CAPTIONS_AFTER = 25.0     # no cue for this long: the channel probably has no captions
 STRICT_GIVE_UP = 45.0        # a kids session waits this long for the first caption before refusing
 KEEP_CUES = 120.0
 WINDOW = 6                   # segments in the published playlist
@@ -36,6 +35,11 @@ IDLE_SECONDS = 120
 GRACE_SECONDS = 20           # a session nobody watches any more lingers this long (flipping back to a channel is instant)
 MAX_SESSIONS = 4
 NAME = re.compile(r"^[A-Za-z0-9_.-]+\.(m3u8|ts|mp4)$")
+CC_PROBE_SECONDS = 8.0       # no captions seen by then: try speech recognition instead
+ASR_PAD_BEFORE, ASR_PAD_AFTER, ASR_MERGE_GAP = 0.4, 0.5, 0.4   # recognised words carry real timings, so the windows can be tight
+ASR_WINDOW_SEGMENTS, ASR_STEP_SEGMENTS = 4, 2
+ASR_EDGE_LEFT, ASR_EDGE_RIGHT = 0.6, 0.5                       # words cut by the edge of a window are not trusted
+ASR_ADULT_WAIT = 8.0         # an adult profile waits this long past the delay for recognition before the audio goes out unfiltered
 
 
 class LiveFilterError(Exception):
@@ -64,6 +68,57 @@ def parse_playlist(text: str) -> list[tuple[str, float]]:
     return out
 
 
+class LiveASR:
+    """Speech recognition for live channels: one small model shared by every session, one window at a time."""
+
+    def __init__(self, cfg, models_dir: Path):
+        self.cfg, self.models_dir = cfg, models_dir
+        self._model = None
+        self._lock = threading.Lock()          # one window at a time keeps CPU use predictable
+        self.active = 0                        # sessions currently using recognition
+        self._slots = threading.Lock()
+
+    def available(self) -> bool:
+        from .analysis import transcribe
+        return transcribe.available()
+
+    def claim(self) -> bool:
+        with self._slots:
+            if self.active >= max(1, self.cfg.analysis.live_asr_sessions):
+                return False
+            self.active += 1
+            return True
+
+    def release(self) -> None:
+        with self._slots:
+            self.active = max(0, self.active - 1)
+
+    def _load(self):
+        if self._model is None:
+            from faster_whisper import WhisperModel
+            a = self.cfg.analysis
+            device = a.whisper_device
+            if device == "auto":
+                try:
+                    import ctranslate2
+                    device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+                except Exception:  # noqa: BLE001
+                    device = "cpu"
+            compute = "int8_float16" if device == "cuda" else a.whisper_compute_type
+            self._model = WhisperModel(a.live_whisper_model, device=device, compute_type=compute,
+                                       cpu_threads=max(1, a.live_whisper_threads), download_root=str(self.models_dir))
+        return self._model
+
+    def words(self, wav: Path) -> list[Word]:
+        """Words (with times in seconds from the start of the file) in a 16 kHz mono recording."""
+        with self._lock:
+            model = self._load()
+            segments, _ = model.transcribe(str(wav), language=self.cfg.analysis.language or None, word_timestamps=True, beam_size=1,
+                                           vad_filter=True, vad_parameters={"min_silence_duration_ms": 300},
+                                           condition_on_previous_text=False, temperature=0.0)
+            return [Word(w.word, float(w.start), float(w.end)) for seg in segments for w in (seg.words or [])]
+
+
 class Session:
     def __init__(self, live: "LiveFilter", key: str, folder: Path, input_args: list[str], cats: set[str] | None, strict: bool):
         self.live, self.key, self.folder, self.strict, self.cats = live, key, folder, strict, cats
@@ -86,6 +141,12 @@ class Session:
         self.next_pub = 0
         self.last_pub = 0.0
         self.muted = 0
+        self.mode = "pending"            # pending | captions | asr | none
+        self.words: list[Word] = []      # recognised words (asr mode), times since the first segment
+        self.covered_until = 0.0         # stream time up to which the words are known (asr mode)
+        self.asr_end = -1                # index of the last segment included in a recognised window
+        self.asr_claimed = False
+        self.behind = False
         self.proc: subprocess.Popen | None = None
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
@@ -102,7 +163,7 @@ class Session:
                 "-hls_flags", "delete_segments+independent_segments+omit_endlist",
                 "-hls_segment_filename", str(self.raw / "s%06d.ts"), str(self.raw / "index.m3u8")]
         self.proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=open(self.folder / "ingest.log", "wb"))
-        for target, name in ((self._watch_raw, "raw"), (self._publish_loop, "publish")):
+        for target, name in ((self._watch_raw, "raw"), (self._publish_loop, "publish"), (self._asr_loop, "asr")):
             threading.Thread(target=target, name=f"livefilter-{name}-{self.sid}", daemon=True).start()
 
     # ---- watching the incoming segments ------------------------------------------
@@ -131,9 +192,83 @@ class Session:
                 except Exception as exc:  # noqa: BLE001 - a failed caption read must not stop the stream
                     log.warning("captions for %s: %s", name, exc)
                 seg["extracted"] = True
-            if time.time() - self.started > NO_CAPTIONS_AFTER and not self.cues_seen and self.state in ("starting", "live"):
-                self.state = "nocaptions"
+            self._decide_mode()
             time.sleep(0.4)
+
+    def _decide_mode(self) -> None:
+        """Captions if the stream has them; otherwise speech recognition, when the machine has room for it."""
+        chan = self.key.split("|")[0]
+        if self.mode == "pending":
+            if self.cues_seen:
+                self.mode = "captions"
+                self.live.no_captions.discard(chan)
+            elif self.segments and (chan in self.live.no_captions or time.time() - self.started > CC_PROBE_SECONDS):
+                if self.live.asr.available() and self.live.asr.claim():
+                    self.asr_claimed = True
+                    self.mode = "asr"
+                    self.live.no_captions.add(chan)
+                else:
+                    self.mode = "none"
+                    self.state = "nocaptions"
+                    self.error = "This channel has no captions and speech recognition is not available, so it cannot be filtered."
+        elif self.mode == "captions" and not self.cues_seen:
+            pass
+        if self.mode == "asr":
+            self.state = "live" if self.state != "failed" else self.state
+
+    # ---- speech recognition (channels without captions) -------------------------------
+    def _asr_loop(self) -> None:
+        while not self.stop_event.is_set():
+            try:
+                if self.mode != "asr" or not self._asr_step():
+                    time.sleep(0.3)
+            except Exception as exc:  # noqa: BLE001 - recognition trouble must not end the stream; the publish gate keeps it safe
+                log.warning("recognition: %s", exc)
+                time.sleep(1.0)
+
+    def _asr_step(self) -> bool:
+        """Recognise the newest window once two new segments have arrived. Returns True when it did work."""
+        with self.lock:
+            n = len(self.segments)
+            segs = list(self.segments[max(0, n - ASR_WINDOW_SEGMENTS):n])
+        if not segs or (n - 1) - self.asr_end < (ASR_STEP_SEGMENTS if self.asr_end >= 0 else 1) or any(not (self.raw / g["name"]).exists() for g in segs):
+            return False
+        base, end = segs[0]["t0"], segs[-1]["t0"] + segs[-1]["dur"]
+        tmp = self.folder / "asr.ts"
+        wav = self.folder / "asr.wav"
+        with open(tmp, "wb") as out:
+            for g in segs:
+                out.write((self.raw / g["name"]).read_bytes())
+        r = subprocess.run([self.live.cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-y", "-i", str(tmp), "-vn", "-ac", "1",
+                            "-ar", "16000", str(wav)], capture_output=True, timeout=30)
+        if r.returncode != 0 or not wav.exists():
+            self.asr_end = n - 1
+            return True
+        words = self.live.asr.words(wav)
+        left = base if self.asr_end < 0 else base + ASR_EDGE_LEFT           # the very first window has no earlier window to defer to
+        right = end - ASR_EDGE_RIGHT
+        self.add_words([Word(w.text, base + w.start, base + w.end) for w in words if left <= base + w.start and base + w.end <= right])
+        self.covered_until = right
+        self.asr_end = n - 1
+        for g in segs:
+            g["extracted"] = True
+        return True
+
+    def add_words(self, words: list[Word]) -> None:
+        """Take recognised words (times since the first segment) and refresh the mute windows."""
+        known = [(normalize(w.text), w.start) for w in self.words]
+        for w in words:
+            n = normalize(w.text)
+            if n and not any(n == k and abs(w.start - t) < 0.4 for k, t in known):
+                self.words.append(w)
+        self.words.sort(key=lambda w: w.start)
+        if self.words:
+            horizon = self.words[-1].end - KEEP_CUES
+            self.words = [w for w in self.words if w.end >= horizon]
+        det = self.live.wordlist.find(self.words)
+        if self.cats is not None:
+            det = [d for d in det if d["category"] in self.cats]
+        self.ranges = build_ranges(det, ASR_PAD_BEFORE, ASR_PAD_AFTER, ASR_MERGE_GAP)
 
     def _extract(self, seg: dict) -> None:
         """Read the captions of this segment (with the one before it, so a caption that began earlier is whole)."""
@@ -177,30 +312,44 @@ class Session:
     def _publish_loop(self) -> None:
         while not self.stop_event.is_set():
             with self.lock:
-                if not self.published:                      # the source hands over a backlog at the start: begin near its newest part, not its oldest
+                if not self.published and self.mode != "pending":   # the source hands over a backlog at the start: begin near its newest part
                     now = time.time()
                     eligible = [i for i, s in enumerate(self.segments) if now >= s["ready"] + DELAY]
                     if eligible and eligible[-1] - self.next_pub > 2:
                         self.next_pub = eligible[-1] - 2
                 seg = self.segments[self.next_pub] if self.next_pub < len(self.segments) else None
                 following = self.segments[self.next_pub + 1] if self.next_pub + 1 < len(self.segments) else None
-            if seg is None or time.time() < seg["ready"] + DELAY:
+            now = time.time()
+            if seg is None or now < seg["ready"] + DELAY:
                 time.sleep(0.2)
                 continue
-            if self.published and time.time() < self.last_pub + 0.8 * self.published[-1]["dur"]:
+            if self.published and now < self.last_pub + 0.8 * self.published[-1]["dur"]:
                 time.sleep(0.1)                              # one segment per segment-length, so a burst from the source never outruns the player
                 continue
-            if self.strict and not self.cues_seen:                       # never let a kids profile hear unfiltered audio
-                if time.time() - self.started > STRICT_GIVE_UP:
-                    self.state = "nocaptions"
-                    self.error = "This channel has no captions, so it cannot be filtered."
-                    self.stop_event.set()
+            age = now - (seg["ready"] + DELAY)               # how long this segment has been ready to go out
+            if self.mode == "pending":
+                if self.strict and now - self.started > STRICT_GIVE_UP:
+                    self._refuse("This channel has no captions, so it cannot be filtered.")
                     return
                 time.sleep(0.3)
                 continue
-            if following is not None and not following["extracted"] and time.time() < seg["ready"] + DELAY + 3:
-                time.sleep(0.2)                                          # a moment for the next segment's captions to land
+            if self.mode == "none" and self.strict:
+                self._refuse(self.error or "This channel cannot be filtered.")
+                return
+            if self.mode == "captions" and following is not None and not following["extracted"] and age < 3:
+                time.sleep(0.2)                              # a moment for the next segment's captions to land
                 continue
+            if self.mode == "asr" and self.covered_until < seg["t0"] + seg["dur"]:
+                if self.strict:                              # a kids profile never hears audio that was not checked
+                    if age > STRICT_GIVE_UP:
+                        self._refuse("The language filter could not keep up on this channel.")
+                        return
+                    time.sleep(0.2)
+                    continue
+                if age < ASR_ADULT_WAIT:
+                    time.sleep(0.2)
+                    continue
+                self.behind = True
             try:
                 self._publish(seg)
             except Exception as exc:  # noqa: BLE001
@@ -210,6 +359,10 @@ class Session:
             self.next_pub += 1
             if self.state == "starting":
                 self.state = "live"
+
+    def _refuse(self, message: str) -> None:
+        self.state, self.error = "nocaptions", message
+        self.stop_event.set()
 
     def windows_for(self, seg: dict) -> list[tuple[float, float]]:
         lo, hi = seg["t0"], seg["t0"] + seg["dur"]
@@ -264,12 +417,15 @@ class Session:
         self.stop_event.set()
 
     def status(self) -> dict:
-        return {"state": self.state, "captions": self.cues_seen, "cues": len(self.cues), "muted": self.muted,
-                "delay": DELAY, "error": self.error, "ready": len(self.published) >= 2}
+        return {"state": self.state, "mode": self.mode, "captions": self.cues_seen, "cues": len(self.cues), "words": len(self.words),
+                "muted": self.muted, "delay": DELAY, "error": self.error, "behind": self.behind, "ready": len(self.published) >= 2}
 
     def stop(self) -> None:
         self.state = "stopped" if self.state not in ("failed", "nocaptions") else self.state
         self.stop_event.set()
+        if self.asr_claimed:
+            self.asr_claimed = False
+            self.live.asr.release()
         if self.proc and self.proc.poll() is None:
             self.proc.kill()
             try:
@@ -280,8 +436,10 @@ class Session:
 
 
 class LiveFilter:
-    def __init__(self, cfg, wordlist, root: Path, realtime_inputs: bool = False):
+    def __init__(self, cfg, wordlist, root: Path, realtime_inputs: bool = False, asr=None):
         self.cfg, self.wordlist, self.root = cfg, wordlist, root
+        self.asr = asr or LiveASR(cfg, cfg.data_dir / "models")
+        self.no_captions: set[str] = set()            # channels already seen to have none: next time recognition starts straight away
         self.realtime_inputs = realtime_inputs        # tests feed a file; a real channel is already live
         shutil.rmtree(root, ignore_errors=True)
         root.mkdir(parents=True, exist_ok=True)

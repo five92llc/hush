@@ -687,3 +687,24 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 /* ---- player on a TV: the TV's own keys set the volume; the progress bar shows when it is being adjusted ---- */
 .tv .player .vol { display: none; }
 .timeline[data-adjust="1"] { outline: .2rem solid var(--lamp); outline-offset: .2rem; }
+
+/* ---- the "tuning in" screen: something to look at while a channel or title opens ---- */
+.wait-screen { position: absolute; top: 0; right: 0; bottom: 0; left: 0; z-index: 3; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; background: #14152A; color: var(--linen); overflow: hidden; }
+.wait-screen::before, .wait-screen::after { content: ""; position: absolute; width: 80vmin; height: 80vmin; border-radius: 50%; pointer-events: none; }
+.wait-screen::before { top: -25%; left: -15%; background: radial-gradient(circle, rgba(169, 156, 240, .24), rgba(169, 156, 240, 0) 65%); animation: wait-drift-a 22s ease-in-out infinite alternate; }
+.wait-screen::after { bottom: -30%; right: -15%; background: radial-gradient(circle, rgba(240, 176, 74, .16), rgba(240, 176, 74, 0) 65%); animation: wait-drift-b 26s ease-in-out infinite alternate; }
+@keyframes wait-drift-a { to { transform: translate(30vmin, 20vmin) scale(1.15); } }
+@keyframes wait-drift-b { to { transform: translate(-25vmin, -18vmin) scale(1.2); } }
+.wait-screen > * { position: relative; z-index: 1; margin-top: .5rem; }
+.wait-brand { font-family: var(--display); font-size: var(--s3); letter-spacing: .02em; color: var(--linen-dim); margin-bottom: 1rem; }
+.wait-clock { font-family: var(--display); font-size: 4.2rem; line-height: 1; }
+.wait-date { font-size: var(--s1); color: var(--linen-dim); }
+.wait-weather { font-size: var(--s1); min-height: 1.6rem; color: var(--linen); }
+.wait-status { margin-top: 1.6rem; font-size: var(--s0); color: var(--lamp); }
+.wait-bar { width: min(26rem, 70%); height: .3rem; background: rgba(255, 255, 255, .12); border-radius: .2rem; overflow: hidden; }
+.wait-bar i { display: block; height: 100%; width: 0; background: var(--lamp); transition: width 1s linear; }
+.wait-screen:not([hidden]) ~ .stage-msg:not(.error) { display: none; }
+.stage-msg { z-index: 4; }
+.player.mini .wait-screen { display: none; }
+@media (prefers-reduced-motion: reduce) { .wait-screen::before, .wait-screen::after { animation: none; } }
