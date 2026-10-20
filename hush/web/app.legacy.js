@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 3f934a451fdbbafea8bf6a0c2210e893f5a7d32bc75560da246c143ff160e357) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 730c12fb7c1b6c1f2931b6417d6358ed2c5b597e553a7d775d9636ca63c70305) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -3878,6 +3878,7 @@ $("#copy-url").addEventListener("click", async () => {
   });
   tl.addEventListener("pointerleave", () => tip.hidden = true);
   tl.addEventListener("keydown", (e) => {
+    if (IS_TV_DEVICE || TV.on) return;
     if (e.key === "ArrowLeft") {
       Player.seek(Player.now() - 5);
       e.preventDefault();
@@ -3918,15 +3919,18 @@ document.addEventListener("keydown", (e) => {
       idle.bump();
       return;
     }
+    const tv = IS_TV_DEVICE || TV.on;
     const zapKeys = {
-      arrowup: () => Queue.zap(-1),
       pageup: () => Queue.zap(-1),
-      arrowdown: () => Queue.zap(1),
       pagedown: () => Queue.zap(1),
       b: () => Queue.recall(),
       g: () => guide.toggle(),
       i: () => Queue.banner()
     };
+    if (!tv) {
+      zapKeys.arrowup = () => Queue.zap(-1);
+      zapKeys.arrowdown = () => Queue.zap(1);
+    }
     if (zapKeys[k]) {
       e.preventDefault();
       zapKeys[k]();
@@ -3946,8 +3950,7 @@ document.addEventListener("keydown", (e) => {
     h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10),
     l: () => Player.seek(Player.now() + 10),
-    arrowleft: () => Player.seek(Player.now() - 10),
-    arrowright: () => Player.seek(Player.now() + 10),
+    ...IS_TV_DEVICE || TV.on ? {} : { arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10) },
     escape: () => !$("#guide").hidden ? guide.close() : !$("#panel").hidden ? togglePanel(false) : !$("#settings").hidden ? $("#settings").hidden = true : null
   };
   if (e.target === $("#timeline") && (k === "arrowleft" || k === "arrowright")) return;
@@ -4132,6 +4135,11 @@ const TV = {
       TVSelect.close();
       return;
     }
+    const tlb = $("#timeline");
+    if ((tlb == null ? void 0 : tlb.dataset.adjust) === "1") {
+      tlb.dataset.adjust = "0";
+      return;
+    }
     if (!$("#profile-picker").hidden) {
       if (!$("#profiles-cancel").hidden) $("#profiles-cancel").click();
       return;
@@ -4175,13 +4183,21 @@ const TV = {
   },
   /** Returns true when the key was handled here. */
   handleKey(e) {
-    var _a, _b, _c, _d, _e, _f;
+    var _a, _b, _c, _d, _e, _f, _g, _h;
     const k = normKey(e);
     const typing = (_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || k === "Backspace" && !typing;
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) {
       e.preventDefault();
       TVSelect.open(e.target);
+      return true;
+    }
+    if (k === "Enter" && e.target.id === "timeline") {
+      e.preventDefault();
+      const on = e.target.dataset.adjust !== "1";
+      e.target.dataset.adjust = on ? "1" : "0";
+      if (on) toast("Left and right to skip 10 seconds. Press OK when done.");
+      idle.bump();
       return true;
     }
     const overlay = document.querySelector("dialog[open]") || !$("#guide").hidden || !$("#panel").hidden || !$("#settings").hidden;
@@ -4201,27 +4217,38 @@ const TV = {
       }
       return false;
     }
+    if (e.repeat) {
+      const now = performance.now();
+      if (now - (this.lastStep || 0) < 90) {
+        e.preventDefault();
+        return true;
+      }
+      this.lastStep = now;
+    }
     if (typing && (dir === "left" || dir === "right")) return false;
     if ((_e = (_d = e.target).matches) == null ? void 0 : _e.call(_d, "input[type=range]")) return false;
     if (playerOpen && !overlay) {
-      if ((_f = document.activeElement) == null ? void 0 : _f.closest("#controls")) {
-        e.preventDefault();
-        this.move(dir);
+      e.preventDefault();
+      const ctl = (_f = document.activeElement) == null ? void 0 : _f.closest("#controls");
+      const hidden = $("#player").classList.contains("idle");
+      if (!ctl || hidden) {
         idle.bump();
+        (((_g = Player.lastControl) == null ? void 0 : _g.isConnected) && Player.lastControl.closest("#controls") ? Player.lastControl : $("#play-btn")).focus({ preventScroll: true });
         return true;
       }
-      if (!Player.chan && dir === "down") {
-        e.preventDefault();
-        idle.show();
-        $("#play-btn").focus();
-        return true;
+      const tl = $("#timeline");
+      if (document.activeElement === tl && tl.dataset.adjust === "1") {
+        if (dir === "left" || dir === "right") {
+          Player.seek(Player.now() + (dir === "left" ? -10 : 10));
+          idle.bump();
+          return true;
+        }
+        tl.dataset.adjust = "0";
       }
-      if (!Player.chan && dir === "up") {
-        e.preventDefault();
-        idle.bump();
-        return true;
-      }
-      return false;
+      this.move(dir);
+      idle.bump();
+      if ((_h = document.activeElement) == null ? void 0 : _h.closest("#controls")) Player.lastControl = document.activeElement;
+      return true;
     }
     e.preventDefault();
     this.move(dir);

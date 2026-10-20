@@ -2557,6 +2557,7 @@ $("#copy-url").addEventListener("click", async () => {
   });
   tl.addEventListener("pointerleave", () => (tip.hidden = true));
   tl.addEventListener("keydown", (e) => {
+    if (IS_TV_DEVICE || TV.on) return;                                          // on a TV the remote's handler does this (arrows move around; after OK on the bar they seek)
     if (e.key === "ArrowLeft") { Player.seek(Player.now() - 5); e.preventDefault(); }
     if (e.key === "ArrowRight") { Player.seek(Player.now() + 5); e.preventDefault(); }
   });
@@ -2580,15 +2581,17 @@ document.addEventListener("keydown", (e) => {
   const k = normKey(e).toLowerCase();
   if (Player.chan) {                                          // Live TV: use the keyboard like a remote control
     if (/^[0-9]$/.test(k)) { e.preventDefault(); Queue.digit(k); idle.bump(); return; }
-    const zapKeys = { arrowup: () => Queue.zap(-1), pageup: () => Queue.zap(-1), arrowdown: () => Queue.zap(1), pagedown: () => Queue.zap(1),
+    const tv = IS_TV_DEVICE || TV.on;
+    const zapKeys = { pageup: () => Queue.zap(-1), pagedown: () => Queue.zap(1),
       b: () => Queue.recall(), g: () => guide.toggle(), i: () => Queue.banner() };
+    if (!tv) { zapKeys.arrowup = () => Queue.zap(-1); zapKeys.arrowdown = () => Queue.zap(1); }
     if (zapKeys[k]) { e.preventDefault(); zapKeys[k](); idle.bump(); return; }
   }
   const map = {
     n: () => Queue.next(), p: () => Queue.prev(), s: () => Queue.toggleShuffle(), r: () => Queue.cycleRepeat(),
     " ": togglePlay, k: togglePlay, f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10), l: () => Player.seek(Player.now() + 10),
-    arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10),
+    ...((IS_TV_DEVICE || TV.on) ? {} : { arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10) }),
     escape: () => (!$("#guide").hidden ? guide.close() : !$("#panel").hidden ? togglePanel(false) : !$("#settings").hidden ? ($("#settings").hidden = true) : null),
   };
   if (e.target === $("#timeline") && (k === "arrowleft" || k === "arrowright")) return;
@@ -2718,6 +2721,8 @@ const TV = {
   /* ---------- Back ---------- */
   back() {
     if (TVSelect.el) { TVSelect.close(); return; }
+    const tlb = $("#timeline");
+    if (tlb?.dataset.adjust === "1") { tlb.dataset.adjust = "0"; return; }
     if (!$("#profile-picker").hidden) { if (!$("#profiles-cancel").hidden) $("#profiles-cancel").click(); return; }
     if (!$("#login").hidden) return;
     const dlg = document.querySelector("dialog[open]");
@@ -2745,6 +2750,13 @@ const TV = {
     const typing = e.target.matches?.("input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || (k === "Backspace" && !typing);
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) { e.preventDefault(); TVSelect.open(e.target); return true; }
+    if (k === "Enter" && e.target.id === "timeline") {                          // OK on the progress bar: left/right now seek until OK or Back
+      e.preventDefault();
+      const on = e.target.dataset.adjust !== "1";
+      e.target.dataset.adjust = on ? "1" : "0";
+      if (on) toast("Left and right to skip 10 seconds. Press OK when done.");
+      idle.bump(); return true;
+    }
     const overlay = document.querySelector("dialog[open]") || !$("#guide").hidden || !$("#panel").hidden || !$("#settings").hidden;
     const playerOpen = !$("#player").hidden && !Player.mini;
     if (isBack) { e.preventDefault(); this.back(); return true; }
@@ -2755,13 +2767,32 @@ const TV = {
       }
       return false;
     }
+    if (e.repeat) {                                                            // holding a key: one step at a time, never a queue of them
+      const now = performance.now();
+      if (now - (this.lastStep || 0) < 90) { e.preventDefault(); return true; }
+      this.lastStep = now;
+    }
     if (typing && (dir === "left" || dir === "right")) return false;           // move the cursor in the search box
     if (e.target.matches?.("input[type=range]")) return false;                  // a drop-down no longer eats the arrow keys: they move on to the next thing
     if (playerOpen && !overlay) {
-      if (document.activeElement?.closest("#controls")) { e.preventDefault(); this.move(dir); idle.bump(); return true; }
-      if (!Player.chan && dir === "down") { e.preventDefault(); idle.show(); $("#play-btn").focus(); return true; }   // reach the buttons
-      if (!Player.chan && dir === "up") { e.preventDefault(); idle.bump(); return true; }
-      return false;                                                            // left/right seek, live: up/down change channel
+      // The arrow keys only ever move around (channels change with CH+/CH-, the number keys or the Channels button; the
+      // TV's own keys set the volume; seeking is on the progress bar, below).
+      e.preventDefault();
+      const ctl = document.activeElement?.closest("#controls");
+      const hidden = $("#player").classList.contains("idle");
+      if (!ctl || hidden) {                                                    // first press just brings the controls up
+        idle.bump();
+        (Player.lastControl?.isConnected && Player.lastControl.closest("#controls") ? Player.lastControl : $("#play-btn")).focus({ preventScroll: true });
+        return true;
+      }
+      const tl = $("#timeline");
+      if (document.activeElement === tl && tl.dataset.adjust === "1") {        // seeking: left/right jump, up/down/OK finish
+        if (dir === "left" || dir === "right") { Player.seek(Player.now() + (dir === "left" ? -10 : 10)); idle.bump(); return true; }
+        tl.dataset.adjust = "0";
+      }
+      this.move(dir); idle.bump();
+      if (document.activeElement?.closest("#controls")) Player.lastControl = document.activeElement;
+      return true;
     }
     e.preventDefault(); this.move(dir); return true;
   },

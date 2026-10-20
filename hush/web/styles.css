@@ -683,3 +683,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .tvsel-list { overflow-y: auto; display: flex; flex-direction: column; gap: .35rem; }
 .tvsel-opt { text-align: left; font: inherit; font-size: var(--s0); color: var(--linen); background: var(--dusk-2); border: 2px solid transparent; border-radius: var(--r-sm); padding: .65rem .9rem; cursor: pointer; }
 .tvsel-opt[aria-selected="true"] { border-color: var(--hush); }
+
+/* ---- player on a TV: the TV's own keys set the volume; the progress bar shows when it is being adjusted ---- */
+.tv .player .vol { display: none; }
+.timeline[data-adjust="1"] { outline: .2rem solid var(--lamp); outline-offset: .2rem; }
