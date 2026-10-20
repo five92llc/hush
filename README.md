@@ -240,3 +240,6 @@ While a channel or title opens, the player shows a Hush-themed screen instead of
 
 - **Keyboard for the remote.** In big screen mode, press OK on a text box and Hush opens its own keyboard: the arrow keys move over the keys, OK types, Back closes it. It has shift, numbers and symbols, a cursor, Clear, `.com`, `https://`, Done and Go (submit). A real keyboard types straight in. The TV's own on-screen keyboard is kept from popping up because it ignores the page's arrow keys.
 - **Full screen button.** While the little player is playing, a "Full screen: <title>" button appears in the big screen menu (and in the top bar on other screens) to bring it back to full screen.
+
+- **Exit Hush.** In the Android and LG apps the big screen menu has an "Exit Hush" button (the Android app also has it under the Menu key). Android apps older than 1.0.1 cannot quit themselves and say so.
+- **OK on a text box.** While a text box has the highlight on a TV it is made read-only: Android's browser otherwise keeps the OK key for its own invisible keyboard and the page never hears it. Typing goes through Hush's keyboard.

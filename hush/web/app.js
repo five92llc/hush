@@ -2725,7 +2725,7 @@ const WaitScreen = {
 const TVKeyboard = {
   el: null, input: null, shift: false, page: "abc", view: null,
   NOT_TEXT: ["checkbox", "radio", "range", "button", "submit", "file", "color", "hidden", "image", "reset"],
-  typeable(el) { return !!el && !el.disabled && !el.readOnly && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !this.NOT_TEXT.includes(el.type || "text"))); },
+  typeable(el) { return !!el && !el.disabled && (!el.readOnly || el.dataset.tvro === "1") && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !this.NOT_TEXT.includes(el.type || "text"))); },
   active() { return IS_TV_DEVICE || TV.on; },
   open(input) {
     if (this.el || !this.typeable(input)) return;
@@ -2769,7 +2769,10 @@ const TVKeyboard = {
     box.replaceChildren(h("div", { class: "tvkb-label" }, this.label()),
       h("div", { class: "tvkb-text" }, text.slice(0, pos), h("span", { class: "caret" }, "|"), text.slice(pos)), bar, kb);
     const keys = [...this.el.querySelectorAll(".tvkb-key")];
-    (keys[keep] || (focusFirst ? keys[bar.children.length + 10] : keys[0]))?.focus({ preventScroll: true });   // start on "q" so typing begins at once
+    const target = keys[keep] || (focusFirst ? keys[bar.children.length + 10] : keys[0]);          // start on "q" so typing begins at once
+    target?.focus({ preventScroll: true });
+    // Android hands the highlight back to the text box when OK is let go; take it again a moment later
+    setTimeout(() => { if (this.el && !this.el.contains(document.activeElement)) (target?.isConnected ? target : this.el.querySelector(".tvkb-key"))?.focus({ preventScroll: true }); }, 150);
   },
   insert(t) {
     const i = this.input;
@@ -2803,8 +2806,15 @@ const TVKeyboard = {
     if (i) { i.dispatchEvent(new Event("change", { bubbles: true })); i.focus({ preventScroll: true }); }
   },
 };
-document.addEventListener("focusin", (e) => {                                  // keep the TV's own keyboard from popping up on top of ours
-  if (TVKeyboard.active() && TVKeyboard.typeable(e.target)) e.target.setAttribute("inputmode", "none");
+// While a text box has the highlight it is made read-only: Android's browser otherwise keeps the remote's OK key for its own
+// (invisible) keyboard and never tells the page, and the TV's own keyboard would pop up over ours. Typing goes through TVKeyboard.
+document.addEventListener("focusin", (e) => {
+  const t = e.target;
+  if (TVKeyboard.active() && TVKeyboard.typeable(t) && !t.readOnly) { t.setAttribute("inputmode", "none"); t.readOnly = true; t.dataset.tvro = "1"; }
+}, true);
+document.addEventListener("focusout", (e) => {
+  const t = e.target;
+  if (t.dataset?.tvro === "1" && !TVKeyboard.el) { t.readOnly = false; delete t.dataset.tvro; }
 }, true);
 document.addEventListener("mousedown", (e) => {
   const t = e.target.closest?.("input, textarea");
@@ -3018,6 +3028,14 @@ const TV = {
   },
 };
 $("#tv-toggle").addEventListener("click", () => TV.set(!TV.on));
+/** "Exit Hush": leaves the app on a TV (the Android app and the LG webOS app; a normal browser has nothing to exit). */
+const CAN_QUIT = !!window.HushApp || /WebAppManager/i.test(UA);
+$("#tv-quit").hidden = !CAN_QUIT;
+$("#tv-quit").addEventListener("click", () => {
+  if (window.HushApp?.exit) { window.HushApp.exit(); return; }
+  if (window.HushApp) { toast("Update the Hush app to get the Exit button (Menu key > Check for updates). For now press Home on the remote."); return; }
+  try { if (window.webOS?.platformBack) window.webOS.platformBack(); else window.close(); } catch { window.close(); }   // LG webOS
+});
 $("#tv-exit").addEventListener("click", () => TV.set(false));
 
 /* ===================================================== remote-control keys (TV remotes and keyboards with media keys) */

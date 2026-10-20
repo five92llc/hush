@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 888b0e84eb7d171865b3dca09bff85ae7eacfbdd0b3b2de8d2cb82a185e44038) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 5be89437ba3ad306ea43748be0ce9b4dcbc26c89de0db6d56077ea289e32d23a) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -4164,7 +4164,7 @@ const TVKeyboard = {
   view: null,
   NOT_TEXT: ["checkbox", "radio", "range", "button", "submit", "file", "color", "hidden", "image", "reset"],
   typeable(el) {
-    return !!el && !el.disabled && !el.readOnly && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" && !this.NOT_TEXT.includes(el.type || "text"));
+    return !!el && !el.disabled && (!el.readOnly || el.dataset.tvro === "1") && (el.tagName === "TEXTAREA" || el.tagName === "INPUT" && !this.NOT_TEXT.includes(el.type || "text"));
   },
   active() {
     return IS_TV_DEVICE || TV.on;
@@ -4201,7 +4201,7 @@ const TVKeyboard = {
     ];
   },
   draw(focusFirst) {
-    var _a, _b, _c, _d;
+    var _a, _b, _c;
     const i = this.input, box = this.el.firstChild;
     const shown = i.type === "password" ? "•".repeat(i.value.length) : i.value;
     const pos = (_a = i.selectionStart) != null ? _a : i.value.length;
@@ -4229,7 +4229,12 @@ const TVKeyboard = {
       kb
     );
     const keys = [...this.el.querySelectorAll(".tvkb-key")];
-    (_d = keys[keep] || (focusFirst ? keys[bar.children.length + 10] : keys[0])) == null ? void 0 : _d.focus({ preventScroll: true });
+    const target = keys[keep] || (focusFirst ? keys[bar.children.length + 10] : keys[0]);
+    target == null ? void 0 : target.focus({ preventScroll: true });
+    setTimeout(() => {
+      var _a2;
+      if (this.el && !this.el.contains(document.activeElement)) (_a2 = (target == null ? void 0 : target.isConnected) ? target : this.el.querySelector(".tvkb-key")) == null ? void 0 : _a2.focus({ preventScroll: true });
+    }, 150);
   },
   insert(t) {
     var _a, _b;
@@ -4315,7 +4320,20 @@ const TVKeyboard = {
   }
 };
 document.addEventListener("focusin", (e) => {
-  if (TVKeyboard.active() && TVKeyboard.typeable(e.target)) e.target.setAttribute("inputmode", "none");
+  const t = e.target;
+  if (TVKeyboard.active() && TVKeyboard.typeable(t) && !t.readOnly) {
+    t.setAttribute("inputmode", "none");
+    t.readOnly = true;
+    t.dataset.tvro = "1";
+  }
+}, true);
+document.addEventListener("focusout", (e) => {
+  var _a;
+  const t = e.target;
+  if (((_a = t.dataset) == null ? void 0 : _a.tvro) === "1" && !TVKeyboard.el) {
+    t.readOnly = false;
+    delete t.dataset.tvro;
+  }
 }, true);
 document.addEventListener("mousedown", (e) => {
   var _a, _b;
@@ -4646,6 +4664,25 @@ const TV = {
   }
 };
 $("#tv-toggle").addEventListener("click", () => TV.set(!TV.on));
+const CAN_QUIT = !!window.HushApp || /WebAppManager/i.test(UA);
+$("#tv-quit").hidden = !CAN_QUIT;
+$("#tv-quit").addEventListener("click", () => {
+  var _a, _b;
+  if ((_a = window.HushApp) == null ? void 0 : _a.exit) {
+    window.HushApp.exit();
+    return;
+  }
+  if (window.HushApp) {
+    toast("Update the Hush app to get the Exit button (Menu key > Check for updates). For now press Home on the remote.");
+    return;
+  }
+  try {
+    if ((_b = window.webOS) == null ? void 0 : _b.platformBack) window.webOS.platformBack();
+    else window.close();
+  } catch (e) {
+    window.close();
+  }
+});
 $("#tv-exit").addEventListener("click", () => TV.set(false));
 const MEDIA_KEYCODES = {
   415: "MediaPlay",

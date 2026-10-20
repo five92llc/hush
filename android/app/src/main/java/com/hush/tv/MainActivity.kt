@@ -201,13 +201,14 @@ class MainActivity : Activity() {
     }
 
     private fun showMenu() {
-        val items = arrayOf("Change server", "Check for updates", "Reload", "About")
+        val items = arrayOf("Change server", "Check for updates", "Reload", "About", "Exit Hush")
         AlertDialog.Builder(this).setTitle("Hush app").setItems(items) { _, i ->
             when (i) {
                 0 -> askServer()
                 1 -> checkForUpdate(manual = true)
                 2 -> load()
                 3 -> Toast.makeText(this, "Hush app ${BuildConfig.VERSION_NAME} · ${server()}", Toast.LENGTH_LONG).show()
+                4 -> finishAffinity()
             }
         }.show()
     }
@@ -288,5 +289,6 @@ class MainActivity : Activity() {
         @JavascriptInterface fun server(): String = this@MainActivity.server()
         @JavascriptInterface fun checkForUpdate() { runOnUiThread { this@MainActivity.checkForUpdate(manual = true) } }
         @JavascriptInterface fun changeServer() { runOnUiThread { askServer() } }
+        @JavascriptInterface fun exit() { runOnUiThread { finishAffinity() } }
     }
 }
