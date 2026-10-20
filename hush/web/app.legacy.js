@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 9341728a8e7e1e088c93baff8997511abded2fdc005e35bec3cf99e2491272a0) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 0248e0cd474358593bfa865d87a7a4e0855dc40bb5bd57a36f9d4cce5b9c0019) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -3286,7 +3286,7 @@ const Player = {
     var _a, _b, _c;
     const queued = (_a = Queue.list[Queue.pos]) == null ? void 0 : _a.title;
     const name = this.chan ? queued || ((_b = this.info) == null ? void 0 : _b.title) || "" : ((_c = this.info) == null ? void 0 : _c.title) || queued || "";
-    $("#mini-title").textContent = this.chan ? splitTags(name).title : name;
+    $("#mini-title").textContent = IS_TV_DEVICE || TV.on ? "⛶ Full screen" : this.chan ? splitTags(name).title : name;
     $("#mini-title").title = name;
   },
   placeMini() {
@@ -3352,13 +3352,11 @@ const Player = {
     const on = !!(this.mini && this.src);
     const title = (((_a = this.info) == null ? void 0 : _a.title) || $("#now-title").textContent || "").trim();
     const label = `⛶ Full screen${title ? ": " + (title.length > 28 ? title.slice(0, 27) + "…" : title) : ""}`;
-    ["#np-btn", "#np-btn-tv"].forEach((id) => {
-      const b = $(id);
-      if (b) {
-        b.hidden = !on;
-        b.textContent = label;
-      }
-    });
+    const b = $("#np-btn");
+    if (b) {
+      b.hidden = !on;
+      b.textContent = label;
+    }
   },
   endMini() {
     if (!this.mini) {
@@ -3886,7 +3884,7 @@ $("#mini-play").addEventListener("click", () => togglePlay());
 $("#mini-prev").addEventListener("click", () => Queue.prev());
 $("#mini-next").addEventListener("click", () => Queue.next());
 $("#mini-title").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
-["#np-btn", "#np-btn-tv"].forEach((id) => $(id).addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`)));
+$("#np-btn").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
 $("#mini-expand").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
 $("#mini-close").addEventListener("click", () => Player.close(false));
 $("#player").addEventListener("dblclick", () => {

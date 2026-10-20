@@ -2107,7 +2107,8 @@ const Player = {
   miniTitle() {
     const queued = Queue.list[Queue.pos]?.title;
     const name = this.chan ? (queued || this.info?.title || "") : (this.info?.title || queued || "");
-    $("#mini-title").textContent = this.chan ? splitTags(name).title : name;
+    // On a TV the first button of the little player is the way back to full screen, so it says so (the title is its tooltip)
+    $("#mini-title").textContent = (IS_TV_DEVICE || TV.on) ? "⛶ Full screen" : (this.chan ? splitTags(name).title : name);
     $("#mini-title").title = name;
   },
   placeMini() {
@@ -2154,7 +2155,7 @@ const Player = {
     const on = !!(this.mini && this.src);
     const title = (this.info?.title || $("#now-title").textContent || "").trim();
     const label = `⛶ Full screen${title ? ": " + (title.length > 28 ? title.slice(0, 27) + "…" : title) : ""}`;
-    ["#np-btn", "#np-btn-tv"].forEach((id) => { const b = $(id); if (b) { b.hidden = !on; b.textContent = label; } });
+    const b = $("#np-btn"); if (b) { b.hidden = !on; b.textContent = label; }
   },
 
   endMini() {
@@ -2557,7 +2558,7 @@ $("#mini-play").addEventListener("click", () => togglePlay());
 $("#mini-prev").addEventListener("click", () => Queue.prev());
 $("#mini-next").addEventListener("click", () => Queue.next());
 $("#mini-title").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
-["#np-btn", "#np-btn-tv"].forEach((id) => $(id).addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`)));
+$("#np-btn").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
 $("#mini-expand").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
 $("#mini-close").addEventListener("click", () => Player.close(false));
 $("#player").addEventListener("dblclick", () => { if (Player.mini && Player.src) go(`#/p/${Player.src}/${Player.item}`); });
