@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 5be89437ba3ad306ea43748be0ce9b4dcbc26c89de0db6d56077ea289e32d23a) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 9341728a8e7e1e088c93baff8997511abded2fdc005e35bec3cf99e2491272a0) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -3334,6 +3334,18 @@ const Player = {
     }
   },
   /** Leave mini mode without touching what is playing (used when the player closes or is replaced). */
+  /** One button for both: the little player goes full screen, and the full-screen player becomes the little one. */
+  toggleMini() {
+    if (!this.src || !video.currentSrc) {
+      toast("Nothing is playing");
+      return;
+    }
+    if (this.mini) go(`#/p/${this.src}/${this.item}`);
+    else if (!$("#player").hidden) {
+      this.forceMini = true;
+      go(S.libraryHash || "#/home");
+    }
+  },
   /** The "Now playing - full screen" buttons in the top bar and the big screen menu: shown only while the little player is playing. */
   syncNowPlaying() {
     var _a;
@@ -4090,6 +4102,7 @@ document.addEventListener("keydown", (e) => {
     r: () => Queue.cycleRepeat(),
     " ": togglePlay,
     k: togglePlay,
+    w: () => Player.toggleMini(),
     f: () => $("#fs-btn").click(),
     m: () => Player.mark(),
     h: () => $("#filter-btn").click(),
@@ -4664,6 +4677,7 @@ const TV = {
   }
 };
 $("#tv-toggle").addEventListener("click", () => TV.set(!TV.on));
+window.hushToggleMini = () => Player.toggleMini();
 const CAN_QUIT = !!window.HushApp || /WebAppManager/i.test(UA);
 $("#tv-quit").hidden = !CAN_QUIT;
 $("#tv-quit").addEventListener("click", () => {
@@ -4700,7 +4714,9 @@ const MEDIA_KEYCODES = {
   403: "ColorF0Red",
   404: "ColorF1Green",
   405: "ColorF2Yellow",
-  406: "ColorF3Blue"
+  406: "ColorF3Blue",
+  171: "Window",
+  186: "ColorF3Blue"
 };
 function mediaKey(e) {
   if (!video.currentSrc || !Player.info) return false;
@@ -4722,7 +4738,9 @@ function mediaKey(e) {
     ColorF0Red: () => $("#filter-btn").click(),
     ColorF1Green: () => $("#panel-btn").click(),
     ColorF2Yellow: () => Player.chan && guide.toggle(),
-    ColorF3Blue: () => $("#mini-btn").click()
+    ColorF3Blue: () => Player.toggleMini(),
+    Window: () => Player.toggleMini(),
+    PictureInPicture: () => Player.toggleMini()
   }[k];
   if (!act) return false;
   e.preventDefault();

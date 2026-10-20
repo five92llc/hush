@@ -2142,6 +2142,13 @@ const Player = {
     if (this.chan) { $("#guide-btn").hidden = false; Queue.banner(); }
   },
   /** Leave mini mode without touching what is playing (used when the player closes or is replaced). */
+  /** One button for both: the little player goes full screen, and the full-screen player becomes the little one. */
+  toggleMini() {
+    if (!this.src || !video.currentSrc) { toast("Nothing is playing"); return; }
+    if (this.mini) go(`#/p/${this.src}/${this.item}`);
+    else if (!$("#player").hidden) { this.forceMini = true; go(S.libraryHash || "#/home"); }
+  },
+
   /** The "Now playing - full screen" buttons in the top bar and the big screen menu: shown only while the little player is playing. */
   syncNowPlaying() {
     const on = !!(this.mini && this.src);
@@ -2676,7 +2683,7 @@ document.addEventListener("keydown", (e) => {
   }
   const map = {
     n: () => Queue.next(), p: () => Queue.prev(), s: () => Queue.toggleShuffle(), r: () => Queue.cycleRepeat(),
-    " ": togglePlay, k: togglePlay, f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
+    " ": togglePlay, k: togglePlay, w: () => Player.toggleMini(), f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10), l: () => Player.seek(Player.now() + 10),
     ...((IS_TV_DEVICE || TV.on) ? {} : { arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10) }),
     escape: () => (!$("#guide").hidden ? guide.close() : !$("#panel").hidden ? togglePanel(false) : !$("#settings").hidden ? ($("#settings").hidden = true) : null),
@@ -3028,6 +3035,7 @@ const TV = {
   },
 };
 $("#tv-toggle").addEventListener("click", () => TV.set(!TV.on));
+window.hushToggleMini = () => Player.toggleMini();                   // for the Android app's menu
 /** "Exit Hush": leaves the app on a TV (the Android app and the LG webOS app; a normal browser has nothing to exit). */
 const CAN_QUIT = !!window.HushApp || /WebAppManager/i.test(UA);
 $("#tv-quit").hidden = !CAN_QUIT;
@@ -3040,7 +3048,7 @@ $("#tv-exit").addEventListener("click", () => TV.set(false));
 
 /* ===================================================== remote-control keys (TV remotes and keyboards with media keys) */
 const MEDIA_KEYCODES = { 415: "MediaPlay", 19: "MediaPause", 10252: "MediaPlayPause", 413: "MediaStop", 417: "MediaFastForward", 412: "MediaRewind",
-  427: "ChannelUp", 428: "ChannelDown", 33: "ChannelUp", 34: "ChannelDown", 457: "Info", 458: "Guide", 403: "ColorF0Red", 404: "ColorF1Green", 405: "ColorF2Yellow", 406: "ColorF3Blue" };
+  427: "ChannelUp", 428: "ChannelDown", 33: "ChannelUp", 34: "ChannelDown", 457: "Info", 458: "Guide", 403: "ColorF0Red", 404: "ColorF1Green", 405: "ColorF2Yellow", 406: "ColorF3Blue", 171: "Window", 186: "ColorF3Blue" };
 /** Returns true when the key was a remote-control key and was used. Works only while something is playing. */
 function mediaKey(e) {
   if (!video.currentSrc || !Player.info) return false;
@@ -3053,7 +3061,7 @@ function mediaKey(e) {
     ChannelUp: () => Player.chan && Queue.zap(1), ChannelDown: () => Player.chan && Queue.zap(-1),
     Info: () => Queue.banner(), Guide: () => Player.chan && guide.toggle(),
     ColorF0Red: () => $("#filter-btn").click(), ColorF1Green: () => $("#panel-btn").click(),
-    ColorF2Yellow: () => Player.chan && guide.toggle(), ColorF3Blue: () => $("#mini-btn").click(),
+    ColorF2Yellow: () => Player.chan && guide.toggle(), ColorF3Blue: () => Player.toggleMini(), Window: () => Player.toggleMini(), PictureInPicture: () => Player.toggleMini(),
   }[k];
   if (!act) return false;
   e.preventDefault(); act(); idle.bump();

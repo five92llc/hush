@@ -173,6 +173,7 @@ class MainActivity : Activity() {
         when (keyCode) {
             KeyEvent.KEYCODE_BACK -> { onBack(); return true }
             KeyEvent.KEYCODE_MENU -> { showMenu(); return true }
+            KeyEvent.KEYCODE_WINDOW, KeyEvent.KEYCODE_PROG_BLUE -> { sendKey("Window", 171); return true }       // Window / blue key: little player <-> full screen
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> { sendKey("MediaPlayPause", 179); return true }
             KeyEvent.KEYCODE_MEDIA_STOP -> { sendKey("MediaStop", 178); return true }
             KeyEvent.KEYCODE_MEDIA_NEXT -> { sendKey("MediaTrackNext", 176); return true }
@@ -201,14 +202,15 @@ class MainActivity : Activity() {
     }
 
     private fun showMenu() {
-        val items = arrayOf("Change server", "Check for updates", "Reload", "About", "Exit Hush")
+        val items = arrayOf("Little player / full screen", "Change server", "Check for updates", "Reload", "About", "Exit Hush")
         AlertDialog.Builder(this).setTitle("Hush app").setItems(items) { _, i ->
             when (i) {
-                0 -> askServer()
-                1 -> checkForUpdate(manual = true)
-                2 -> load()
-                3 -> Toast.makeText(this, "Hush app ${BuildConfig.VERSION_NAME} · ${server()}", Toast.LENGTH_LONG).show()
-                4 -> finishAffinity()
+                0 -> js("window.hushToggleMini && window.hushToggleMini()")
+                1 -> askServer()
+                2 -> checkForUpdate(manual = true)
+                3 -> load()
+                4 -> Toast.makeText(this, "Hush app ${BuildConfig.VERSION_NAME} · ${server()}", Toast.LENGTH_LONG).show()
+                5 -> finishAffinity()
             }
         }.show()
     }
