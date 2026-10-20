@@ -2099,6 +2099,7 @@ const Player = {
     document.body.style.overflow = "";
     guide.close(); if (!$("#panel").hidden) togglePanel(false); $("#settings").hidden = true; $("#resume-chip").hidden = true;
     this.miniTitle();
+    this.syncNowPlaying();
     const many = Queue.list.length > 1;
     $("#mini-prev").hidden = $("#mini-next").hidden = !many;
     this.placeMini();
@@ -2131,6 +2132,7 @@ const Player = {
   },
   expand() {
     this.mini = false;
+    this.syncNowPlaying();
     const p = $("#player"); p.classList.remove("mini", "playing-keep");
     Object.assign(p.style, { left: "", top: "", width: "", right: "", bottom: "" });
     $("#mini-slot").hidden = true;
@@ -2140,9 +2142,18 @@ const Player = {
     if (this.chan) { $("#guide-btn").hidden = false; Queue.banner(); }
   },
   /** Leave mini mode without touching what is playing (used when the player closes or is replaced). */
+  /** The "Now playing - full screen" buttons in the top bar and the big screen menu: shown only while the little player is playing. */
+  syncNowPlaying() {
+    const on = !!(this.mini && this.src);
+    const title = (this.info?.title || $("#now-title").textContent || "").trim();
+    const label = `⛶ Full screen${title ? ": " + (title.length > 28 ? title.slice(0, 27) + "…" : title) : ""}`;
+    ["#np-btn", "#np-btn-tv"].forEach((id) => { const b = $(id); if (b) { b.hidden = !on; b.textContent = label; } });
+  },
+
   endMini() {
-    if (!this.mini) return;
+    if (!this.mini) { this.syncNowPlaying(); return; }
     this.mini = false;
+    this.syncNowPlaying();
     const p = $("#player"); p.classList.remove("mini", "playing-keep");
     Object.assign(p.style, { left: "", top: "", width: "", right: "", bottom: "" });
     $("#mini-slot").hidden = true;
@@ -2539,6 +2550,7 @@ $("#mini-play").addEventListener("click", () => togglePlay());
 $("#mini-prev").addEventListener("click", () => Queue.prev());
 $("#mini-next").addEventListener("click", () => Queue.next());
 $("#mini-title").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
+["#np-btn", "#np-btn-tv"].forEach((id) => $(id).addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`)));
 $("#mini-expand").addEventListener("click", () => Player.src && go(`#/p/${Player.src}/${Player.item}`));
 $("#mini-close").addEventListener("click", () => Player.close(false));
 $("#player").addEventListener("dblclick", () => { if (Player.mini && Player.src) go(`#/p/${Player.src}/${Player.item}`); });
@@ -2708,6 +2720,102 @@ const WaitScreen = {
   },
 };
 
+/** A keyboard the remote can drive, for text on a TV: the TV's own on-screen keyboard does not take the page's arrow keys.
+    OK on a text box opens it; arrows move over the keys, OK types, Back closes. Typing on a real keyboard works too. */
+const TVKeyboard = {
+  el: null, input: null, shift: false, page: "abc", view: null,
+  NOT_TEXT: ["checkbox", "radio", "range", "button", "submit", "file", "color", "hidden", "image", "reset"],
+  typeable(el) { return !!el && !el.disabled && !el.readOnly && (el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && !this.NOT_TEXT.includes(el.type || "text"))); },
+  active() { return IS_TV_DEVICE || TV.on; },
+  open(input) {
+    if (this.el || !this.typeable(input)) return;
+    this.input = input; this.shift = false; this.page = "abc";
+    const host = input.closest("dialog") || document.body;                    // inside an open dialog, or it would sit underneath it
+    this.el = h("div", { class: "tvkb", role: "dialog", "aria-label": "Keyboard" }, h("div", { class: "tvkb-box" }));
+    host.append(this.el);
+    this.draw(true);
+  },
+  label() { return this.input.getAttribute("aria-label") || this.input.placeholder || this.input.closest("label")?.textContent?.trim() || "Type here"; },
+  rows() {
+    const L = (a) => a.map((c) => ({ t: this.shift ? c.toUpperCase() : c, v: this.shift ? c.toUpperCase() : c }));
+    if (this.page === "sym") return [
+      "1234567890".split("").map((c) => ({ t: c, v: c })), "!@#$%^&*()".split("").map((c) => ({ t: c, v: c })),
+      [...`-_=+:;'"`].map((c) => ({ t: c, v: c })).concat([{ t: "⌫", act: "back", w: 2 }]),
+      [..."/\\|?<>,.~"].map((c) => ({ t: c, v: c })),
+      [{ t: "ABC", act: "abc", w: 2 }, { t: "space", v: " ", w: 6 }, { t: "Done", act: "done", w: 2 }]];
+    return [
+      "1234567890".split("").map((c) => ({ t: c, v: c })), L("qwertyuiop".split("")),
+      L("asdfghjkl".split("")).concat([{ t: "⌫", act: "back" }]),
+      [{ t: this.shift ? "⇩" : "⇧", act: "shift" }, ...L("zxcvbnm,.".split("").slice(0, 7)), ...L([",", "."])],
+      [{ t: "?123", act: "sym" }, { t: "@", v: "@" }, { t: "-", v: "-" }, { t: "space", v: " ", w: 4 }, { t: "/", v: "/" }, { t: ".com", v: ".com" }, { t: "Done", act: "done" }]];
+  },
+  draw(focusFirst) {
+    const i = this.input, box = this.el.firstChild;
+    const shown = i.type === "password" ? "•".repeat(i.value.length) : i.value;
+    const pos = i.selectionStart ?? i.value.length;
+    const text = i.type === "password" ? shown : i.value;
+    const kb = h("div", { class: "tvkb-keys" });
+    for (const row of this.rows()) {
+      const r = h("div", { class: "tvkb-row" });
+      for (const k of row) r.append(h("button", { class: "tvkb-key" + (k.act ? " act" : ""), type: "button", style: k.w ? `flex:${k.w} 1 0` : "", onclick: () => this.press(k) }, k.t));
+      kb.append(r);
+    }
+    const bar = h("div", { class: "tvkb-row bar" },
+      h("button", { class: "tvkb-key act", type: "button", onclick: () => this.caret(-1) }, "◀"), h("button", { class: "tvkb-key act", type: "button", onclick: () => this.caret(1) }, "▶"),
+      h("button", { class: "tvkb-key act", type: "button", onclick: () => this.press({ act: "clear" }) }, "Clear"),
+      h("button", { class: "tvkb-key act", type: "button", onclick: () => this.press({ v: "https://" }) }, "https://"),
+      h("button", { class: "tvkb-key act go", type: "button", onclick: () => this.press({ act: "go" }) }, "Go"));
+    const keep = document.activeElement?.closest?.(".tvkb") ? [...this.el.querySelectorAll(".tvkb-key")].indexOf(document.activeElement) : -1;
+    box.replaceChildren(h("div", { class: "tvkb-label" }, this.label()),
+      h("div", { class: "tvkb-text" }, text.slice(0, pos), h("span", { class: "caret" }, "|"), text.slice(pos)), bar, kb);
+    const keys = [...this.el.querySelectorAll(".tvkb-key")];
+    (keys[keep] || (focusFirst ? keys[bar.children.length + 10] : keys[0]))?.focus({ preventScroll: true });   // start on "q" so typing begins at once
+  },
+  insert(t) {
+    const i = this.input;
+    try {
+      const a = i.selectionStart ?? i.value.length, b = i.selectionEnd ?? a;
+      i.setRangeText(t, a, b, "end");
+    } catch { i.value += t; }                                                  // number and email boxes have no caret
+    i.dispatchEvent(new Event("input", { bubbles: true }));
+  },
+  back() {
+    const i = this.input;
+    try {
+      const a = i.selectionStart ?? i.value.length, b = i.selectionEnd ?? a;
+      if (a !== b) i.setRangeText("", a, b, "end"); else if (a > 0) i.setRangeText("", a - 1, a, "end");
+    } catch { i.value = i.value.slice(0, -1); }
+    i.dispatchEvent(new Event("input", { bubbles: true }));
+  },
+  caret(d) { const i = this.input; try { const p = Math.max(0, Math.min(i.value.length, (i.selectionStart ?? i.value.length) + d)); i.setSelectionRange(p, p); } catch { /* no caret */ } this.draw(); },
+  press(k) {
+    if (k.act === "shift") { this.shift = !this.shift; this.draw(); return; }
+    if (k.act === "sym" || k.act === "abc") { this.page = k.act; this.draw(); return; }
+    if (k.act === "back") { this.back(); this.draw(); return; }
+    if (k.act === "clear") { this.input.value = ""; this.input.dispatchEvent(new Event("input", { bubbles: true })); this.draw(); return; }
+    if (k.act === "done") { this.close(); return; }
+    if (k.act === "go") { const f = this.input.form; this.close(); if (f) (f.requestSubmit ? f.requestSubmit() : f.submit()); return; }
+    if (k.v != null) { this.insert(k.v); if (this.shift && this.page === "abc") this.shift = false; this.draw(); }
+  },
+  close() {
+    const i = this.input;
+    this.el?.remove(); this.el = null; this.input = null;
+    if (i) { i.dispatchEvent(new Event("change", { bubbles: true })); i.focus({ preventScroll: true }); }
+  },
+};
+document.addEventListener("focusin", (e) => {                                  // keep the TV's own keyboard from popping up on top of ours
+  if (TVKeyboard.active() && TVKeyboard.typeable(e.target)) e.target.setAttribute("inputmode", "none");
+}, true);
+document.addEventListener("mousedown", (e) => {
+  const t = e.target.closest?.("input, textarea");
+  if (t && TVKeyboard.active() && TVKeyboard.typeable(t)) { e.preventDefault(); t.focus({ preventScroll: true }); TVKeyboard.open(t); }
+}, true);
+document.addEventListener("keydown", (e) => {                                  // a real keyboard (or a remote with one) types straight into the box
+  if (!TVKeyboard.el || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key.length === 1) { e.preventDefault(); e.stopPropagation(); TVKeyboard.insert(e.key); TVKeyboard.draw(); }
+  else if (e.key === "Backspace") { e.preventDefault(); e.stopPropagation(); TVKeyboard.back(); TVKeyboard.draw(); }
+}, true);
+
 /** On a TV a drop-down opens as a big list of buttons the remote can move through and Back can close; the browser's own
     pop-up cannot be left with a remote (it swallows the keys). Used for every <select> while in big screen mode. */
 const TVSelect = {
@@ -2773,6 +2881,7 @@ const TV = {
     return el.offsetWidth > 0 || el.offsetHeight > 0 || el.getClientRects().length > 0;
   },
   roots() {
+    if (TVKeyboard.el) return [TVKeyboard.el];
     if (TVSelect.el) return [TVSelect.el];
     const dlg = document.querySelector("dialog[open]");
     if (dlg) return [dlg];
@@ -2829,6 +2938,7 @@ const TV = {
 
   /* ---------- Back ---------- */
   back() {
+    if (TVKeyboard.el) { TVKeyboard.close(); return; }
     if (TVSelect.el) { TVSelect.close(); return; }
     const tlb = $("#timeline");
     if (tlb?.dataset.adjust === "1") { tlb.dataset.adjust = "0"; return; }
@@ -2859,6 +2969,7 @@ const TV = {
     const typing = e.target.matches?.("input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || (k === "Backspace" && !typing);
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) { e.preventDefault(); TVSelect.open(e.target); return true; }
+    if (k === "Enter" && !TVKeyboard.el && TVKeyboard.typeable(e.target)) { e.preventDefault(); TVKeyboard.open(e.target); return true; }
     if (k === "Enter" && e.target.id === "timeline") {                          // OK on the progress bar: left/right now seek until OK or Back
       e.preventDefault();
       const on = e.target.dataset.adjust !== "1";

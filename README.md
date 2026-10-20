@@ -235,3 +235,8 @@ A live channel plays about **10 seconds behind the broadcast** when the filter i
 ## The tuning-in screen
 
 While a channel or title opens, the player shows a Hush-themed screen instead of black: the time, the date, the weather and a count-up with a progress bar (and "Starting the language filter" while a filtered channel starts). Set your town under Settings → Tuning-in screen; the weather comes from Open-Meteo (free, no key). Titles that open in under a second never show it.
+
+## Text entry and the little player on a TV
+
+- **Keyboard for the remote.** In big screen mode, press OK on a text box and Hush opens its own keyboard: the arrow keys move over the keys, OK types, Back closes it. It has shift, numbers and symbols, a cursor, Clear, `.com`, `https://`, Done and Go (submit). A real keyboard types straight in. The TV's own on-screen keyboard is kept from popping up because it ignores the page's arrow keys.
+- **Full screen button.** While the little player is playing, a "Full screen: <title>" button appears in the big screen menu (and in the top bar on other screens) to bring it back to full screen.

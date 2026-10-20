@@ -708,3 +708,21 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .stage-msg { z-index: 4; }
 .player.mini .wait-screen { display: none; }
 @media (prefers-reduced-motion: reduce) { .wait-screen::before, .wait-screen::after { animation: none; } }
+
+/* ---- the remote-driven keyboard (TVKeyboard) ---- */
+.tvkb { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 410; background: rgba(10, 11, 22, .9); display: flex; align-items: center; justify-content: center; }
+.tvkb-box { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1rem 1.2rem 1.2rem; width: min(52rem, 94%); }
+.tvkb-label { font-size: var(--s-1); color: var(--linen-dim); margin-bottom: .3rem; }
+.tvkb-text { font-size: var(--s2); min-height: 2.2rem; background: var(--ink-deep); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .4rem .7rem; margin-bottom: .6rem; overflow-wrap: anywhere; }
+.tvkb-text .caret { color: var(--lamp); }
+.tvkb-row { display: flex; margin-bottom: .35rem; }
+.tvkb-row > * + * { margin-left: .35rem; }
+.tvkb-key { flex: 1 1 0; min-width: 0; font: inherit; font-size: var(--s1); padding: .6rem 0; color: var(--linen); background: var(--dusk-2); border: 2px solid transparent; border-radius: var(--r-sm); cursor: pointer; text-align: center; }
+.tvkb-key.act { background: var(--ink); color: var(--lamp); font-size: var(--s0); }
+.tvkb-key.go { background: var(--lamp); color: var(--ink); font-weight: 700; }
+.tvkb-row.bar { margin-bottom: .6rem; }
+
+/* ---- "full screen" button for the little player ---- */
+.np-btn { background: var(--lamp); color: var(--ink); font-weight: 700; border: 2px solid transparent; }
+.tv .tv-nav .np-btn { background: var(--lamp); color: var(--ink); margin-left: 0; padding: .6rem 1.25rem; border-radius: 999px; font-size: var(--s0); font-family: var(--body); cursor: pointer; }
+.tv .topbar-actions .np-btn { display: none; }          /* on a TV it is in the big screen menu instead */
