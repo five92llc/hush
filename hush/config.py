@@ -31,7 +31,7 @@ def _expand(value: Any) -> Any:
 @dataclass
 class AnalysisConfig:
     engine: str = "auto"            # auto | whisper | subtitles
-    whisper_model: str = "small.en"  # tiny.en, base.en, small.en, medium.en, large-v3
+    whisper_model: str = "medium.en"  # tiny.en, base.en, small.en, medium.en, large-v3
     whisper_device: str = "auto"     # auto | cpu | cuda
     whisper_compute_type: str = "int8"
     whisper_cpu_threads: int = 0     # CPU threads per scan; 0 = library default (4)

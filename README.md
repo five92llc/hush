@@ -223,3 +223,11 @@ An Android app (Android TV / Google TV such as TCL, Fire TV, Android tablets) an
 ## Old TVs (LG webOS 5 and older)
 
 Older TV browsers cannot read modern JavaScript, so Hush also ships `hush/web/app.legacy.js`, a translated copy of `app.js`. The page starts the normal script and falls back to the copy on its own when the browser cannot read it (`boot.js`). **After changing `app.js`, run `scripts/build-legacy.sh`** (needs Node); a test fails when the copy is out of date.
+
+## Language filter for live TV (captions)
+
+A live channel plays about **10 seconds behind the broadcast** when the filter is on (it is always on for kids profiles). Hush pulls the channel, reads its closed captions (CEA-608/708, carried inside many broadcast streams), matches them against the word list and silences the flagged words before they reach the screen. Only the audio of segments that need it is re-encoded; the video is copied. Captions only say roughly when a word was spoken (live captions run 1-2 seconds late), so the silence is a short window around the word rather than a precise bleep.
+
+- **Channels without captions** cannot be filtered: an adult profile is told and the channel plays unfiltered; a kids profile is refused. In a sample of 26 channels about 1 in 8 carried captions, so check a channel before relying on it. Live speech recognition (Whisper) for the rest is the next step.
+- **Starting a channel takes about 15-20 seconds** with the filter on, because of the delay. Turn the filter off (adults) to flip through channels quickly; flipping back to a recent channel is quick.
+- Kids profiles can no longer open a live channel unfiltered at all.

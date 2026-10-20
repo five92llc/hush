@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import discover, epg, hw, media, mylist, profiles as rules, stream
 from .hls import HLSError, HLSManager
+from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
 from .remote import RemoteHub
 from .analysis.jobs import Analyzer
@@ -91,6 +92,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     analyzer = Analyzer(cfg, db, registry)
     library = MetadataService(cfg, db, registry)
     hls = HLSManager(cfg.data_dir / "hls")
+    livefilter = LiveFilter(cfg, analyzer.wordlist, cfg.data_dir / "livefilter")
     livetv = LiveTV(cfg, db, registry)
     remote = RemoteHub()
     renamer = Renamer(db, registry)
@@ -183,6 +185,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             src, item = segs[3], segs[4].removesuffix(".mkv")
         elif kind == "hls" and len(segs) > 5 and segs[3] == "start":
             src, item = segs[4], segs[5]
+        if src == "url" and kind in ("stream", "hls", "raw", "external", "filtered"):
+            return "Live TV on this profile always plays through the language filter"
         if src is not None:
             if src == "url" and cfg["allow_live"]:
                 return None
@@ -403,6 +407,54 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if name.endswith(".m3u8"):
             return FileResponse(f, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
         return FileResponse(f, media_type="video/mp2t", headers={"Cache-Control": "private, max-age=300"})
+
+    # ---- live TV language filter (captions) ----------------------------------------------
+    @app.post("/api/livefilter/open", dependencies=[need])
+    def livefilter_open(body: dict = Body(...), prof: dict = Depends(get_profile)):
+        """Start (or join) the filtered, 10-second-delayed feed of a live channel. Waits until it can be played."""
+        src, item = str(body.get("src", "")), str(body.get("item", ""))
+        ref = resolve(src, item)
+        if not ref.live and not ref.url:
+            raise HTTPException(400, "Only live channels use the live filter")
+        cats = {c for c in str(body.get("cats", "")).split(",") if c} or None
+        if prof["kids"]:
+            cats = None                                            # a kids profile always gets everything filtered
+        try:
+            sess = livefilter.open(media_key(src, item), media.ffmpeg_input(ref, src, item), cats, str(body.get("tab", ""))[:40], bool(prof["kids"]))
+        except LiveFilterError as exc:
+            raise HTTPException(502, str(exc))
+        return {"sid": sess.sid, "hls": f"/api/livefilter/{sess.sid}/index.m3u8", "mp4": f"/api/livefilter/{sess.sid}/stream.mp4", "status": sess.status()}
+
+    @app.post("/api/livefilter/release", dependencies=[need])
+    def livefilter_release(body: dict = Body(default={})):
+        livefilter.release(str(body.get("tab", ""))[:40])
+        return {"ok": True}
+
+    @app.get("/api/livefilter/{sid}/status", dependencies=[need])
+    def livefilter_status(sid: str):
+        s = livefilter.get(sid)
+        if not s:
+            raise HTTPException(404)
+        return s.status()
+
+    @app.get("/api/livefilter/{sid}/{name}", dependencies=[need])
+    async def livefilter_file(request: Request, sid: str, name: str):
+        s = livefilter.get(sid)
+        if not s:
+            raise HTTPException(404)
+        if name == "stream.mp4":                                   # for browsers that cannot play HLS: repackage the filtered feed
+            if not (s.out / "index.m3u8").exists():
+                raise HTTPException(404)
+            s.last = time.time()
+            cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-fflags", "+genpts", "-i", str(s.out / "index.m3u8"),
+                   "-c", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
+            return await stream.ffmpeg_response(request, cmd, "video/mp4")
+        f = livefilter.file(sid, name)
+        if not f:
+            raise HTTPException(404)
+        if name.endswith(".m3u8"):
+            return FileResponse(f, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
+        return FileResponse(f, media_type="video/mp2t", headers={"Cache-Control": "private, max-age=60"})
 
     @app.get("/api/seekpoint/{source_id}/{item_id}", dependencies=[need])
     def seekpoint(source_id: str, item_id: str, t: float, mode: str = "remux"):

@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 730c12fb7c1b6c1f2931b6417d6358ed2c5b597e553a7d775d9636ca63c70305) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 8fa7c88b1391421b800ed7fff261cc217d9d665125fdf0f861194da25dc57d60) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -2881,6 +2881,7 @@ const Player = {
     this.renderPanel();
   },
   close(goBack = true) {
+    this.releaseLiveFilter();
     this.endMini();
     Progress.save(true);
     Progress.disarm();
@@ -2929,7 +2930,52 @@ const Player = {
   hlsTimer: null,
   /** True when the server (not the browser) is muting the filtered words. */
   serverMuted() {
-    return this.hls && this.mode !== "direct";
+    return this.hls && this.mode !== "direct" || this.liveFiltered;
+  },
+  /** Live channels are filtered by their captions on the server, about 10 seconds behind the broadcast. */
+  wantsLiveFilter() {
+    var _a;
+    return !!(((_a = this.info) == null ? void 0 : _a.live) && this.chan && (isKids() || this.filterOn));
+  },
+  async openLiveFilter() {
+    const body = { src: this.src, item: this.item, cats: [...this.cats].join(","), tab: TAB };
+    const r = await api("/api/livefilter/open", { method: "POST", body });
+    this.liveSid = r.sid;
+    this.watchLiveFilter(r.sid, r.status);
+    return this.hls ? r.hls : r.mp4;
+  },
+  /** Tells the person what the filter found, once: no captions means nothing can be filtered on that channel. */
+  watchLiveFilter(sid, first) {
+    clearTimeout(this.lfTimer);
+    let told = false;
+    const look = async (st) => {
+      if (this.liveSid !== sid) return;
+      try {
+        st = st || await api(`/api/livefilter/${sid}/status`);
+      } catch (e) {
+        return;
+      }
+      if (st.state === "nocaptions" && !told && !isKids()) {
+        told = true;
+        toast("This channel has no captions, so the language filter can't work on it. It is playing unfiltered.");
+      } else if (st.captions && !told) {
+        told = true;
+        toast("Language filter on: captions found (the picture is about 10 seconds behind live).");
+      }
+      this.lfTimer = setTimeout(() => look(), told ? 6e4 : 8e3);
+    };
+    this.lfTimer = setTimeout(() => look(first), 6e3);
+  },
+  releaseLiveFilter() {
+    clearTimeout(this.lfTimer);
+    if (this.liveSid) {
+      try {
+        navigator.sendBeacon("/api/livefilter/release", new Blob([JSON.stringify({ tab: TAB })], { type: "application/json" }));
+      } catch (e) {
+      }
+    }
+    this.liveSid = null;
+    this.liveFiltered = false;
   },
   sig() {
     return `${+this.filterOn}|${[...this.cats].sort()}|${this.ranges.map((r) => `${r.id}:${r.start}:${r.end}:${+r.enabled}`).join(",")}`;
@@ -2972,8 +3018,21 @@ const Player = {
       }
       this.offset = landing;
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
-      let url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
-      if (IS_LG && this.hls) {
+      let url;
+      if (this.wantsLiveFilter()) {
+        this.message("Starting the language filter (about 15 seconds)…");
+        try {
+          url = await this.openLiveFilter();
+          this.liveFiltered = true;
+        } catch (err) {
+          if (tok === this.openToken) this.message(err.message, true);
+          return;
+        }
+      } else {
+        this.releaseLiveFilter();
+        url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      }
+      if (IS_LG && this.hls && !this.liveFiltered) {
         try {
           const r = await fetch(url, { credentials: "same-origin" });
           if (r.ok && r.url) url = r.url;
@@ -3750,12 +3809,15 @@ $("#volume").addEventListener("input", (e) => {
   store.set("volume", Number(e.target.value));
 });
 $("#filter-btn").addEventListener("click", () => {
+  var _a;
   if (isKids()) return;
   Player.filterOn = !Player.filterOn;
   store.set(pk("filterOn"), Player.filterOn);
   Player.applyFilterButton();
   Player.Audio.reset();
   toast(Player.filterOn ? "Filter on" : "Filter off. Every word will play.");
+  if (((_a = Player.info) == null ? void 0 : _a.live) && Player.chan) Player.startAt(0).then(() => video.play().catch(() => {
+  }));
 });
 $("#mode-select").addEventListener("change", (e) => {
   Player.bleep = e.target.value === "bleep";

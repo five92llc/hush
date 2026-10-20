@@ -1825,6 +1825,7 @@ const Player = {
   },
 
   close(goBack = true) {
+    this.releaseLiveFilter();
     this.endMini();
     Progress.save(true); Progress.disarm();
     $("#resume-chip").hidden = true;
@@ -1862,7 +1863,34 @@ const Player = {
 
   hls: IS_WEBKIT || IS_LG, hlsSig: "", hlsTimer: null,
   /** True when the server (not the browser) is muting the filtered words. */
-  serverMuted() { return this.hls && this.mode !== "direct"; },
+  serverMuted() { return (this.hls && this.mode !== "direct") || this.liveFiltered; },
+  /** Live channels are filtered by their captions on the server, about 10 seconds behind the broadcast. */
+  wantsLiveFilter() { return !!(this.info?.live && this.chan && (isKids() || this.filterOn)); },
+  async openLiveFilter() {
+    const body = { src: this.src, item: this.item, cats: [...this.cats].join(","), tab: TAB };
+    const r = await api("/api/livefilter/open", { method: "POST", body });
+    this.liveSid = r.sid;
+    this.watchLiveFilter(r.sid, r.status);
+    return this.hls ? r.hls : r.mp4;
+  },
+  /** Tells the person what the filter found, once: no captions means nothing can be filtered on that channel. */
+  watchLiveFilter(sid, first) {
+    clearTimeout(this.lfTimer);
+    let told = false;
+    const look = async (st) => {
+      if (this.liveSid !== sid) return;
+      try { st = st || await api(`/api/livefilter/${sid}/status`); } catch { return; }
+      if (st.state === "nocaptions" && !told && !isKids()) { told = true; toast("This channel has no captions, so the language filter can't work on it. It is playing unfiltered."); }
+      else if (st.captions && !told) { told = true; toast("Language filter on: captions found (the picture is about 10 seconds behind live)."); }
+      this.lfTimer = setTimeout(() => look(), told ? 60000 : 8000);
+    };
+    this.lfTimer = setTimeout(() => look(first), 6000);
+  },
+  releaseLiveFilter() {
+    clearTimeout(this.lfTimer);
+    if (this.liveSid) { try { navigator.sendBeacon("/api/livefilter/release", new Blob([JSON.stringify({ tab: TAB })], { type: "application/json" })); } catch { /* the server drops idle ones */ } }
+    this.liveSid = null; this.liveFiltered = false;
+  },
   sig() {
     return `${+this.filterOn}|${[...this.cats].sort()}|${this.ranges.map((r) => `${r.id}:${r.start}:${r.end}:${+r.enabled}`).join(",")}`;
   },
@@ -1898,8 +1926,16 @@ const Player = {
       }
       this.offset = landing;
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
-      let url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
-      if (IS_LG && this.hls) {                      // LG's player is happier with the playlist address itself than with a redirect to it
+      let url;
+      if (this.wantsLiveFilter()) {
+        this.message("Starting the language filter (about 15 seconds)…");
+        try { url = await this.openLiveFilter(); this.liveFiltered = true; }
+        catch (err) { if (tok === this.openToken) this.message(err.message, true); return; }
+      } else {
+        this.releaseLiveFilter();
+        url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      }
+      if (IS_LG && this.hls && !this.liveFiltered) {                      // LG's player is happier with the playlist address itself than with a redirect to it
         try { const r = await fetch(url, { credentials: "same-origin" }); if (r.ok && r.url) url = r.url; } catch { /* use the start address */ }
       }
       if (tok !== this.openToken) return;
@@ -2479,6 +2515,7 @@ $("#filter-btn").addEventListener("click", () => {
   Player.filterOn = !Player.filterOn; store.set(pk("filterOn"), Player.filterOn);
   Player.applyFilterButton(); Player.Audio.reset();
   toast(Player.filterOn ? "Filter on" : "Filter off. Every word will play.");
+  if (Player.info?.live && Player.chan) Player.startAt(0).then(() => video.play().catch(() => {}));      // a live channel restarts with or without the live filter
 });
 $("#mode-select").addEventListener("change", (e) => { Player.bleep = e.target.value === "bleep"; store.set(pk("mode"), e.target.value); Player.Audio.reset(); Player.renderPanel(); });
 $("#sub-select").addEventListener("change", (e) => Player.loadSubs(e.target.value));
