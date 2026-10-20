@@ -2816,6 +2816,7 @@ const TVKeyboard = {
 };
 // While a text box has the highlight it is made read-only: Android's browser otherwise keeps the remote's OK key for its own
 // (invisible) keyboard and never tells the page, and the TV's own keyboard would pop up over ours. Typing goes through TVKeyboard.
+document.addEventListener("focusin", () => Remote.soon());              // the phone learns when a text box gets the highlight
 document.addEventListener("focusin", (e) => {
   const t = e.target;
   if (TVKeyboard.active() && TVKeyboard.typeable(t) && !t.readOnly) { t.setAttribute("inputmode", "none"); t.readOnly = true; t.dataset.tvro = "1"; }
@@ -3120,7 +3121,35 @@ const Remote = {
       mediaKey: active ? Player.info.media_key : null, position: active ? Math.round(Player.now() * 10) / 10 : 0,
       duration: active ? Math.round(Player.duration || 0) : 0, volume: Number($("#volume").value), filterOn: Player.filterOn,
       mini: Player.mini, channel: chan, tv: TV.on, view: location.hash, queue: Queue.list.length, shuffle: Queue.shuffle, repeat: Queue.repeat,
+      text: this.textField(),
     };
+  },
+  /** The text box the phone can type into: the one Hush's keyboard is editing, or the one that has the highlight. */
+  textTarget() {
+    const k = TVKeyboard.input, a = document.activeElement;
+    return k || (a && a !== document.body && TVKeyboard.typeable(a) ? a : null);
+  },
+  textField() {
+    const t = this.textTarget();
+    if (!t) return { on: false };
+    return { on: true, editing: !!TVKeyboard.el, label: (t.getAttribute("aria-label") || t.placeholder || "Text").slice(0, 60), value: t.type === "password" ? "" : String(t.value).slice(0, 300), password: t.type === "password" };
+  },
+  /** Text typed on the phone replaces the contents of the text box on the screen. */
+  setText(a) {
+    const t = this.textTarget();
+    if (!t) return;
+    if (typeof a.value === "string" && a.value !== t.value) {
+      t.value = a.value.slice(0, 500);
+      t.dispatchEvent(new Event("input", { bubbles: true }));
+      try { t.setSelectionRange(t.value.length, t.value.length); } catch { /* no caret in this kind of box */ }
+      if (TVKeyboard.el) TVKeyboard.draw();
+    }
+    if (a.submit) {
+      const f = t.form;
+      if (TVKeyboard.el) TVKeyboard.close();
+      t.dispatchEvent(new Event("change", { bubbles: true }));
+      if (f) (f.requestSubmit ? f.requestSubmit() : f.submit());
+    }
   },
   push(force) {
     if (!this.ws || this.ws.readyState !== 1) return;
@@ -3164,7 +3193,8 @@ const Remote = {
       case "stop": Player.close(false); break;
       case "home": go("#/home"); break;
       case "guide": if (Player.chan) guide.toggle(); break;
-      case "mini": if (playing) $("#mini-btn").click(); break;
+      case "mini": if (playing) Player.toggleMini(); break;
+      case "text": this.setText(a); break;
       case "tv": TV.set(a.on !== false); break;
       case "nav": if (typeof a.hash === "string" && a.hash.startsWith("#/") && !a.hash.startsWith("#/p/")) go(a.hash); break;
       case "open":

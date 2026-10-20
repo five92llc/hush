@@ -62,6 +62,16 @@
     <div class="digits" id="digits"></div>
   </section>
 
+  <section id="kbd" class="kbd" hidden>
+    <label id="kbd-label" for="kbd-input">Keyboard</label>
+    <div class="kbd-row">
+      <input id="kbd-input" type="text" autocomplete="off" autocapitalize="sentences" spellcheck="false" placeholder="Type here to send to the screen">
+      <button id="kbd-go" type="button">Go</button>
+      <button id="kbd-clear" type="button" class="ghost">Clear</button>
+    </div>
+    <p id="kbd-hint" class="hint">Highlight a text box on the screen, then type here.</p>
+  </section>
+
   <details class="dpad-box" open>
     <summary>Arrows</summary>
     <div class="dpad">
@@ -74,7 +84,7 @@
       <button data-cmd="home">Home</button>
     </div>
     <div class="pad small">
-      <button data-cmd="mini">Mini player</button>
+      <button data-cmd="mini">Mini / full screen</button>
       <button data-cmd="stop">Stop</button>
       <button data-cmd="tv" data-args='{"on":true}'>Big screen</button>
     </div>

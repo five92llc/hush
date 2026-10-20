@@ -321,3 +321,8 @@ def test_weather_search_and_current(monkeypatch):
     weather._cache.clear()
     now = weather.current(30.27, -97.74, "f", c)
     assert now == {"temp": 72, "text": "Partly cloudy", "high": 80, "low": 60, "unit": "°F", "timezone": "America/Chicago"}
+
+
+def test_the_phone_remote_can_send_text():
+    from hush.remote import COMMANDS
+    assert "text" in COMMANDS

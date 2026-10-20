@@ -58,3 +58,12 @@ button:disabled { opacity: .4; }
 .btn.primary { background: var(--lamp); color: #191A2C; border-color: var(--lamp); font-weight: 700; }
 .error { color: var(--ember); margin: 0; }
 .toast { position: fixed; left: 50%; bottom: calc(1.2rem + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--dusk-2); border: 1px solid var(--line); padding: .6rem 1rem; border-radius: 999px; z-index: 9; }
+
+.kbd { margin: .8rem 0; padding: .7rem .8rem; background: var(--dusk, #23253B); border-radius: 10px; }
+.kbd label { display: block; font-size: .85rem; opacity: .8; margin-bottom: .4rem; }
+.kbd-row { display: flex; gap: .4rem; }
+.kbd-row input { flex: 1; min-width: 0; font-size: 1.05rem; padding: .6rem .7rem; border-radius: 8px; border: 1px solid #3A3D5C; background: #121322; color: inherit; }
+.kbd-row input:disabled { opacity: .5; }
+.kbd-row button { font-size: 1rem; padding: .6rem .9rem; border-radius: 8px; border: 0; background: #F0B04A; color: #191A2C; font-weight: 700; }
+.kbd-row button.ghost { background: transparent; color: inherit; border: 1px solid #3A3D5C; font-weight: 400; }
+.kbd .hint { font-size: .78rem; opacity: .65; margin: .4rem 0 0; }

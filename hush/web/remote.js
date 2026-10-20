@@ -82,6 +82,7 @@
     $("#bar").hidden = $("#times").hidden = !st.active || live;
     $("#pp").textContent = st.playing ? "⏸" : "▶";
     $("#live-pad").hidden = !st.channel;
+    renderKeyboard(st);
     const f = $("#filter"); f.textContent = st.filterOn === false ? "Filter off" : "Filter on"; f.setAttribute("aria-pressed", String(st.filterOn !== false));
     ticker();
   }
@@ -93,6 +94,28 @@
     $("#bar-i").style.width = `${st.duration ? Math.min(100, (pos / st.duration) * 100) : 0}%`;
   }
   setInterval(ticker, 500);
+
+  /* ---------- typing on the phone into the screen's text box ---------- */
+  let kbdTimer, kbdWasEditing = false;
+  function renderKeyboard(st) {
+    const t = st.text || { on: false }, box = $("#kbd"), input = $("#kbd-input");
+    box.hidden = !current;
+    $("#kbd-label").textContent = t.on ? t.label : "Keyboard";
+    $("#kbd-hint").textContent = t.on ? (t.password ? "Typing a password: it is sent as you type." : "Typed text appears on the screen as you type.") : "Highlight a text box on the screen, then type here.";
+    input.disabled = !t.on; input.type = t.password ? "password" : "text";
+    if (t.on && document.activeElement !== input) input.value = t.value || "";             // never overwrite what is being typed right now
+    if (!t.on && document.activeElement !== input) input.value = "";
+    if (t.editing && !kbdWasEditing) setTimeout(() => input.focus(), 50);                  // the screen opened its keyboard: bring up the phone's
+    kbdWasEditing = !!t.editing;
+  }
+  function sendText(submit) {
+    clearTimeout(kbdTimer);
+    send("text", { value: $("#kbd-input").value, submit: !!submit });
+  }
+  $("#kbd-input").addEventListener("input", () => { clearTimeout(kbdTimer); kbdTimer = setTimeout(() => sendText(false), 80); });
+  $("#kbd-input").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); sendText(true); } });
+  $("#kbd-go").addEventListener("click", () => sendText(true));
+  $("#kbd-clear").addEventListener("click", () => { $("#kbd-input").value = ""; sendText(false); $("#kbd-input").focus(); });
 
   /* ---------- browse and play on the screen ---------- */
   const play = (a) => { send("open", a); toast(`Playing on ${screens.find((s) => s.id === current)?.name || "the screen"}`); };

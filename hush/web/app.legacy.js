@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 0248e0cd474358593bfa865d87a7a4e0855dc40bb5bd57a36f9d4cce5b9c0019) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 26d45bfc3bb28a11167ea9f07e5ca64749ab9422495c170e6a7628acd195e51c) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -4330,6 +4330,7 @@ const TVKeyboard = {
     }
   }
 };
+document.addEventListener("focusin", () => Remote.soon());
 document.addEventListener("focusin", (e) => {
   const t = e.target;
   if (TVKeyboard.active() && TVKeyboard.typeable(t) && !t.readOnly) {
@@ -4841,8 +4842,39 @@ const Remote = {
       view: location.hash,
       queue: Queue.list.length,
       shuffle: Queue.shuffle,
-      repeat: Queue.repeat
+      repeat: Queue.repeat,
+      text: this.textField()
     };
+  },
+  /** The text box the phone can type into: the one Hush's keyboard is editing, or the one that has the highlight. */
+  textTarget() {
+    const k = TVKeyboard.input, a = document.activeElement;
+    return k || (a && a !== document.body && TVKeyboard.typeable(a) ? a : null);
+  },
+  textField() {
+    const t = this.textTarget();
+    if (!t) return { on: false };
+    return { on: true, editing: !!TVKeyboard.el, label: (t.getAttribute("aria-label") || t.placeholder || "Text").slice(0, 60), value: t.type === "password" ? "" : String(t.value).slice(0, 300), password: t.type === "password" };
+  },
+  /** Text typed on the phone replaces the contents of the text box on the screen. */
+  setText(a) {
+    const t = this.textTarget();
+    if (!t) return;
+    if (typeof a.value === "string" && a.value !== t.value) {
+      t.value = a.value.slice(0, 500);
+      t.dispatchEvent(new Event("input", { bubbles: true }));
+      try {
+        t.setSelectionRange(t.value.length, t.value.length);
+      } catch (e) {
+      }
+      if (TVKeyboard.el) TVKeyboard.draw();
+    }
+    if (a.submit) {
+      const f = t.form;
+      if (TVKeyboard.el) TVKeyboard.close();
+      t.dispatchEvent(new Event("change", { bubbles: true }));
+      if (f) f.requestSubmit ? f.requestSubmit() : f.submit();
+    }
   },
   push(force) {
     if (!this.ws || this.ws.readyState !== 1) return;
@@ -4931,7 +4963,10 @@ const Remote = {
         if (Player.chan) guide.toggle();
         break;
       case "mini":
-        if (playing) $("#mini-btn").click();
+        if (playing) Player.toggleMini();
+        break;
+      case "text":
+        this.setText(a);
         break;
       case "tv":
         TV.set(a.on !== false);
