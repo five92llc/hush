@@ -292,3 +292,41 @@ def test_kids_cannot_follow_outside_shows(env):
     as_profile(c, kid["id"])
     assert c.post("/api/watchlist", json={"tvmaze_id": "123", "status": "planned"}).status_code == 403
     assert c.get("/api/watchlist/search?q=anything").json() == []
+
+
+def test_channels_keep_their_numbers_for_good(tmp_path):
+    from hush.db import DB
+    db = DB(tmp_path / "n.db")
+    rows = lambda *names: [(f"k{n}", n, ";", "", f"http://x/{n}", enc(f"http://x/{n}"), "") for n in names]  # noqa: E731
+    db.replace_channels("pl", rows("Charlie", "Alpha", "Bravo"))
+    nums = {c["chan_key"]: c["number"] for c in db.list_channels(profile_id="p")}
+    assert nums == {"kAlpha": 1, "kBravo": 2, "kCharlie": 3}                         # first numbering: alphabetical
+    db.replace_channels("pl", rows("Charlie", "Alpha", "Bravo", "Aardvark"))        # a re-read adds a channel; nothing moves
+    nums = {c["chan_key"]: c["number"] for c in db.list_channels(profile_id="p")}
+    assert nums["kAlpha"] == 1 and nums["kBravo"] == 2 and nums["kCharlie"] == 3 and nums["kAardvark"] == 4
+    db.replace_channels("pl", rows("Alpha", "Bravo"))                               # Charlie and Aardvark leave...
+    db.replace_channels("pl", rows("Alpha", "Bravo", "Charlie"))                    # ...and Charlie comes back: same number
+    assert {c["chan_key"]: c["number"] for c in db.list_channels(profile_id="p")}["kCharlie"] == 3
+    with pytest.raises(ValueError, match="Channel 1 is Alpha"):
+        db.set_channel_number("kBravo", 1)
+    assert db.set_channel_number("kBravo", 1, swap=True)["swapped"] == "Alpha"
+    nums = {c["chan_key"]: c["number"] for c in db.list_channels(profile_id="p")}
+    assert nums["kBravo"] == 1 and nums["kAlpha"] == 2
+    assert db.set_channel_number("kAlpha", 500)["number"] == 500
+    assert [r["number"] for r in db.lineup()] == [1, 3, 500]
+    assert db.renumber("name") == 3 and [r["number"] for r in db.lineup()] == [1, 2, 3]
+    with pytest.raises(ValueError):
+        db.set_channel_number("kAlpha", 0)
+
+
+def test_numbers_are_given_to_channels_that_existed_before(tmp_path):
+    import sqlite3
+    from hush.db import DB
+    path = tmp_path / "old.db"
+    db = DB(path)
+    db.replace_channels("pl", [("kb", "Beta", ";", "", "http://x/b", enc("http://x/b"), ""), ("ka", "Alpha", ";", "", "http://x/a", enc("http://x/a"), "")])
+    c = sqlite3.connect(path)
+    c.execute("DROP TABLE channel_numbers")                                          # a database from before numbering existed
+    c.commit(); c.close()
+    db2 = DB(path)
+    assert {r["key"]: r["number"] for r in db2.lineup()} == {"ka": 1, "kb": 2}

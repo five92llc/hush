@@ -164,7 +164,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
                     "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
-                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location")
+                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -177,6 +177,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if path.startswith("/api/live") and not cfg["allow_live"]:
             return "Live TV is switched off for this profile"
         if path.startswith("/api/library/title/") and method != "GET":
+            return "That is for grown-ups"
+        if path.startswith("/api/live/channels/") and path.endswith("/number"):
             return "That is for grown-ups"
         segs = path.split("/")                       # ['', 'api', kind, a, b, ...]
         kind = segs[2] if len(segs) > 2 else ""
@@ -1266,7 +1268,26 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     def _channel(c: dict) -> dict:
         return {"key": c["chan_key"], "name": c["name"], "groups": [g for g in (c["grp"] or "").split(";") if g],
                 "logo_url": f"/api/live/logo/{c['chan_key']}" if c["logo"] else None, "item_id": c["item_id"], "letter": c["letter"],
-                "favorite": bool(c["favorite"]), "failures": c["failures"]}
+                "favorite": bool(c["favorite"]), "failures": c["failures"], "number": c.get("number")}
+
+    @app.get("/api/live/lineup", dependencies=[need])
+    def live_lineup():
+        """Every working channel in number order, compactly: [number, key, item_id, name, has_logo]. Channel up/down and the number keys use it."""
+        return {"channels": [[r["number"], r["key"], r["item_id"], r["name"], 1 if r["logo"] else 0] for r in db.lineup()]}
+
+    @app.put("/api/live/channels/{key}/number", dependencies=[need])
+    def live_channel_number(key: str, body: dict = Body(...)):
+        if not key.isalnum() or not db.get_channel(key):
+            raise HTTPException(404)
+        try:
+            return db.set_channel_number(key, int(body.get("number", 0)), bool(body.get("swap")))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(409 if "is " in str(exc) else 400, str(exc))
+
+    @app.post("/api/live/renumber", dependencies=[need])
+    def live_renumber(body: dict = Body(...)):
+        mode = "group" if body.get("mode") == "group" else "name"
+        return {"numbered": db.renumber(mode)}
 
     @app.get("/api/live/channels", dependencies=[need])
     def live_channels(q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,

@@ -34,6 +34,20 @@ const when = (t) => {
   if (days === 1) return `Tomorrow ${time}`;
   return `${d.toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })} ${time}`;
 };
+/** A channel as the player's queue holds it. The number is the channel's own, permanent one. */
+const chanItem = (c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups, number: c.number });
+/** Every working channel in number order, fetched once for the number keys (about 100 bytes a channel). */
+const Lineup = {
+  list: null, at: 0,
+  async load(force = false) {
+    if (!force && this.list && Date.now() - this.at < 300000) return this.list;
+    const r = await api("/api/live/lineup");
+    this.list = r.channels.map(([number, key, item, name, logo]) => ({ number, key, item, name, logo }));
+    this.at = Date.now();
+    return this.list;
+  },
+  items() { return this.list.map((c) => ({ src: "url", item: c.item, title: c.name, chan: c.key, logo: c.logo ? `/api/live/logo/${c.key}` : null, groups: [], number: c.number })); },
+};
 const hm = (t) => new Date(t * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 
 const ICONS = {
@@ -413,6 +427,33 @@ function jobText(j) {
   if (j.status === "queued") return "Waiting to start";
   return `${j.stage[0].toUpperCase()}${j.stage.slice(1)}, ${Math.round(j.progress * 100)}%`;
 }
+/** Give the channel that is playing a number of your own. A number someone else has can be swapped. */
+async function changeChannelNumber() {
+  const cur = Queue.list[Queue.pos];
+  if (!cur?.chan) return;
+  const dlg = h("dialog", { class: "dialog" });
+  const input = h("input", { type: "number", min: 1, max: 99999, value: cur.number ?? "", "aria-label": "Channel number" });
+  const msg = h("p", { class: "hint" }, `${splitTags(cur.title).title} is channel ${cur.number ?? "?"}. Channel numbers never change on their own.`);
+  const save = async (swap = false) => {
+    try {
+      const r = await api(`/api/live/channels/${cur.chan}/number`, { method: "PUT", body: { number: Number(input.value), swap } });
+      Queue.list.forEach((c) => { if (c.chan === cur.chan) c.number = r.number; });
+      Lineup.list = null; dlg.close(); Queue.banner();
+      toast(r.swapped ? `Channel ${r.number}. ${r.swapped} took its old number.` : `Now channel ${r.number}`);
+    } catch (err) {
+      if (err.status === 409) { msg.textContent = `${err.message}. Swap them?`; swapBtn.hidden = false; }
+      else msg.textContent = err.message;
+    }
+  };
+  const swapBtn = h("button", { class: "btn primary", type: "button", hidden: true, onclick: () => save(true) }, "Swap");
+  dlg.append(h("h2", {}, "Channel number"), msg, h("div", { class: "row" }, input),
+    h("div", { class: "row" }, h("button", { class: "btn primary", type: "button", onclick: () => save(false) }, "Save"), swapBtn,
+      h("button", { class: "btn ghost", type: "button", onclick: () => dlg.close() }, "Cancel")));
+  dlg.addEventListener("close", () => dlg.remove());
+  document.body.append(dlg); dlg.showModal(); input.focus();
+}
+$("#chan-num-btn").addEventListener("click", changeChannelNumber);
+
 /** Settings -> Tuning-in screen: where you live, for the weather shown while a channel opens. */
 const WeatherCard = {
   loc: null,
@@ -639,7 +680,7 @@ const guide = {
     list.append(...this.feed.items.slice(from).map((c, k) => {
       const i = from + k;
       return h("li", {}, h("button", { type: "button", "data-key": c.key, "aria-current": String(c.key === Player.chan), onclick: () => this.pick(i) },
-        h("span", { class: "n" }, i + 1), h("span", {}, splitTags(c.name).title)));
+        h("span", { class: "n" }, c.number ?? i + 1), h("span", {}, splitTags(c.name).title)));
     }));
     if (!this.feed.done) list.append(h("li", { class: "sentinel" }, ""));
     this.watch();
@@ -665,7 +706,7 @@ const guide = {
   pick(i) {
     const c = this.feed.items[i];
     if (!c) return;
-    Queue.set(this.feed.items.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups })));
+    Queue.set(this.feed.items.map((x) => (chanItem(x))));
     const feed = this.feed;
     Queue.loadMore = async () => (feed === this.feed ? this.more() : false);
     if (c.key !== Player.chan) { Queue.history.push(Queue.pos); Queue.go(i); }
@@ -788,7 +829,7 @@ const Queue = {
   banner(at = this.pos) {
     const c = this.list[at];
     if (!c?.chan) return;
-    $("#cb-num").textContent = at + 1;
+    $("#cb-num").textContent = this.list[at]?.number ?? at + 1;
     $("#cb-name").textContent = splitTags(c.title).title;
     $("#cb-sub").textContent = [...splitTags(c.title).tags, ...(c.groups || []).slice(0, 2)].join(" · ");
     const logo = $("#cb-logo");
@@ -799,6 +840,17 @@ const Queue = {
   },
 
   /** Go to the channel at this position, loading more of the list first if it is further down. */
+  /** Tune to a channel by its own number, from the whole lineup; up/down then follow the numbers from there. */
+  async jumpToNumber(n) {
+    let line;
+    try { line = await Lineup.load(); } catch { toast("Could not load the channel list"); return; }
+    const i = line.findIndex((c) => c.number === n);
+    if (i < 0) { toast(`There is no channel ${n}`); return; }
+    const key = line[i].key;
+    if (this.list[this.pos]?.chan === key) { this.banner(); return; }
+    this.set(Lineup.items()); this.loadMore = null; this.history = [];
+    this.go(i);
+  },
   async jumpTo(i) {
     while (i >= this.list.length && this.loadMore && await this.loadMore()) { /* fetch pages until it exists */ }
     if (i >= 0 && i < this.list.length) { this.history.push(this.pos); this.go(i); }
@@ -821,13 +873,13 @@ const Queue = {
     this.go(i);
   },
   digit(d) {
-    this.digits = (this.digits + d).slice(-4);
+    this.digits = (this.digits + d).slice(-5);
     const box = $("#chan-entry");
     box.textContent = this.digits; box.hidden = false;
     clearTimeout(this.digitTimer);
     this.digitTimer = setTimeout(() => {
       const n = Number(this.digits); this.digits = ""; box.hidden = true;
-      if (n > 0) this.jumpTo(n - 1);
+      if (n > 0) this.jumpToNumber(n);
     }, 1400);
   },
 
@@ -1129,6 +1181,12 @@ const Catalog = {
             h("p", {}, "Shows you start watching appear here by themselves. Use the box above to follow a show you are interested in, or the My List menu on any show or movie."))].filter(Boolean));
   },
 
+  async renumber(mode) {
+    if (!confirm("Number every channel again from 1? Numbers you set yourself are replaced.")) return;
+    try { const r = await api("/api/live/renumber", { method: "POST", body: { mode } }); Lineup.list = null; toast(`${plural(r.numbered, "channel")} renumbered`); this.open("live"); }
+    catch (err) { toast(err.message); }
+  },
+
   /** The programme-guide part of the playlist manager: sources, status and a refresh button. */
   guidesBox() {
     const box = h("div", { class: "guides" });
@@ -1171,7 +1229,7 @@ const Catalog = {
     const summary = h("p", { class: "hint" });
     let loaded = [], total = 0, stats = { dead: 0, favorites: 0, total: 0 };
 
-    const toQueue = () => Queue.set(loaded.map((c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups })));
+    const toQueue = () => Queue.set(loaded.map((c) => (chanItem(c))));
     const card = (c, n, setQueue = toQueue) => {
       const star = h("button", { class: "star", type: "button", "aria-pressed": String(c.favorite), title: c.favorite ? "Remove from favorites" : "Add to favorites",
         "aria-label": `Favorite: ${c.name}`, onclick: async (e) => {
@@ -1193,7 +1251,7 @@ const Catalog = {
       };
       return h("a", { class: "chan", "data-key": c.key, href: `#/p/url/${c.item_id}`, onclick: () => { stopPeek(); setQueue(); },
           onmouseenter: startPeek, onfocus: startPeek, onmouseleave: stopPeek, onblur: stopPeek },
-        n != null ? h("span", { class: "num" }, n + 1) : null,
+        (c.number ?? (n != null ? n + 1 : null)) != null ? h("span", { class: "num" }, c.number ?? n + 1) : null,
         h("div", { class: "logo" }, c.logo_url
           ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy", onerror: (e) => { e.target.replaceWith(h("span", { class: "noart" }, initials(c.name))); } })
           : h("span", { class: "noart" }, initials(c.name))),
@@ -1236,7 +1294,7 @@ const Catalog = {
         const r = await api("/api/live/channels?recent=true&limit=8");
         const items = r.channels;
         recentBox.hidden = !items.length;
-        const q = () => Queue.set(items.map((c) => ({ src: "url", item: c.item_id, title: c.name, chan: c.key, logo: c.logo_url, groups: c.groups })));
+        const q = () => Queue.set(items.map((c) => (chanItem(c))));
         recentBox.replaceChildren(h("h2", {}, "Recently watched"),
           h("div", { class: "chans small" }, ...items.map((c) => card(c, null, () => { q(); Queue.loadMore = null; }))));
       } catch { recentBox.hidden = true; }
@@ -1284,6 +1342,10 @@ const Catalog = {
         catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Add playlist"; }
       } }, addName, addUrl, h("button", { class: "btn primary", type: "submit" }, "Add playlist")),
       this.guidesBox(),
+      h("div", { class: "row" }, h("strong", { style: "align-self:center" }, "Channel numbers"),
+        h("button", { class: "btn ghost", type: "button", title: "Number every channel again from 1, alphabetically", onclick: () => this.renumber("name") }, "Renumber A–Z"),
+        h("button", { class: "btn ghost", type: "button", title: "Number every channel again from 1, grouped by category", onclick: () => this.renumber("group") }, "Renumber by group"),
+        h("span", { class: "hint", style: "align-self:center" }, "Numbers stay the same otherwise, even when a playlist is read again.")),
       h("div", { class: "row" }, h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
         e.currentTarget.disabled = true; e.currentTarget.textContent = "Importing…";
         try { const r = await api("/api/live/playlists/import", { method: "POST" }); toast(r.imported ? `Imported ${plural(r.imported, "playlist")}` : "No saved playlists found"); } catch (err) { toast(err.message); }
@@ -1327,7 +1389,7 @@ const Catalog = {
       get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows"), get("/api/library/upcoming"), get("/api/watchlist")]);
     const upNext = mine.filter((i) => i.status === "watching" && i.progress?.next && !i.progress.next.position);
     const chan = (list) => (c) => h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => {
-      Queue.set(list.map((x) => ({ src: "url", item: x.item_id, title: x.name, chan: x.key, logo: x.logo_url, groups: x.groups }))); Queue.loadMore = null;
+      Queue.set(list.map((x) => (chanItem(x)))); Queue.loadMore = null;
     } }, h("div", { class: "logo" }, c.logo_url ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))),
       h("span", { class: "name" }, splitTags(c.name).title));
     const poster = (isShow, list) => (m) => h("a", { class: "card", href: isShow ? `#/show/${m.show_key}` : `#/title/${m.media_key}`,
@@ -1810,7 +1872,7 @@ const Player = {
     if (this.chan) this.altTried.add(this.chan);
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
-    $("#guide-btn").hidden = !this.chan; guide.close();
+    $("#guide-btn").hidden = !this.chan; $("#chan-num-btn").hidden = !this.chan; guide.close();
     if (this.chan) Queue.banner();
     $("#player").hidden = false;
     if (!keepMini) { $("#library").hidden = true; document.body.style.overflow = "hidden"; }
@@ -2141,7 +2203,7 @@ const Player = {
     $("#library").hidden = true; $("#tasks").hidden = true; $("#prefs").hidden = true; document.body.style.overflow = "hidden";
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
-    if (this.chan) { $("#guide-btn").hidden = false; Queue.banner(); }
+    if (this.chan) { $("#guide-btn").hidden = false; $("#chan-num-btn").hidden = false; Queue.banner(); }
   },
   /** Leave mini mode without touching what is playing (used when the player closes or is replaced). */
   /** One button for both: the little player goes full screen, and the full-screen player becomes the little one. */
@@ -3120,7 +3182,7 @@ const Remote = {
   state() {
     const active = !!Player.info && !!video.currentSrc && !$("#player").hidden;
     const q = Queue.list[Queue.pos];
-    const chan = active && Player.chan ? { num: Queue.pos + 1, name: q?.title || "", logo: q?.logo || null } : null;
+    const chan = active && Player.chan ? { num: q?.number ?? Queue.pos + 1, name: q?.title || "", logo: q?.logo || null } : null;
     return {
       active, playing: active && !video.paused, live: active && !!Player.info?.live,
       title: !active ? "" : chan ? splitTags(chan.name).title : (Player.info.title || ""),

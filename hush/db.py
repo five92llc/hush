@@ -155,6 +155,10 @@ CREATE TABLE IF NOT EXISTS probes (
     updated_at  REAL NOT NULL,
     PRIMARY KEY (source_id, item_id)
 );
+CREATE TABLE IF NOT EXISTS channel_numbers (
+    chan_key    TEXT PRIMARY KEY,
+    number      INTEGER NOT NULL UNIQUE      -- permanent: a channel keeps its number, even when its playlist is re-read
+);
 CREATE TABLE IF NOT EXISTS programmes (
     tvg_id      TEXT NOT NULL,
     start       REAL NOT NULL,
@@ -277,6 +281,8 @@ class DB:
             c.execute("ALTER TABLE channels ADD COLUMN tvg_id TEXT")
         if "epg_id" not in self._columns("channels"):
             c.execute("ALTER TABLE channels ADD COLUMN epg_id TEXT")
+        if not c.execute("SELECT 1 FROM channel_numbers LIMIT 1").fetchone() and c.execute("SELECT 1 FROM channels LIMIT 1").fetchone():
+            c.execute("INSERT INTO channel_numbers(chan_key, number) SELECT chan_key, ROW_NUMBER() OVER (ORDER BY lower(name), position) FROM channels")
         if "epg_url" not in self._columns("playlists"):
             c.execute("ALTER TABLE playlists ADD COLUMN epg_url TEXT")
         for table in ("meta", "shows"):
@@ -734,12 +740,61 @@ class DB:
                 "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 [(r[0], pid, r[1], letter_of(r[1]), r[2], r[3], r[4], r[5], pos, keep.get(r[0], 0), r[6] if len(r) > 6 else "")
                  for pos, r in enumerate(rows)])
+            self._assign_numbers()
             c.commit()
         return len(rows)
 
+    def _assign_numbers(self) -> None:
+        """Give every channel without a number the next free one (existing numbers never change). Call with the lock held."""
+        c = self._conn
+        nxt = (c.execute("SELECT COALESCE(MAX(number), 0) FROM channel_numbers").fetchone()[0] or 0) + 1
+        fresh = [r[0] for r in c.execute("SELECT c.chan_key FROM channels c LEFT JOIN channel_numbers n ON n.chan_key=c.chan_key "
+                                         "WHERE n.chan_key IS NULL ORDER BY lower(c.name), c.position")]
+        c.executemany("INSERT OR IGNORE INTO channel_numbers(chan_key, number) VALUES(?,?)", [(k, nxt + i) for i, k in enumerate(fresh)])
+
+    def set_channel_number(self, key: str, number: int, swap: bool = False) -> dict:
+        """Give a channel a number of your choice. If another channel has it: refuse, or swap the two when asked to."""
+        if not 1 <= number <= 99999:
+            raise ValueError("A channel number is between 1 and 99999")
+        with self._lock:
+            c = self._conn
+            mine = c.execute("SELECT number FROM channel_numbers WHERE chan_key=?", (key,)).fetchone()
+            other = c.execute("SELECT n.chan_key, ch.name FROM channel_numbers n LEFT JOIN channels ch ON ch.chan_key=n.chan_key WHERE n.number=?", (number,)).fetchone()
+            if other and other[0] == key:
+                return {"number": number, "swapped": None}
+            if other and not swap:
+                raise ValueError(f"Channel {number} is {other[1] or 'another channel'}")
+            if other:
+                spare = (c.execute("SELECT COALESCE(MAX(number), 0) FROM channel_numbers").fetchone()[0] or 0) + 1
+                c.execute("UPDATE channel_numbers SET number=? WHERE chan_key=?", (spare, other[0]))        # three steps because numbers are unique
+                c.execute("INSERT INTO channel_numbers(chan_key, number) VALUES(?,?) ON CONFLICT(chan_key) DO UPDATE SET number=excluded.number", (key, number))
+                if mine:
+                    c.execute("UPDATE channel_numbers SET number=? WHERE chan_key=?", (mine[0], other[0]))
+            else:
+                c.execute("INSERT INTO channel_numbers(chan_key, number) VALUES(?,?) ON CONFLICT(chan_key) DO UPDATE SET number=excluded.number", (key, number))
+            c.commit()
+        return {"number": number, "swapped": other[1] if other else None}
+
+    def renumber(self, mode: str = "name") -> int:
+        """Start the numbering again from 1, alphabetically or grouped by category. Returns how many channels were numbered."""
+        order = "lower(name), position" if mode == "name" else "lower(COALESCE(NULLIF(trim(grp, ';'), ''), 'zzz')), lower(name), position"
+        with self._lock:
+            c = self._conn
+            keys = [r[0] for r in c.execute(f"SELECT chan_key FROM channels ORDER BY {order}")]
+            c.execute("DELETE FROM channel_numbers")
+            c.executemany("INSERT INTO channel_numbers(chan_key, number) VALUES(?,?)", [(k, i + 1) for i, k in enumerate(keys)])
+            c.commit()
+        return len(keys)
+
+    def lineup(self) -> list[dict]:
+        """Every working channel in number order: the list the number keys and channel up/down move through."""
+        return self._all("SELECT c.chan_key AS key, c.item_id, c.name, c.logo, n.number FROM channels c JOIN channel_numbers n ON n.chan_key=c.chan_key "
+                         "WHERE c.failures<2 ORDER BY n.number")
+
     @staticmethod
     def _channel_filter(profile_id: str, q: str, group: str, favorites: bool, hide_dead: bool, letter: str = "", recent: bool = False):
-        sql = ["FROM channels c LEFT JOIN channel_marks m ON m.chan_key=c.chan_key AND m.profile_id=? WHERE 1=1"]
+        sql = ["FROM channels c LEFT JOIN channel_marks m ON m.chan_key=c.chan_key AND m.profile_id=? "
+               "LEFT JOIN channel_numbers cn ON cn.chan_key=c.chan_key WHERE 1=1"]
         args: list = [profile_id]
         if q:
             sql.append("AND c.name LIKE ?"); args.append(f"%{q}%")
@@ -758,8 +813,8 @@ class DB:
     def list_channels(self, q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,
                       limit: int = 120, offset: int = 0, letter: str = "", recent: bool = False, profile_id: str = "") -> list[dict]:
         frm, args = self._channel_filter(profile_id, q, group, favorites, hide_dead, letter, recent)
-        order = "m.last_ok DESC" if recent else "lower(c.name), c.position"
-        return self._all(f"SELECT c.*, COALESCE(m.favorite,0) AS favorite, m.last_ok AS last_ok {frm} ORDER BY {order} LIMIT ? OFFSET ?",
+        order = "m.last_ok DESC" if recent else "COALESCE(cn.number, 999999), lower(c.name), c.position"
+        return self._all(f"SELECT c.*, cn.number AS number, COALESCE(m.favorite,0) AS favorite, m.last_ok AS last_ok {frm} ORDER BY {order} LIMIT ? OFFSET ?",
                          (*args, limit, offset))
 
     def count_channels(self, q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,
@@ -788,7 +843,7 @@ class DB:
         return {"total": r["total"] or 0, "dead": r["dead"] or 0, "favorites": r["favorites"] or 0}
 
     def get_channel(self, key: str) -> dict | None:
-        return self._one("SELECT * FROM channels WHERE chan_key=?", (key,))
+        return self._one("SELECT c.*, n.number AS number FROM channels c LEFT JOIN channel_numbers n ON n.chan_key=c.chan_key WHERE c.chan_key=?", (key,))
 
     def set_favorite(self, key: str, on: bool, profile_id: str = "") -> None:
         self._exec("INSERT INTO channel_marks(profile_id,chan_key,favorite) VALUES(?,?,?) "
