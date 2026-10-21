@@ -685,7 +685,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .tvsel-opt[aria-selected="true"] { border-color: var(--hush); }
 
 /* ---- player on a TV: the TV's own keys set the volume; the progress bar shows when it is being adjusted ---- */
-.tv .player .vol { display: none; }
+.tv .player .vol, .tvdev .player .vol { display: none; }
 .timeline[data-adjust="1"] { outline: .2rem solid var(--lamp); outline-offset: .2rem; }
 
 /* ---- the "tuning in" screen: something to look at while a channel or title opens ---- */

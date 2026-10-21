@@ -77,6 +77,7 @@ const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /
    unless the page claims them, so the app handles them itself and hides the pointer. */
 const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|HushTV|Android.*\bTV\b/i;
 const IS_TV_DEVICE = TVUA.test(UA);
+if (IS_TV_DEVICE) document.documentElement.classList.add("tvdev");      // set whether or not big screen mode is on
 /** What video this screen can play without the server re-encoding it: 0 none, 1 HEVC, 2 HEVC 10-bit. (Safari gets HLS instead.) */
 const HEVC = (() => {
   try {
@@ -2994,7 +2995,7 @@ const TV = {
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || (k === "Backspace" && !typing);
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) { e.preventDefault(); TVSelect.open(e.target); return true; }
     if (k === "Enter" && !TVKeyboard.el && TVKeyboard.typeable(e.target)) { e.preventDefault(); TVKeyboard.open(e.target); return true; }
-    if (k === "Enter" && e.target.id === "timeline") {                          // OK on the progress bar: left/right now seek until OK or Back
+    if (k === "Enter" && (e.target.id === "timeline" || e.target.matches?.("input[type=range]"))) {                          // OK on the progress bar: left/right now seek until OK or Back
       e.preventDefault();
       const on = e.target.dataset.adjust !== "1";
       e.target.dataset.adjust = on ? "1" : "0";
@@ -3017,7 +3018,7 @@ const TV = {
       this.lastStep = now;
     }
     if (typing && (dir === "left" || dir === "right")) return false;           // move the cursor in the search box
-    if (e.target.matches?.("input[type=range]")) return false;                  // a drop-down no longer eats the arrow keys: they move on to the next thing
+    if (e.target.matches?.("input[type=range]") && e.target.dataset.adjust === "1") return false;    // a slider only takes the arrow keys after OK; otherwise they move on to the next thing
     if (playerOpen && !overlay) {
       // The arrow keys only ever move around (channels change with CH+/CH-, the number keys or the Channels button; the
       // TV's own keys set the volume; seeking is on the progress bar, below).

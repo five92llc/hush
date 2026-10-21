@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 f6057adf59a9e4bf8a3d37d532c84e52ca3bc3c525e155459d9e4066a14ea33b) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 ef61fef1c96b1c8c2af9bbb4250b34f0b32947da1ad2a73976fba6d82e241bc4) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -84,6 +84,7 @@ const IS_LG = /Web0S|webOS|NetCast/i.test(UA);
 const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /iP(hone|ad|od)/.test(UA) || navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1;
 const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|HushTV|Android.*\bTV\b/i;
 const IS_TV_DEVICE = TVUA.test(UA);
+if (IS_TV_DEVICE) document.documentElement.classList.add("tvdev");
 const HEVC = (() => {
   try {
     const v = document.createElement("video"), ok = (t) => !!v.canPlayType && v.canPlayType(`video/mp4; codecs="${t}"`) === "probably";
@@ -4604,7 +4605,7 @@ const TV = {
   },
   /** Returns true when the key was handled here. */
   handleKey(e) {
-    var _a, _b, _c, _d, _e, _f, _g, _h;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const k = normKey(e);
     const typing = (_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || k === "Backspace" && !typing;
@@ -4618,7 +4619,7 @@ const TV = {
       TVKeyboard.open(e.target);
       return true;
     }
-    if (k === "Enter" && e.target.id === "timeline") {
+    if (k === "Enter" && (e.target.id === "timeline" || ((_d = (_c = e.target).matches) == null ? void 0 : _d.call(_c, "input[type=range]")))) {
       e.preventDefault();
       const on = e.target.dataset.adjust !== "1";
       e.target.dataset.adjust = on ? "1" : "0";
@@ -4635,7 +4636,7 @@ const TV = {
     }
     const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[k];
     if (!dir) {
-      if (k === "Enter" && playerOpen && !overlay && !((_c = document.activeElement) == null ? void 0 : _c.closest("#controls"))) {
+      if (k === "Enter" && playerOpen && !overlay && !((_e = document.activeElement) == null ? void 0 : _e.closest("#controls"))) {
         e.preventDefault();
         togglePlay();
         idle.bump();
@@ -4652,14 +4653,14 @@ const TV = {
       this.lastStep = now;
     }
     if (typing && (dir === "left" || dir === "right")) return false;
-    if ((_e = (_d = e.target).matches) == null ? void 0 : _e.call(_d, "input[type=range]")) return false;
+    if (((_g = (_f = e.target).matches) == null ? void 0 : _g.call(_f, "input[type=range]")) && e.target.dataset.adjust === "1") return false;
     if (playerOpen && !overlay) {
       e.preventDefault();
-      const ctl = (_f = document.activeElement) == null ? void 0 : _f.closest("#controls");
+      const ctl = (_h = document.activeElement) == null ? void 0 : _h.closest("#controls");
       const hidden = $("#player").classList.contains("idle");
       if (!ctl || hidden) {
         idle.bump();
-        (((_g = Player.lastControl) == null ? void 0 : _g.isConnected) && Player.lastControl.closest("#controls") ? Player.lastControl : $("#play-btn")).focus({ preventScroll: true });
+        (((_i = Player.lastControl) == null ? void 0 : _i.isConnected) && Player.lastControl.closest("#controls") ? Player.lastControl : $("#play-btn")).focus({ preventScroll: true });
         return true;
       }
       const tl = $("#timeline");
@@ -4673,7 +4674,7 @@ const TV = {
       }
       this.move(dir);
       idle.bump();
-      if ((_h = document.activeElement) == null ? void 0 : _h.closest("#controls")) Player.lastControl = document.activeElement;
+      if ((_j = document.activeElement) == null ? void 0 : _j.closest("#controls")) Player.lastControl = document.activeElement;
       return true;
     }
     e.preventDefault();
