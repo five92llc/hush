@@ -731,3 +731,6 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .tv .player.mini .mini-bar { opacity: 1; background: linear-gradient(transparent, rgba(8, 9, 20, .92) 40%); padding-top: .8rem; }
 .tv .mini-bar .t { flex: none; background: var(--lamp); color: var(--ink); font-weight: 700; font-size: .8rem; border-radius: 999px; padding: .25rem .8rem; margin-right: auto; }
 .tv .mini-bar .icon-btn { width: 2rem; height: 2rem; }
+
+.ranges .chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.ranges .chip { background: var(--dusk-2); border-radius: 999px; padding: .2rem .7rem; font-size: var(--s-1); }

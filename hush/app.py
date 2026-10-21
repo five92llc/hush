@@ -1286,8 +1286,12 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.post("/api/live/renumber", dependencies=[need])
     def live_renumber(body: dict = Body(...)):
-        mode = "group" if body.get("mode") == "group" else "name"
-        return {"numbered": db.renumber(mode)}
+        mode = body.get("mode") if body.get("mode") in ("group", "ranges") else "name"
+        return {"numbered": db.renumber(mode), "ranges": db.number_ranges()}
+
+    @app.get("/api/live/ranges", dependencies=[need])
+    def live_ranges():
+        return db.number_ranges()
 
     @app.get("/api/live/channels", dependencies=[need])
     def live_channels(q: str = "", group: str = "", favorites: bool = False, hide_dead: bool = True,

@@ -330,3 +330,35 @@ def test_numbers_are_given_to_channels_that_existed_before(tmp_path):
     c.commit(); c.close()
     db2 = DB(path)
     assert {r["key"]: r["number"] for r in db2.lineup()} == {"ka": 1, "kb": 2}
+
+
+def test_ranges_leave_room_for_each_category_to_grow(tmp_path):
+    from hush.db import DB, plan_ranges, primary_group
+    assert primary_group(";News;Sports;") == "News" and primary_group("") == ""
+    plan = plan_ranges({"Sports": 150, "News": 40, "Movies": 9, "Zoo": 3, "Kids": 2})
+    names = [p[0] for p in plan]
+    assert names == ["News", "Movies", "Sports", "Other"]                         # known categories first, tiny ones share "Other" at the end
+    blocks = {c: (a, b) for c, a, b in plan}
+    assert blocks["News"] == (100, 199) and blocks["Movies"] == (200, 299) and blocks["Sports"] == (300, 599) and blocks["Other"] == (600, 699)
+    assert all(a % 100 == 0 for _, a, _ in plan)
+
+    db = DB(tmp_path / "r.db")
+    rows = [(f"n{i}", f"News {i:02d}", ";News;", "", f"http://x/n{i}", enc(f"http://x/n{i}"), "") for i in range(12)]
+    rows += [(f"s{i}", f"Sport {i:02d}", ";Sports;", "", f"http://x/s{i}", enc(f"http://x/s{i}"), "") for i in range(9)]
+    db.replace_channels("pl", rows)
+    assert db.renumber("ranges") == 21
+    nums = {c["chan_key"]: c["number"] for c in db.list_channels(limit=100, profile_id="p")}
+    assert nums["n0"] == 100 and nums["n11"] == 111 and nums["s0"] == 200 and nums["s8"] == 208     # a block starts on a hundred, alphabetical inside
+    # a channel that arrives later goes into its own category's block, after the others, and keeps that number
+    db.replace_channels("pl", rows + [("n99", "News 99", ";News;", "", "http://x/n99", enc("http://x/n99"), ""),
+                                      ("z1", "Brand new", ";Cooking;", "", "http://x/z1", enc("http://x/z1"), "")])
+    nums = {c["chan_key"]: c["number"] for c in db.list_channels(limit=100, profile_id="p")}
+    assert nums["n99"] == 112 and nums["s0"] == 200 and nums["n0"] == 100
+    assert 300 <= nums["z1"] < 400 or nums["z1"] >= 300                           # an unknown category lands in "Other" (its own block)
+    # a full block opens another one at the end instead of running into the next category
+    for i in range(100):
+        db.replace_channels("pl", rows + [(f"x{j}", f"Extra {j}", ";News;", "", f"http://x/e{j}", enc(f"http://x/e{j}"), "") for j in range(i + 1)])
+        if len(db.number_ranges()) > 3 + 0 and any(r["category"] == "News" and r["start"] > 199 for r in db.number_ranges()):
+            break
+    assert any(r["category"] == "News" and r["start"] >= 400 for r in db.number_ranges())
+    assert len({c["number"] for c in db.list_channels(limit=500, profile_id="p")}) == len(db.list_channels(limit=500, profile_id="p"))

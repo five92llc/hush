@@ -1182,9 +1182,25 @@ const Catalog = {
   },
 
   async renumber(mode) {
-    if (!confirm("Number every channel again from 1? Numbers you set yourself are replaced.")) return;
-    try { const r = await api("/api/live/renumber", { method: "POST", body: { mode } }); Lineup.list = null; toast(`${plural(r.numbered, "channel")} renumbered`); this.open("live"); }
-    catch (err) { toast(err.message); }
+    if (!confirm(mode === "ranges" ? "Number every channel again? Each category gets its own block of numbers with room to grow (News 100-299, Sports 300-499...). Numbers you set yourself are replaced."
+      : "Number every channel again from 1? Numbers you set yourself are replaced.")) return;
+    try {
+      const r = await api("/api/live/renumber", { method: "POST", body: { mode } });
+      Lineup.list = null;
+      toast(r.ranges?.length ? `${plural(r.numbered, "channel")} numbered into ${plural(r.ranges.length, "block")}` : `${plural(r.numbered, "channel")} renumbered`);
+      this.open("live");
+    } catch (err) { toast(err.message); }
+  },
+
+  /** Which blocks of numbers each category has, and how full they are (only after "Number by category"). */
+  rangesBox() {
+    const box = h("div", { class: "ranges" });
+    api("/api/live/ranges").then((rs) => {
+      if (!rs.length) return;
+      box.replaceChildren(h("p", { class: "hint" }, "Number blocks: new channels join their category's block."),
+        h("div", { class: "chips" }, ...rs.map((r) => h("span", { class: "chip", title: `${r.used} of ${r.stop - r.start + 1} numbers used` }, `${r.category} ${r.start}–${r.stop} · ${r.used}`))));
+    }).catch(() => {});
+    return box;
   },
 
   /** The programme-guide part of the playlist manager: sources, status and a refresh button. */
@@ -1343,9 +1359,11 @@ const Catalog = {
       } }, addName, addUrl, h("button", { class: "btn primary", type: "submit" }, "Add playlist")),
       this.guidesBox(),
       h("div", { class: "row" }, h("strong", { style: "align-self:center" }, "Channel numbers"),
-        h("button", { class: "btn ghost", type: "button", title: "Number every channel again from 1, alphabetically", onclick: () => this.renumber("name") }, "Renumber A–Z"),
-        h("button", { class: "btn ghost", type: "button", title: "Number every channel again from 1, grouped by category", onclick: () => this.renumber("group") }, "Renumber by group"),
+        h("button", { class: "btn subtle", type: "button", title: "Give each category its own block of numbers, with room for more channels", onclick: () => this.renumber("ranges") }, "Number by category"),
+        h("button", { class: "btn ghost", type: "button", title: "Number every channel again from 1, alphabetically", onclick: () => this.renumber("name") }, "A–Z"),
+        h("button", { class: "btn ghost", type: "button", title: "Number every channel again from 1, grouped by category", onclick: () => this.renumber("group") }, "By group"),
         h("span", { class: "hint", style: "align-self:center" }, "Numbers stay the same otherwise, even when a playlist is read again.")),
+      this.rangesBox(),
       h("div", { class: "row" }, h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
         e.currentTarget.disabled = true; e.currentTarget.textContent = "Importing…";
         try { const r = await api("/api/live/playlists/import", { method: "POST" }); toast(r.imported ? `Imported ${plural(r.imported, "playlist")}` : "No saved playlists found"); } catch (err) { toast(err.message); }

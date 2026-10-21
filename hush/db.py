@@ -159,6 +159,12 @@ CREATE TABLE IF NOT EXISTS channel_numbers (
     chan_key    TEXT PRIMARY KEY,
     number      INTEGER NOT NULL UNIQUE      -- permanent: a channel keeps its number, even when its playlist is re-read
 );
+CREATE TABLE IF NOT EXISTS number_ranges (
+    category    TEXT NOT NULL,
+    start       INTEGER NOT NULL,
+    stop        INTEGER NOT NULL,            -- inclusive; a category's channels live inside its ranges, with room to grow
+    PRIMARY KEY (category, start)
+);
 CREATE TABLE IF NOT EXISTS programmes (
     tvg_id      TEXT NOT NULL,
     start       REAL NOT NULL,
@@ -208,6 +214,35 @@ def _flag_counts(data) -> dict[str, int]:
         cat = r.get("category") or "manual"
         counts[cat] = counts.get(cat, 0) + 1
     return counts
+
+
+# Channel numbering by category: each category gets a block of numbers with room to grow (twice what it has now, at least 100),
+# blocks start on a multiple of 100, and the numbers below RANGE_START stay free for channels you pin yourself.
+CATEGORY_ORDER = ("general", "entertainment", "news", "movies", "series", "sports", "kids", "animation", "comedy", "music", "documentary",
+                  "lifestyle", "cooking", "travel", "science", "education", "business", "weather", "religious", "outdoor", "family", "classic", "culture", "shop", "relax")
+RANGE_START, MIN_BLOCK, SMALL_CATEGORY = 100, 100, 8
+
+
+def primary_group(grp: str | None) -> str:
+    """The category a channel is numbered under: the first of its groups."""
+    return next((g.strip() for g in (grp or "").split(";") if g.strip()), "")
+
+
+def plan_ranges(counts: dict[str, int], start: int = RANGE_START) -> list[tuple[str, int, int]]:
+    """[(category, first number, last number)] with room for each category to grow. Small categories share one "Other" block."""
+    merged: dict[str, int] = {}
+    for cat, n in counts.items():
+        name = cat if n >= SMALL_CATEGORY and cat else "Other"
+        merged[name] = merged.get(name, 0) + n
+    def rank(c: str):
+        low = c.lower()
+        return (2, 0, "") if c == "Other" else ((0, CATEGORY_ORDER.index(low), "") if low in CATEGORY_ORDER else (1, 0, low))
+    out, nxt = [], max(start, 1)
+    for cat in sorted(merged, key=rank):
+        size = max(MIN_BLOCK, -(-merged[cat] * 2 // 100) * 100)               # twice what it has, rounded up to a whole hundred
+        out.append((cat, nxt, nxt + size - 1))
+        nxt += size
+    return out
 
 
 def letter_of(name: str, skip_articles: bool = False) -> str:
@@ -747,10 +782,34 @@ class DB:
     def _assign_numbers(self) -> None:
         """Give every channel without a number the next free one (existing numbers never change). Call with the lock held."""
         c = self._conn
-        nxt = (c.execute("SELECT COALESCE(MAX(number), 0) FROM channel_numbers").fetchone()[0] or 0) + 1
-        fresh = [r[0] for r in c.execute("SELECT c.chan_key FROM channels c LEFT JOIN channel_numbers n ON n.chan_key=c.chan_key "
-                                         "WHERE n.chan_key IS NULL ORDER BY lower(c.name), c.position")]
-        c.executemany("INSERT OR IGNORE INTO channel_numbers(chan_key, number) VALUES(?,?)", [(k, nxt + i) for i, k in enumerate(fresh)])
+        fresh = [(r[0], r[1]) for r in c.execute("SELECT c.chan_key, c.grp FROM channels c LEFT JOIN channel_numbers n ON n.chan_key=c.chan_key "
+                                                 "WHERE n.chan_key IS NULL ORDER BY lower(c.name), c.position")]
+        if not fresh:
+            return
+        top = c.execute("SELECT COALESCE(MAX(number), 0) FROM channel_numbers").fetchone()[0] or 0
+        if c.execute("SELECT 1 FROM number_ranges LIMIT 1").fetchone():
+            known = {r[0] for r in c.execute("SELECT DISTINCT category FROM number_ranges")}
+            for key, grp in fresh:
+                cat = primary_group(grp)
+                cat = cat if cat in known else "Other"
+                number = self._next_in_ranges(cat)
+                c.execute("INSERT OR IGNORE INTO channel_numbers(chan_key, number) VALUES(?,?)", (key, number))
+            return
+        c.executemany("INSERT OR IGNORE INTO channel_numbers(chan_key, number) VALUES(?,?)", [(k, top + 1 + i) for i, (k, _) in enumerate(fresh)])
+
+    def _next_in_ranges(self, cat: str) -> int:
+        """The next number inside this category's block (after the highest one used there); a full block gets a fresh one at the end."""
+        c = self._conn
+        blocks = c.execute("SELECT start, stop FROM number_ranges WHERE category=? ORDER BY start", (cat,)).fetchall()
+        for a, b in blocks:
+            used = c.execute("SELECT MAX(number) FROM channel_numbers WHERE number BETWEEN ? AND ?", (a, b)).fetchone()[0]
+            nxt = (used + 1) if used else a
+            if nxt <= b:
+                return nxt
+        top = max([r[0] for r in c.execute("SELECT MAX(stop) FROM number_ranges")] + [c.execute("SELECT COALESCE(MAX(number), 0) FROM channel_numbers").fetchone()[0] or 0])
+        a = (top // 100 + 1) * 100
+        c.execute("INSERT OR IGNORE INTO number_ranges(category, start, stop) VALUES(?,?,?)", (cat, a, a + MIN_BLOCK - 1))
+        return a
 
     def set_channel_number(self, key: str, number: int, swap: bool = False) -> dict:
         """Give a channel a number of your choice. If another channel has it: refuse, or swap the two when asked to."""
@@ -777,14 +836,37 @@ class DB:
 
     def renumber(self, mode: str = "name") -> int:
         """Start the numbering again from 1, alphabetically or grouped by category. Returns how many channels were numbered."""
-        order = "lower(name), position" if mode == "name" else "lower(COALESCE(NULLIF(trim(grp, ';'), ''), 'zzz')), lower(name), position"
         with self._lock:
             c = self._conn
-            keys = [r[0] for r in c.execute(f"SELECT chan_key FROM channels ORDER BY {order}")]
             c.execute("DELETE FROM channel_numbers")
+            c.execute("DELETE FROM number_ranges")
+            if mode == "ranges":
+                rows = c.execute("SELECT chan_key, name, grp FROM channels ORDER BY lower(name), position").fetchall()
+                counts: dict[str, int] = {}
+                for _, _, grp in rows:
+                    counts[primary_group(grp)] = counts.get(primary_group(grp), 0) + 1
+                plan = plan_ranges(counts)
+                c.executemany("INSERT INTO number_ranges(category, start, stop) VALUES(?,?,?)", plan)
+                block = {cat: [a, b] for cat, a, b in plan}
+                nxt = {cat: a for cat, (a, _) in block.items()}
+                assigned = []
+                for key, _, grp in rows:                                           # alphabetical inside each block, with the room left at the end
+                    cat = primary_group(grp)
+                    cat = cat if cat in block else "Other"
+                    assigned.append((key, nxt[cat])); nxt[cat] += 1
+                c.executemany("INSERT INTO channel_numbers(chan_key, number) VALUES(?,?)", assigned)
+                c.commit()
+                return len(assigned)
+            order = "lower(name), position" if mode == "name" else "lower(COALESCE(NULLIF(trim(grp, ';'), ''), 'zzz')), lower(name), position"
+            keys = [r[0] for r in c.execute(f"SELECT chan_key FROM channels ORDER BY {order}")]
             c.executemany("INSERT INTO channel_numbers(chan_key, number) VALUES(?,?)", [(k, i + 1) for i, k in enumerate(keys)])
             c.commit()
         return len(keys)
+
+    def number_ranges(self) -> list[dict]:
+        """The blocks of numbers each category lives in, and how many of them are used."""
+        return self._all("SELECT r.category, r.start, r.stop, (SELECT COUNT(*) FROM channel_numbers n WHERE n.number BETWEEN r.start AND r.stop) AS used "
+                         "FROM number_ranges r ORDER BY r.start")
 
     def lineup(self) -> list[dict]:
         """Every working channel in number order: the list the number keys and channel up/down move through."""
