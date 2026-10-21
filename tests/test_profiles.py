@@ -337,9 +337,9 @@ def test_ranges_leave_room_for_each_category_to_grow(tmp_path):
     assert primary_group(";News;Sports;") == "News" and primary_group("") == ""
     plan = plan_ranges({"Sports": 150, "News": 40, "Movies": 9, "Zoo": 3, "Kids": 2})
     names = [p[0] for p in plan]
-    assert names == ["News", "Movies", "Sports", "Other"]                         # known categories first, tiny ones share "Other" at the end
+    assert names == ["News", "Sports", "Movies", "Other"]                         # known categories first, tiny ones share "Other" at the end
     blocks = {c: (a, b) for c, a, b in plan}
-    assert blocks["News"] == (100, 199) and blocks["Movies"] == (200, 299) and blocks["Sports"] == (300, 599) and blocks["Other"] == (600, 699)
+    assert blocks["News"] == (100, 199) and blocks["Sports"] == (200, 499) and blocks["Movies"] == (500, 599) and blocks["Other"] == (600, 699)
     assert all(a % 100 == 0 for _, a, _ in plan)
 
     db = DB(tmp_path / "r.db")

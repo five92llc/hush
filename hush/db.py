@@ -218,8 +218,9 @@ def _flag_counts(data) -> dict[str, int]:
 
 # Channel numbering by category: each category gets a block of numbers with room to grow (twice what it has now, at least 100),
 # blocks start on a multiple of 100, and the numbers below RANGE_START stay free for channels you pin yourself.
-CATEGORY_ORDER = ("general", "entertainment", "news", "movies", "series", "sports", "kids", "animation", "comedy", "music", "documentary",
-                  "lifestyle", "cooking", "travel", "science", "education", "business", "weather", "religious", "outdoor", "family", "classic", "culture", "shop", "relax")
+CATEGORY_ORDER = ("news", "sports", "entertainment", "movies", "series", "comedy", "kids", "animation", "family", "music", "documentary", "lifestyle",
+                  "cooking", "travel", "science", "education", "business", "weather", "classic", "culture", "outdoor", "relax", "religious", "shop", "auto",
+                  "general", "legislative", "undefined")
 RANGE_START, MIN_BLOCK, SMALL_CATEGORY = 100, 100, 8
 
 
