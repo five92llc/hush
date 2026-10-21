@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 26d45bfc3bb28a11167ea9f07e5ca64749ab9422495c170e6a7628acd195e51c) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 f6057adf59a9e4bf8a3d37d532c84e52ca3bc3c525e155459d9e4066a14ea33b) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -4424,7 +4424,8 @@ const TV = {
   on: false,
   init() {
     var _a;
-    this.on = (_a = store.get("tv", null)) != null ? _a : TVUA.test(navigator.userAgent);
+    const cookie = (document.cookie.match(/(?:^|; )hush_tv=([01])/) || [])[1];
+    this.on = (_a = store.get("tv", null)) != null ? _a : cookie != null ? cookie === "1" : TVUA.test(navigator.userAgent);
     this.apply();
     const watch = new MutationObserver(() => {
       clearTimeout(this.obsTimer);
@@ -4435,6 +4436,11 @@ const TV = {
   set(on) {
     this.on = on;
     store.set("tv", on);
+    this.chosen = true;
+    try {
+      document.cookie = `hush_tv=${on ? 1 : 0}; max-age=31536000; path=/; SameSite=Lax`;
+    } catch (e) {
+    }
     this.apply();
     if (on && !location.hash.startsWith("#/p/")) go("#/home");
     else route();
@@ -4889,7 +4895,7 @@ const Remote = {
   },
   pressKey(key) {
     var _a;
-    if (!TV.on && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(key) && $("#player").hidden) TV.set(true);
+    if (!TV.on && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(key) && $("#player").hidden && store.get("tv", null) === null && !/(?:^|; )hush_tv=/.test(document.cookie)) TV.set(true);
     const a = document.activeElement;
     const target = a && a !== document.body ? a : document.body;
     if (key === "Enter") {

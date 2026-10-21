@@ -2872,13 +2872,18 @@ document.addEventListener("mousedown", (e) => {
 const TV = {
   on: false,
   init() {
-    this.on = store.get("tv", null) ?? TVUA.test(navigator.userAgent);   // a smart TV starts in big screen mode by itself
+    // A smart TV starts in big screen mode by itself, until someone chooses. The choice is also kept in a cookie, in case a TV's
+    // browser forgets local storage between launches.
+    const cookie = (document.cookie.match(/(?:^|; )hush_tv=([01])/) || [])[1];
+    this.on = store.get("tv", null) ?? (cookie != null ? cookie === "1" : TVUA.test(navigator.userAgent));
     this.apply();
     const watch = new MutationObserver(() => { clearTimeout(this.obsTimer); this.obsTimer = setTimeout(() => this.focusSoon(0), 350); });
     ["#catalog-view", "#browser-view", "#tasks", "#prefs"].forEach((id) => watch.observe($(id), { childList: true, subtree: true }));   // not the player, which changes every second
   },
   set(on) {
-    this.on = on; store.set("tv", on); this.apply();
+    this.on = on; store.set("tv", on); this.chosen = true;
+    try { document.cookie = `hush_tv=${on ? 1 : 0}; max-age=31536000; path=/; SameSite=Lax`; } catch { /* cookies off */ }
+    this.apply();
     if (on && !location.hash.startsWith("#/p/")) go("#/home"); else route();
   },
   apply() {
@@ -3160,7 +3165,9 @@ const Remote = {
   soon() { clearTimeout(this.soonTimer); this.soonTimer = setTimeout(() => this.push(true), 150); },
 
   pressKey(key) {
-    if (!TV.on && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(key) && $("#player").hidden) TV.set(true);   // arrows from a phone mean "use it like a TV"
+    // Arrows from a phone mean "use it like a TV", but only until someone has chosen: leaving big screen mode must stay left.
+    if (!TV.on && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(key) && $("#player").hidden
+        && store.get("tv", null) === null && !/(?:^|; )hush_tv=/.test(document.cookie)) TV.set(true);
     const a = document.activeElement;
     const target = a && a !== document.body ? a : document.body;
     if (key === "Enter") {
