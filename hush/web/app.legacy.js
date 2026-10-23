@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 71625eeccf46960f361d9f474d518c37556ff8e54a1dca500ad59a42967836b3) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 e3c58103f34c05f545a1a7e1e28884ff8bcc9d2bdf6f344b62beb02c1accf34c) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -897,6 +897,36 @@ const Ticker = {
       slide.classList.add("in");
     }
     [...$("#ticker-dots").children].forEach((d, i) => d.classList.toggle("on", i === this.at));
+    this.fit();
+  },
+  /** Make the slide fit the room the bar has: shrink it a little, then drop the last small details, rather than cutting words off. */
+  fit() {
+    var _a;
+    const slide = $("#ticker-slide"), row = slide.firstElementChild;
+    if (!row || $("#ticker").hidden) return;
+    row.style.transform = "";
+    row.style.width = "";
+    row.classList.remove("fit");
+    for (const el of row.querySelectorAll("[data-fit-hidden]")) {
+      el.hidden = false;
+      delete el.dataset.fitHidden;
+    }
+    const room = slide.clientWidth;
+    if (!room) return;
+    const need = () => row.scrollWidth;
+    if (need() > room) {
+      const k = Math.max(0.78, room / need());
+      row.style.width = `${100 / k}%`;
+      row.style.transform = `scale(${k})`;
+      row.style.transformOrigin = "center";
+    }
+    const kids = [...row.children];
+    while (row.scrollWidth > row.clientWidth + 1 && kids.length > 2) {
+      const el = kids.pop();
+      if ((_a = el.matches) == null ? void 0 : _a.call(el, ".tk-ico,.tk-big,.tk-main,.tk-photo")) break;
+      el.hidden = true;
+      el.dataset.fitHidden = "1";
+    }
   },
   start() {
     clearInterval(this.timer);
@@ -929,6 +959,154 @@ const Ticker = {
     this.rebuild();
     setInterval(() => this.refreshSlow(), 15 * 60 * 1e3);
     setInterval(() => this.refreshFast(), 60 * 1e3);
+    window.addEventListener("resize", () => this.fit());
+  }
+};
+const Saver = {
+  last: Date.now(),
+  on: false,
+  art: [],
+  artAt: 0,
+  layer: 0,
+  timers: [],
+  prevFocus: null,
+  mins() {
+    return Number(store.get("saver", 10)) || 0;
+  },
+  bg() {
+    return store.get("saverbg", "art");
+  },
+  busy() {
+    return !!(Player.info && !video.paused) || $("#login") && !$("#login").hidden || document.hidden;
+  },
+  poke() {
+    this.last = Date.now();
+  },
+  async loadArt() {
+    if (this.art.length && Date.now() - this.artAt < 30 * 60 * 1e3) return;
+    const lists = await Promise.all(["/api/library/movies", "/api/library/shows"].map((u) => api(u).catch(() => [])));
+    const all = lists.flat().filter((x) => x.fanart_url || x.art_url);
+    all.sort(() => Math.random() - 0.5);
+    this.art = all.slice(0, 40).map((x) => x.fanart_url || x.art_url);
+    this.artAt = Date.now();
+  },
+  nextBg() {
+    if (this.bg() !== "art" || !this.art.length) return;
+    const layers = $$("#saver .sv-bg"), url = this.art[Math.floor(Math.random() * this.art.length)];
+    const img = new Image();
+    img.onload = () => {
+      const el = layers[this.layer ^= 1];
+      el.style.backgroundImage = `url("${url}")`;
+      layers.forEach((l, i) => l.classList.toggle("show", i === this.layer));
+    };
+    img.src = url;
+  },
+  clock() {
+    const now = /* @__PURE__ */ new Date();
+    $("#sv-time").textContent = now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    $("#sv-date").textContent = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+    const w = Ticker.data.weather;
+    $("#sv-weather").replaceChildren(...(w == null ? void 0 : w.configured) && !w.unavailable ? [
+      h("span", { class: "sv-wico" }, w.icon || ""),
+      h("span", { class: "sv-wtemp" }, `${w.temp}${w.unit}`),
+      h("span", { class: "sv-wtext" }, `${w.text} · ${w.place}`)
+    ] : []);
+    const wc = Ticker.clocks || [];
+    $("#sv-world").replaceChildren(...wc.slice(0, 4).map((c) => h("span", {}, h("em", {}, c.name), Ticker.fmtTime(c.tz))));
+  },
+  info() {
+    var _a;
+    const pages = Ticker.pages().filter((p) => !["clock", "world", "weather", "server"].includes(p.id));
+    if (!pages.length) {
+      $("#sv-info").replaceChildren();
+      return;
+    }
+    this.i = (((_a = this.i) != null ? _a : -1) + 1) % pages.length;
+    const box = $("#sv-info");
+    box.classList.remove("in");
+    box.replaceChildren(pages[this.i].render());
+    void box.offsetWidth;
+    box.classList.add("in");
+  },
+  drift() {
+    const c = $("#sv-card"), x = Math.round((Math.random() - 0.5) * 18), y = Math.round((Math.random() - 0.5) * 16);
+    c.style.transform = `translate(${x}vw, ${y}vh)`;
+  },
+  async show() {
+    var _a, _b;
+    if (this.on) return;
+    this.on = true;
+    this.shownAt = Date.now();
+    this.prevFocus = document.activeElement;
+    (_b = (_a = document.activeElement) == null ? void 0 : _a.blur) == null ? void 0 : _b.call(_a);
+    $("#saver").hidden = false;
+    requestAnimationFrame(() => $("#saver").classList.add("up"));
+    Ticker.refreshSlow();
+    Ticker.refreshFast();
+    this.clock();
+    this.info();
+    this.drift();
+    await this.loadArt().catch(() => {
+    });
+    this.nextBg();
+    this.timers = [setInterval(() => this.clock(), 1e3), setInterval(() => this.info(), 1e4), setInterval(() => this.nextBg(), 25e3), setInterval(() => this.drift(), 45e3)];
+  },
+  hide() {
+    var _a, _b, _c, _d;
+    if (!this.on) return;
+    this.on = false;
+    this.timers.forEach(clearInterval);
+    this.timers = [];
+    $("#saver").classList.remove("up");
+    $("#saver").hidden = true;
+    this.poke();
+    if ((_a = this.prevFocus) == null ? void 0 : _a.isConnected) (_c = (_b = this.prevFocus).focus) == null ? void 0 : _c.call(_b, { preventScroll: true });
+    (_d = TV.focusSoon) == null ? void 0 : _d.call(TV, 80);
+  },
+  init() {
+    $("#saver-mins").value = String(this.mins());
+    $("#saver-bg").value = this.bg();
+    $("#saver-mins").addEventListener("change", (e) => {
+      store.set("saver", Number(e.target.value));
+      this.poke();
+      toast(Number(e.target.value) ? `Screensaver starts after ${e.target.value} minutes` : "Screensaver off");
+    });
+    $("#saver-bg").addEventListener("change", (e) => {
+      store.set("saverbg", e.target.value);
+    });
+    $("#saver-preview").addEventListener("click", () => {
+      this.show();
+    });
+    const wake = (e) => {
+      var _a, _b;
+      if (this.on) {
+        if (e.type === "pointermove" && Date.now() - (this.shownAt || 0) < 600) return;
+        (_a = e.preventDefault) == null ? void 0 : _a.call(e);
+        (_b = e.stopImmediatePropagation) == null ? void 0 : _b.call(e);
+        this.hide();
+        return;
+      }
+      this.poke();
+    };
+    for (const t of ["keydown", "pointerdown", "wheel", "touchstart"]) window.addEventListener(t, wake, true);
+    let lastMove = 0;
+    window.addEventListener("pointermove", (e) => {
+      const n = Date.now();
+      if (n - lastMove < 500) return;
+      lastMove = n;
+      wake(e);
+    }, true);
+    setInterval(() => {
+      const m = this.mins();
+      if (!m || this.on || this.busy()) {
+        if (this.busy()) this.poke();
+        return;
+      }
+      if (!$("#app").hidden && Date.now() - this.last > m * 6e4) {
+        this.shownAt = Date.now();
+        this.show();
+      }
+    }, 5e3);
   }
 };
 const TickerSettings = {
@@ -5836,6 +6014,7 @@ async function start() {
   try {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
     Ticker.init();
+    Saver.init();
   } catch (e) {
     return;
   }

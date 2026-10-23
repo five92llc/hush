@@ -785,3 +785,29 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .prefs-back { margin-bottom: 1rem; }
 .prefs-card[hidden] { display: none; }
 .prefs.in-section .prefs-card > h2:first-child { display: none; }
+
+/* ---------- screensaver ---------- */
+.saver { position: fixed; inset: 0; z-index: 9000; background: #05060b; color: #fff; overflow: hidden; cursor: none; opacity: 0; transition: opacity 1.2s ease; }
+.saver.up { opacity: 1; }
+.sv-bg { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 3s ease; transform: scale(1.04); }
+.sv-bg.show { opacity: .55; animation: sv-pan 40s ease-in-out infinite alternate; }
+@keyframes sv-pan { from { transform: scale(1.04) translate(0, 0); } to { transform: scale(1.14) translate(-1.5%, -1%); } }
+.sv-shade { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 70%, rgba(0,0,0,.55), rgba(0,0,0,.2) 55%, rgba(0,0,0,.6)); }
+.sv-card { position: absolute; left: 6vw; bottom: 9vh; max-width: 80vw; transition: transform 6s ease-in-out; text-shadow: 0 2px 18px rgba(0,0,0,.6); }
+.sv-time { font-size: clamp(4rem, 15vw, 11rem); font-weight: 700; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sv-date { font-size: clamp(1.1rem, 2.6vw, 2rem); opacity: .85; margin: .3rem 0 1rem; }
+.sv-weather { display: flex; align-items: center; gap: .7rem; font-size: clamp(1.1rem, 2.4vw, 1.8rem); } .sv-wico { font-size: 1.4em; } .sv-wtemp { font-weight: 700; } .sv-wtext { opacity: .8; }
+.sv-info { margin-top: 1.1rem; min-height: 2.6rem; font-size: clamp(1rem, 2vw, 1.5rem); } .sv-info.in { animation: tk-in .8s cubic-bezier(.2,.8,.2,1); }
+.sv-info .tk-row { white-space: normal; flex-wrap: wrap; } .sv-info .tk-ico { font-size: 1.6em; } .sv-info .tk-big { font-size: 1.4em; }
+.sv-info .tk-photo { width: 7rem; height: 4.4rem; } .sv-info .tk-main, .sv-info .tk-wrap { max-width: 40rem; -webkit-line-clamp: 2; }
+.sv-world { display: flex; gap: 1.6rem; margin-top: 1.2rem; opacity: .8; font-size: clamp(.9rem, 1.6vw, 1.2rem); font-variant-numeric: tabular-nums; } .sv-world em { font-style: normal; opacity: .65; margin-right: .4rem; }
+
+/* top bar: brand left, panel in the middle of the bar, actions right */
+.topbar { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, 60rem) minmax(max-content, 1fr); gap: .8rem; justify-content: initial; }
+.topbar > :first-child { justify-self: start; } .topbar-actions { justify-self: end; flex-wrap: nowrap; }
+.ticker { justify-self: stretch; width: auto; min-width: 0; margin: 0; max-width: none; }
+.tk-row { justify-content: center; }
+.tk-slide { overflow: hidden; }
+.ticker:not([hidden]) ~ .topbar-actions { min-width: 0; }
+@media (max-width: 899px) { html:not(.tv) .topbar { display: flex; justify-content: space-between; } }
+.sv-info .tk-row { justify-content: flex-start; }

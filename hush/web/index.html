@@ -120,6 +120,12 @@
       <h2>Display</h2>
       <div class="pref"><div><strong>Big screen mode</strong><p class="hint">Bigger and made for a remote control. A TV starts in it automatically.</p></div>
         <button id="tv-toggle" class="btn subtle" type="button" aria-pressed="false">Big screen</button></div>
+      <div class="pref"><div><strong>Screensaver</strong><p class="hint">When nothing is playing and nobody is pressing anything, show the clock, weather and pictures from your library. Any key brings Hush back.</p></div>
+        <select id="saver-mins" aria-label="Start the screensaver after"><option value="0">Off</option><option value="2">After 2 minutes</option><option value="5">After 5 minutes</option>
+          <option value="10">After 10 minutes</option><option value="20">After 20 minutes</option><option value="30">After 30 minutes</option></select></div>
+      <div class="pref"><div><strong>Screensaver pictures</strong><p class="hint">Fan art from your library, or a plain dark background.</p></div>
+        <select id="saver-bg" aria-label="Screensaver background"><option value="art">Library artwork</option><option value="plain">Plain</option></select>
+        <button id="saver-preview" class="btn subtle" type="button">Preview</button></div>
       <div class="pref admin-only"><div><strong>Phone remote</strong><p class="hint">Control this screen from your phone.</p></div>
         <button id="remote-btn" class="btn subtle" type="button" aria-haspopup="dialog">Phone remote</button></div>
     </div>
@@ -521,6 +527,16 @@
   <ul id="match-results" class="match-results"></ul>
 </dialog>
 
+<div id="saver" class="saver" hidden aria-hidden="true">
+  <div class="sv-bg a"></div><div class="sv-bg b"></div><div class="sv-shade"></div>
+  <div id="sv-card" class="sv-card">
+    <div id="sv-time" class="sv-time"></div>
+    <div id="sv-date" class="sv-date"></div>
+    <div id="sv-weather" class="sv-weather"></div>
+    <div id="sv-info" class="sv-info"></div>
+    <div id="sv-world" class="sv-world"></div>
+  </div>
+</div>
 <div id="toast" class="toast" role="status" hidden></div>
 </body>
 </html>
