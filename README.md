@@ -1,8 +1,10 @@
-# Hush
+# Hush Media Centre
 
-A self-hosted media player that mutes profanity while you watch.
+A home media server that plays videos, movies and TV with a profanity blocker.
 
-Hush runs on a home server or NAS and plays your movies, shows and music in any browser. It plays files from your NAS shares, folders, links, DLNA servers, Jellyfin and Plex.
+Hush runs on a home server or NAS and plays your movies, shows, live TV and music in any browser, on TVs and on phones. Every word on your list is muted as it plays.
+
+It plays files from your NAS shares, folders, links, DLNA servers, Jellyfin and Plex.
 
 Each title gets scanned once. Hush transcribes the dialogue with Whisper, or reads the subtitle track, and marks every word on your list. From then on those moments are muted, or covered with a soft tone, as the video plays.
 

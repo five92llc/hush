@@ -4,7 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="dark">
-<title>Hush</title>
+<title>Hush Media Centre</title>
+<meta name="description" content="Hush Media Centre: a home media server that plays videos, movies and TV with a profanity blocker.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23191A2C'/%3E%3Cpath d='M9 13h4l5-4v14l-5-4H9z' fill='%23F0B04A'/%3E%3Cpath d='M21 12l6 8M27 12l-6 8' stroke='%23A99CF0' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/static/styles.css">
 <script src="/static/diag.js"></script>
@@ -18,7 +19,8 @@
 <main id="login" class="login" hidden>
   <form id="login-form" class="login-card">
     <h1 class="brand-mark">Hush</h1>
-    <p class="login-lede">Movies and music, without the language.</p>
+    <p class="brand-sub">Media Centre</p>
+    <p class="login-lede">A home media server that plays videos, movies and TV with a profanity blocker.</p>
     <label for="password">Password</label>
     <input id="password" type="password" autocomplete="current-password" required autofocus>
     <p id="login-error" class="error" role="alert"></p>
@@ -149,6 +151,7 @@
     </div>
     <div class="prefs-card" id="about-card">
       <h2>About</h2>
+      <p class="hint">Hush Media Centre: a home media server that plays videos, movies and TV with a profanity blocker.</p>
       <div class="pref"><div><strong>Hush server</strong><p id="server-info" class="hint"></p></div>
         <button id="about-reload-btn" class="btn subtle" type="button">Reload page</button></div>
       <div class="pref" id="app-card" hidden><div><strong>Hush app</strong><p id="app-info" class="hint"></p></div>
