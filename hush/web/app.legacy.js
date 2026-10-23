@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 ad14a3153d037e2d3f6f0467799ce13eb75007a1883b6ba413df6cffb7a3c290) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 b2a0a21515d55979db0a67b33e0bba309523c86fa941ec127259c1aa4212d44d) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -3369,7 +3369,7 @@ const Player = {
   async restartLive() {
     var _a;
     if (!(((_a = this.info) == null ? void 0 : _a.live) && this.chan)) return;
-    WaitScreen.start("Switching…", this.wantsLiveFilter() ? 25 : 6);
+    WaitScreen.start(this.wantsLiveFilter() ? isKids() || this.filterOn ? "Starting the language filter" : "Starting captions" : "Filter off: restarting the channel", this.wantsLiveFilter() ? 25 : 6);
     video.pause();
     await this.startAt(0);
     video.play().catch(() => {
@@ -3513,8 +3513,9 @@ const Player = {
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
       let url;
       if (this.wantsLiveFilter()) {
-        WaitScreen.label("Starting the language filter", 25);
-        this.message("Starting the language filter (about 25 seconds)…");
+        const what = isKids() || this.filterOn ? "the language filter" : "captions";
+        WaitScreen.label(`Starting ${what}`, 25);
+        this.message(`Starting ${what} (about 25 seconds)…`);
         try {
           url = await this.openLiveFilter();
           this.liveFiltered = true;
@@ -3524,7 +3525,7 @@ const Player = {
             this.message(err.message, true);
             return;
           }
-          toast(`The filter couldn't start (${err.message}). Playing the channel without it.`);
+          toast(`${isKids() || this.filterOn ? "The filter" : "Captions"} couldn't start (${err.message}). Playing the channel as it is.`);
           this.releaseLiveFilter();
           url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
         }
@@ -4996,14 +4997,14 @@ const TV = {
         cross = Math.abs(dy);
       } else if (dir === "down") {
         if (dy <= 1) continue;
-        primary = dy;
+        primary = Math.max(0, r.top - c.bottom) + dy * 0.05;
         cross = Math.abs(dx);
       } else {
         if (dy >= -1) continue;
-        primary = -dy;
+        primary = Math.max(0, c.top - r.bottom) + -dy * 0.05;
         cross = Math.abs(dx);
       }
-      const score = primary + cross * 2.4;
+      const score = primary + cross * (dir === "up" || dir === "down" ? 0.35 : 2.4);
       if (score < bestScore) {
         bestScore = score;
         best = el;

@@ -2133,7 +2133,7 @@ const Player = {
   /** A live channel changes between plain and filtered/captioned: show the tuning screen, then start it again. */
   async restartLive() {
     if (!(this.info?.live && this.chan)) return;
-    WaitScreen.start("Switching…", this.wantsLiveFilter() ? 25 : 6);
+    WaitScreen.start(this.wantsLiveFilter() ? (isKids() || this.filterOn ? "Starting the language filter" : "Starting captions") : "Filter off: restarting the channel", this.wantsLiveFilter() ? 25 : 6);
     video.pause();
     await this.startAt(0);
     video.play().catch(() => {});
@@ -2234,13 +2234,14 @@ const Player = {
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
       let url;
       if (this.wantsLiveFilter()) {
-        WaitScreen.label("Starting the language filter", 25);
-        this.message("Starting the language filter (about 25 seconds)…");
+        const what = isKids() || this.filterOn ? "the language filter" : "captions";
+        WaitScreen.label(`Starting ${what}`, 25);
+        this.message(`Starting ${what} (about 25 seconds)…`);
         try { url = await this.openLiveFilter(); this.liveFiltered = true; }
         catch (err) {
           if (tok !== this.openToken) return;
           if (isKids()) { this.message(err.message, true); return; }
-          toast(`The filter couldn't start (${err.message}). Playing the channel without it.`);   // never leave the screen dead
+          toast(`${isKids() || this.filterOn ? "The filter" : "Captions"} couldn't start (${err.message}). Playing the channel as it is.`);   // never leave the screen dead
           this.releaseLiveFilter();
           url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
         }
@@ -3246,9 +3247,9 @@ const TV = {
       let primary, cross;
       if (dir === "right") { if (r.left < c.right - c.width * 0.4 && dx <= 0) continue; if (dx <= 1) continue; primary = dx; cross = Math.abs(dy); }
       else if (dir === "left") { if (dx >= -1) continue; primary = -dx; cross = Math.abs(dy); }
-      else if (dir === "down") { if (dy <= 1) continue; primary = dy; cross = Math.abs(dx); }
-      else { if (dy >= -1) continue; primary = -dy; cross = Math.abs(dx); }
-      const score = primary + cross * 2.4;
+      else if (dir === "down") { if (dy <= 1) continue; primary = Math.max(0, r.top - c.bottom) + dy * 0.05; cross = Math.abs(dx); }      // the gap between edges, so a stack of full-width rows is visited one by one
+      else { if (dy >= -1) continue; primary = Math.max(0, c.top - r.bottom) + -dy * 0.05; cross = Math.abs(dx); }
+      const score = primary + cross * (dir === "up" || dir === "down" ? 0.35 : 2.4);
       if (score < bestScore) { bestScore = score; best = el; }
     }
     if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: dir === "up" || dir === "down" ? "center" : "nearest", inline: "nearest" }); }
