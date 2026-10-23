@@ -3097,7 +3097,9 @@ const TV = {
     const roots = this.roots();
     const main = roots.filter((r) => r.matches?.("#library, #tasks, #prefs, dialog, .guide, .panel, #controls"));
     const list = this.focusables(main.length ? main : roots);
-    const target = list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
+    const home = !this.launched && list.find((el) => el.matches('.tv-nav a[href="#/home"]'));
+    this.launched = true;                                                  // the very first stop at launch is Home
+    const target = home || list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
     target?.focus({ preventScroll: true });
   },
   focusSoon(delay = 250) {
@@ -3115,9 +3117,16 @@ const TV = {
     const cur = document.activeElement;
     if (!cur || cur === document.body || !cands.includes(cur)) { this.focusFirst(); return; }
     const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+    // Sideways moves stay in the row you are on, and up/down stay in your column, when anything is there; only then look further afield.
+    const sameLine = (r) => (dir === "left" || dir === "right")
+      ? r.top < c.bottom - c.height * 0.3 && r.bottom > c.top + c.height * 0.3
+      : r.left < c.right - c.width * 0.3 && r.right > c.left + c.width * 0.3;
+    const pool = cands.filter((el) => el !== cur && !cur.contains(el) && !el.contains(cur));
+    const inLine = pool.some((el) => { const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      return sameLine(r) && (dir === "right" ? x > cx + 1 : dir === "left" ? x < cx - 1 : dir === "down" ? y > cy + 1 : y < cy - 1); });
     let best = null, bestScore = Infinity;
-    for (const el of cands) {
-      if (el === cur || cur.contains(el) || el.contains(cur)) continue;
+    for (const el of pool) {
+      if (inLine && !sameLine(el.getBoundingClientRect())) continue;
       const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
       let primary, cross;
       if (dir === "right") { if (r.left < c.right - c.width * 0.4 && dx <= 0) continue; if (dx <= 1) continue; primary = dx; cross = Math.abs(dy); }

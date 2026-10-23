@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 606b60743ae50197368cfed96d3ed3dba7ed72213411ffcc477e045c4794577a) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 11904d315bd7b3132c7a37a2b2b630ed105ec7760a67aa17722e33d7ea3c0864) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -4742,7 +4742,9 @@ const TV = {
       return (_a = r.matches) == null ? void 0 : _a.call(r, "#library, #tasks, #prefs, dialog, .guide, .panel, #controls");
     });
     const list = this.focusables(main.length ? main : roots);
-    const target = list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
+    const home = !this.launched && list.find((el) => el.matches('.tv-nav a[href="#/home"]'));
+    this.launched = true;
+    const target = home || list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
     target == null ? void 0 : target.focus({ preventScroll: true });
   },
   focusSoon(delay = 250) {
@@ -4766,9 +4768,15 @@ const TV = {
       return;
     }
     const c = cur.getBoundingClientRect(), cx = c.left + c.width / 2, cy = c.top + c.height / 2;
+    const sameLine = (r) => dir === "left" || dir === "right" ? r.top < c.bottom - c.height * 0.3 && r.bottom > c.top + c.height * 0.3 : r.left < c.right - c.width * 0.3 && r.right > c.left + c.width * 0.3;
+    const pool = cands.filter((el) => el !== cur && !cur.contains(el) && !el.contains(cur));
+    const inLine = pool.some((el) => {
+      const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2;
+      return sameLine(r) && (dir === "right" ? x > cx + 1 : dir === "left" ? x < cx - 1 : dir === "down" ? y > cy + 1 : y < cy - 1);
+    });
     let best = null, bestScore = Infinity;
-    for (const el of cands) {
-      if (el === cur || cur.contains(el) || el.contains(cur)) continue;
+    for (const el of pool) {
+      if (inLine && !sameLine(el.getBoundingClientRect())) continue;
       const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
       let primary, cross;
       if (dir === "right") {
