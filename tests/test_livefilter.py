@@ -167,3 +167,15 @@ def test_a_kids_session_is_refused_when_nothing_can_check_the_audio(tmp_path, mo
     time.sleep(1.0)
     assert s.stop_event.is_set() and s.state == "nocaptions" and s.published == []
     live.stop_all()
+
+
+def test_captions_feed_drops_rolled_up_repeats_and_chunks_long_lines(tmp_path):
+    live = livefilter.LiveFilter(Config(data_dir=tmp_path), WordList(), tmp_path / "lf", realtime_inputs=True)
+    sess = livefilter.Session(live, "k|*|0", tmp_path / "lf" / "m", ["-i", "x"], None, False)
+    sess._caption(0, 2, "good evening and welcome")
+    sess._caption(2, 4, "and welcome to the news tonight")        # roll-up: "and welcome" was already shown
+    out = sess.captions_after(0)
+    assert [c["text"] for c in out["cues"]] == ["good evening and welcome", "to the news tonight"]
+    assert out["next"] == 2 and sess.captions_after(out["next"])["cues"] == []
+    sess._caption(4, 8, " ".join(f"w{i}" for i in range(20)))
+    assert max(len(c["text"].split()) for c in sess.captions_after(2)["cues"]) <= livefilter.CAPTION_WORDS

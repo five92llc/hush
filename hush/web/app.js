@@ -427,32 +427,28 @@ function jobText(j) {
   if (j.status === "queued") return "Waiting to start";
   return `${j.stage[0].toUpperCase()}${j.stage.slice(1)}, ${Math.round(j.progress * 100)}%`;
 }
-/** Give the channel that is playing a number of your own. A number someone else has can be swapped. */
-async function changeChannelNumber() {
-  const cur = Queue.list[Queue.pos];
-  if (!cur?.chan) return;
-  const dlg = h("dialog", { class: "dialog" });
-  const input = h("input", { type: "number", min: 1, max: 99999, value: cur.number ?? "", "aria-label": "Channel number" });
-  const msg = h("p", { class: "hint" }, `${splitTags(cur.title).title} is channel ${cur.number ?? "?"}. Channel numbers never change on their own.`);
-  const save = async (swap = false) => {
-    try {
-      const r = await api(`/api/live/channels/${cur.chan}/number`, { method: "PUT", body: { number: Number(input.value), swap } });
-      Queue.list.forEach((c) => { if (c.chan === cur.chan) c.number = r.number; });
-      Lineup.list = null; dlg.close(); Queue.banner();
-      toast(r.swapped ? `Channel ${r.number}. ${r.swapped} took its old number.` : `Now channel ${r.number}`);
-    } catch (err) {
-      if (err.status === 409) { msg.textContent = `${err.message}. Swap them?`; swapBtn.hidden = false; }
-      else msg.textContent = err.message;
+/** The channels pop-out: type a channel number to tune to it, or give the channel that is playing a number of your own. */
+$("#guide-num").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const n = Math.floor(Number($("#guide-num-in").value));
+  if (n > 0) { Queue.jumpToNumber(n); $("#guide-num-in").value = ""; guide.close(); }
+});
+$("#guide-num-set").addEventListener("click", async () => {
+  const cur = Queue.list[Queue.pos], n = Math.floor(Number($("#guide-num-in").value));
+  if (!cur?.chan || !(n > 0)) { toast("Type the number you want in the box first"); return; }
+  const put = (swap) => api(`/api/live/channels/${cur.chan}/number`, { method: "PUT", body: { number: n, swap } });
+  try {
+    let r;
+    try { r = await put(false); }
+    catch (err) {
+      if (err.status !== 409 || !confirm(`${err.message}. Swap the two channels' numbers?`)) throw err;
+      r = await put(true);
     }
-  };
-  const swapBtn = h("button", { class: "btn primary", type: "button", hidden: true, onclick: () => save(true) }, "Swap");
-  dlg.append(h("h2", {}, "Channel number"), msg, h("div", { class: "row" }, input),
-    h("div", { class: "row" }, h("button", { class: "btn primary", type: "button", onclick: () => save(false) }, "Save"), swapBtn,
-      h("button", { class: "btn ghost", type: "button", onclick: () => dlg.close() }, "Cancel")));
-  dlg.addEventListener("close", () => dlg.remove());
-  document.body.append(dlg); dlg.showModal(); input.focus();
-}
-$("#chan-num-btn").addEventListener("click", changeChannelNumber);
+    Queue.list.forEach((c) => { if (c.chan === cur.chan) c.number = r.number; });
+    Lineup.list = null; $("#guide-num-in").value = ""; Queue.banner(); guide.reload?.();
+    toast(r.swapped ? `Channel ${r.number}. ${r.swapped} took its old number.` : `Now channel ${r.number}`);
+  } catch (err) { toast(err.message); }
+});
 
 /** Settings -> Tuning-in screen: where you live, for the weather shown while a channel opens. */
 const WeatherCard = {
@@ -1890,7 +1886,7 @@ const Player = {
     if (this.chan) this.altTried.add(this.chan);
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
-    $("#guide-btn").hidden = !this.chan; $("#chan-num-btn").hidden = !this.chan; guide.close();
+    $("#guide-btn").hidden = !this.chan; $("#panel-btn").hidden = !!this.chan; guide.close();
     if (this.chan) Queue.banner();
     $("#player").hidden = false;
     if (!keepMini) { $("#library").hidden = true; document.body.style.overflow = "hidden"; }
@@ -1922,6 +1918,10 @@ const Player = {
     $("#timeline").setAttribute("aria-valuemax", Math.round(this.duration));
     this.setupTracks();
     this.applyFilterButton();
+    this.captionsOn = !!store.get(pk("cc"), false); this.applyCaptionButton();
+    const music = info.kind === "audio" && !info.live;                    // shuffle and repeat only make sense for music
+    $("#shuffle-btn").hidden = $("#repeat-btn").hidden = !music;
+    if (this.captionsOn && !info.live) this.startFileCaptions().then((ok) => { if (!ok) { this.captionsOn = false; this.applyCaptionButton(); } });
     $("#mode-select").value = this.bleep ? "bleep" : "mute";
     $("#autoplay-toggle").checked = autoplay();
     const resumeAt = info.resume && !info.resume.finished && info.resume.position > 20 ? info.resume.position : 0;
@@ -1964,9 +1964,63 @@ const Player = {
     const sSel = $("#sub-select");
     sSel.replaceChildren(h("option", { value: "" }, "Off"),
       ...p.subtitles.map((s) => h("option", { value: s.index }, s.label || `Subtitles ${s.index}`)));
-    api(`/api/sidecars/${this.src}/${this.item}`).then((list) => {
+    this.tracksReady = api(`/api/sidecars/${this.src}/${this.item}`).then((list) => {
       for (const s of list) sSel.append(h("option", { value: s.id }, s.label));
     }).catch(() => {});
+  },
+
+  /* ---------- captions: one button for every kind of playback ---------- */
+  captionsOn: false,
+  applyCaptionButton() { const b = $("#cc-btn"); b.setAttribute("aria-pressed", String(this.captionsOn)); b.title = this.captionsOn ? "Captions on (C)" : "Captions off (C)"; },
+  /** Live channels: lines from the filter session (captions in the stream, or recognised speech), shown in step with the picture. */
+  async pollCaptions(sid) {
+    clearTimeout(this.capTimer);
+    const tick = async () => {
+      if (this.liveSid !== sid || !this.captionsOn) return;
+      try {
+        const r = await api(`/api/livefilter/${sid}/captions?after=${this.capAfter || 0}`);
+        const t = video.currentTime || 0;
+        this.subCues = (this.subCues || []).filter((c) => c.end > t - 15);
+        for (const c of r.cues) this.subCues.push({ start: t + c.show_in, end: t + c.show_in + c.dur, text: c.text });
+        this.capAfter = r.next;
+      } catch { /* try again on the next beat */ }
+      this.capTimer = setTimeout(tick, 1000);
+    };
+    tick();
+  },
+  /** Movies and shows: a subtitle track (English first), or the words from the scan when there is none. */
+  async startFileCaptions() {
+    await this.tracksReady;
+    const sel = $("#sub-select");
+    const opts = [...sel.options].filter((o) => o.value);
+    const pick = opts.find((o) => /\b(en|eng|english)\b/i.test(o.textContent)) || opts[0];
+    if (pick) { sel.value = pick.value; await this.loadSubs(pick.value); return true; }
+    try {
+      const c = await api(`/api/captions/${this.src}/${this.item}`);
+      if (c.transcript) {
+        const vtt = await api(`/api/transcript/${c.key}.vtt?censor=${this.filterOn ? 1 : 0}`);
+        this.subCues = parseVTT(vtt); sel.value = ""; return true;
+      }
+    } catch { /* none */ }
+    return false;
+  },
+  async setCaptions(on) {
+    this.captionsOn = !!on; store.set(pk("cc"), this.captionsOn); this.applyCaptionButton();
+    clearTimeout(this.capTimer);
+    if (!this.info) return;
+    if (!on) { this.subCues = null; $("#subs").replaceChildren(); $("#sub-select").value = ""; }
+    if (this.info.live && this.chan) {
+      if (this.wantsLiveFilter() !== !!this.liveSid) { this.startAt(0).then(() => video.play().catch(() => {})); }   // the delayed, captioned stream starts or stops
+      else if (on && this.liveSid) { this.subCues = []; this.capAfter = 0; this.pollCaptions(this.liveSid); }
+      toast(on ? "Captions on" : "Captions off");
+      return;
+    }
+    if (on && !(await this.startFileCaptions())) {
+      this.captionsOn = false; store.set(pk("cc"), false); this.applyCaptionButton();
+      toast("No captions for this one. Scan it, and Hush can make captions from its dialogue.");
+      return;
+    }
+    toast(on ? "Captions on" : "Captions off");
   },
 
   streamUrl(start) {
@@ -1980,12 +2034,14 @@ const Player = {
   /** True when the server (not the browser) is muting the filtered words. */
   serverMuted() { return (this.hls && this.mode !== "direct") || this.liveFiltered; },
   /** Live channels are filtered by their captions on the server, about 10 seconds behind the broadcast. */
-  wantsLiveFilter() { return !!(this.info?.live && this.chan && (isKids() || this.filterOn)); },
+  wantsLiveFilter() { return !!(this.info?.live && this.chan && (isKids() || this.filterOn || this.captionsOn)); },
   async openLiveFilter() {
-    const body = { src: this.src, item: this.item, cats: [...this.cats].join(","), tab: TAB };
+    const body = { src: this.src, item: this.item, cats: [...this.cats].join(","), tab: TAB, mute: isKids() || this.filterOn };
     const r = await api("/api/livefilter/open", { method: "POST", body });
     this.liveSid = r.sid;
+    this.subCues = []; this.capAfter = 0;
     this.watchLiveFilter(r.sid, r.status);
+    if (this.captionsOn) this.pollCaptions(r.sid);
     return this.hls ? r.hls : r.mp4;
   },
   /** Tells the person what the filter found, once: no captions means nothing can be filtered on that channel. */
@@ -1995,9 +2051,8 @@ const Player = {
     const look = async (st) => {
       if (this.liveSid !== sid) return;
       try { st = st || await api(`/api/livefilter/${sid}/status`); } catch { return; }
-      if (st.state === "nocaptions" && !told && !isKids()) { told = true; toast("This channel has no captions and can't be listened to, so the language filter can't work on it. It is playing unfiltered."); }
-      else if (st.mode === "asr" && !told) { told = true; toast("No captions on this channel, so Hush is listening to it instead (about 10 seconds behind live; a little less precise)."); }
-      else if (st.mode === "captions" && !told) { told = true; toast("Language filter on: captions found (about 10 seconds behind live)."); }
+      if (st.state === "nocaptions" && !told && !isKids()) { told = true; toast("Hush can't listen to this channel right now, so it is playing without captions or the language filter."); }
+      else if ((st.mode === "asr" || st.mode === "captions") && !told) { told = true; toast(`${this.filterOn || isKids() ? "Language filter on" : "Captions on"} (about 10 seconds behind live).`); }
       if (st.behind && !warned) { warned = true; toast("The filter fell behind on this channel for a moment, so a few words may not have been filtered."); }
       this.lfTimer = setTimeout(() => look(), told ? 30000 : 6000);
     };
@@ -2221,7 +2276,7 @@ const Player = {
     $("#library").hidden = true; $("#tasks").hidden = true; $("#prefs").hidden = true; document.body.style.overflow = "hidden";
     const back = (S.libraryHash || "").replace(/^#\/?/, "").split("/")[0];
     $("#back-btn").textContent = { live: "Back to Live TV", movies: "Back to Movies", title: "Back to Movies", shows: "Back to TV shows", show: "Back to the show", b: "Back to the folder" }[back] || "Back to library";
-    if (this.chan) { $("#guide-btn").hidden = false; $("#chan-num-btn").hidden = false; Queue.banner(); }
+    if (this.chan) { $("#guide-btn").hidden = false; $("#panel-btn").hidden = true; Queue.banner(); }
   },
   /** Leave mini mode without touching what is playing (used when the player closes or is replaced). */
   /** One button for both: the little player goes full screen, and the full-screen player becomes the little one. */
@@ -2657,7 +2712,8 @@ $("#filter-btn").addEventListener("click", () => {
   if (Player.info?.live && Player.chan) Player.startAt(0).then(() => video.play().catch(() => {}));      // a live channel restarts with or without the live filter
 });
 $("#mode-select").addEventListener("change", (e) => { Player.bleep = e.target.value === "bleep"; store.set(pk("mode"), e.target.value); Player.Audio.reset(); Player.renderPanel(); });
-$("#sub-select").addEventListener("change", (e) => Player.loadSubs(e.target.value));
+$("#sub-select").addEventListener("change", (e) => { Player.loadSubs(e.target.value); Player.captionsOn = !!e.target.value; store.set(pk("cc"), Player.captionsOn); Player.applyCaptionButton(); });
+$("#cc-btn").addEventListener("click", () => Player.setCaptions(!Player.captionsOn));
 $("#audio-select").addEventListener("change", async (e) => {
   const t = Player.now();
   Player.audioIndex = Number(e.target.value);
@@ -2764,7 +2820,8 @@ document.addEventListener("keydown", (e) => {
     if (zapKeys[k]) { e.preventDefault(); zapKeys[k](); idle.bump(); return; }
   }
   const map = {
-    n: () => Queue.next(), p: () => Queue.prev(), s: () => Queue.toggleShuffle(), r: () => Queue.cycleRepeat(),
+    n: () => Queue.next(), p: () => Queue.prev(), s: () => { if (!$("#shuffle-btn").hidden) Queue.toggleShuffle(); }, r: () => { if (!$("#repeat-btn").hidden) Queue.cycleRepeat(); },
+    c: () => Player.setCaptions(!Player.captionsOn),
     " ": togglePlay, k: togglePlay, w: () => Player.toggleMini(), f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10), l: () => Player.seek(Player.now() + 10),
     ...((IS_TV_DEVICE || TV.on) ? {} : { arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10) }),
@@ -3282,6 +3339,7 @@ const Remote = {
       case "home": go("#/home"); break;
       case "guide": if (Player.chan) guide.toggle(); break;
       case "mini": if (playing) Player.toggleMini(); break;
+      case "captions": if (playing) Player.setCaptions(!Player.captionsOn); break;
       case "text": this.setText(a); break;
       case "tv": TV.set(a.on !== false); break;
       case "nav": if (typeof a.hash === "string" && a.hash.startsWith("#/") && !a.hash.startsWith("#/p/")) go(a.hash); break;

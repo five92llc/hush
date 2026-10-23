@@ -19,7 +19,7 @@ import uuid
 from fastapi import WebSocket
 
 COMMANDS = {"key", "playpause", "play", "pause", "seek", "seekto", "next", "prev", "channel", "digits", "volume", "mute",
-            "filter", "stop", "home", "guide", "mini", "open", "nav", "tv", "fullscreen", "text"}
+            "filter", "stop", "home", "guide", "mini", "open", "nav", "tv", "fullscreen", "text", "captions"}
 MAX_STATE_BYTES = 4096
 _ID = re.compile(r"[^A-Za-z0-9_-]")
 

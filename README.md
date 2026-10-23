@@ -251,3 +251,9 @@ While a channel or title opens, the player shows a Hush-themed screen instead of
 ## Channel numbers
 
 Every Live TV channel has a **permanent number**, like a real lineup. Existing channels were numbered A-Z once; a channel added later gets the next free number; and numbers never change when a playlist is read again, or when a channel disappears and comes back. Cards, the channel banner, the channel list and the phone remote all show it, Live TV lists run in number order, and typing a number on the remote (up to 5 digits) tunes straight to that channel and carries on from there with channel up and down. Give the channel you are watching a number of your own with the **Number** button in the player (a number someone else has can be swapped), or start over with **Renumber A-Z** / **Renumber by group** in Live TV -> Playlists.
+
+## Captions button
+
+Every player has a **CC** button (or press **C**, or use *Captions* on the phone remote). On a **live channel** Hush treats every channel as captioned: it shows the broadcast's own captions when the stream carries them and otherwise listens to the channel and writes the lines itself, about 10 seconds behind live (the same delay the language filter uses). With the filter off, captions are shown but nothing is muted. On **movies and shows** CC turns on the English subtitle track, or the words from the scan when there is no track. Your choice is remembered per profile. **Shuffle** and **Repeat** only appear while music is playing.
+
+On Live TV the channel number is typed into the box in the **Channels** pop-out, and the Language button is hidden.

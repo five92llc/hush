@@ -39,6 +39,8 @@ CC_PROBE_SECONDS = 8.0       # no captions seen by then: try speech recognition 
 ASR_PAD_BEFORE, ASR_PAD_AFTER, ASR_MERGE_GAP = 0.4, 0.5, 0.4   # recognised words carry real timings, so the windows can be tight
 ASR_WINDOW_SEGMENTS, ASR_STEP_SEGMENTS = 4, 2
 ASR_EDGE_LEFT, ASR_EDGE_RIGHT = 0.6, 0.5                       # words cut by the edge of a window are not trusted
+PLAYER_LATENCY = 4.0         # roughly how long a player holds a published segment before showing it: captions are shown this much later
+CAPTION_WORDS = 9            # a caption line is at most this many words
 ASR_ADULT_WAIT = 8.0         # an adult profile waits this long past the delay for recognition before the audio goes out unfiltered
 
 
@@ -147,6 +149,9 @@ class Session:
         self.asr_end = -1                # index of the last segment included in a recognised window
         self.asr_claimed = False
         self.behind = False
+        self.caption_log: list[dict] = []   # what the screen should show, line by line: id, start/end (stream time), text, show_at (wall clock)
+        self.caption_seq = 0
+        self.caption_tail: list[str] = []   # the last words shown, so a roll-up caption that repeats them is not shown twice
         self.proc: subprocess.Popen | None = None
         self.stop_event = threading.Event()
         self.lock = threading.Lock()
@@ -257,10 +262,13 @@ class Session:
     def add_words(self, words: list[Word]) -> None:
         """Take recognised words (times since the first segment) and refresh the mute windows."""
         known = [(normalize(w.text), w.start) for w in self.words]
+        new: list[Word] = []
         for w in words:
             n = normalize(w.text)
             if n and not any(n == k and abs(w.start - t) < 0.4 for k, t in known):
                 self.words.append(w)
+                new.append(w)
+        self._caption_words(sorted(new, key=lambda w: w.start))
         self.words.sort(key=lambda w: w.start)
         if self.words:
             horizon = self.words[-1].end - KEEP_CUES
@@ -269,6 +277,57 @@ class Session:
         if self.cats is not None:
             det = [d for d in det if d["category"] in self.cats]
         self.ranges = build_ranges(det, ASR_PAD_BEFORE, ASR_PAD_AFTER, ASR_MERGE_GAP)
+
+    # ---- captions for the screen ---------------------------------------------------
+    def _wall_for(self, t: float) -> float:
+        """When (wall clock) the broadcast reached stream time t, judged from when each segment arrived."""
+        segs = self.segments
+        if not segs:
+            return time.time()
+        for s in segs:
+            if s["t0"] <= t < s["t0"] + s["dur"]:
+                return s["ready"] - (s["t0"] + s["dur"] - t)
+        last = segs[-1]
+        return last["ready"] + (t - (last["t0"] + last["dur"])) if t >= last["t0"] else segs[0]["ready"] - (segs[0]["t0"] - t)
+
+    def _caption_words(self, words: list[Word]) -> None:
+        """Group recognised words into caption lines: a pause, or nine words, ends a line."""
+        line: list[Word] = []
+        for w in words + [None]:
+            if line and (w is None or w.start - line[-1].end > 0.9 or len(line) >= CAPTION_WORDS):
+                self._caption(line[0].start, line[-1].end, " ".join(x.text.strip() for x in line))
+                line = []
+            if w is not None:
+                line.append(w)
+
+    def _caption(self, start: float, end: float, text: str) -> None:
+        """Add a caption. Words that repeat the end of the previous one (live captions roll up) are not shown again."""
+        words = text.split()
+        norm = [normalize(w) for w in words]
+        k = 0
+        for n in range(min(len(self.caption_tail), len(norm)), 0, -1):          # the longest end of what was shown that begins this one
+            if self.caption_tail[-n:] == norm[:n]:
+                k = n
+                break
+        words, norm = words[k:], norm[k:]
+        if not words:
+            return
+        self.caption_tail = (self.caption_tail + norm)[-40:]
+        span = max(0.4, end - start)
+        for i in range(0, len(words), CAPTION_WORDS):
+            chunk = words[i:i + CAPTION_WORDS]
+            a = start + span * i / len(words)
+            b = start + span * min(len(words), i + CAPTION_WORDS) / len(words)
+            self.caption_seq += 1
+            self.caption_log.append({"id": self.caption_seq, "start": a, "end": b, "text": " ".join(chunk),
+                                     "show_at": self._wall_for(a) + DELAY + PLAYER_LATENCY})
+        self.caption_log = self.caption_log[-300:]
+
+    def captions_after(self, after: int) -> dict:
+        now = time.time()
+        cues = [{"id": c["id"], "show_in": round(max(0.0, c["show_at"] - now), 2), "dur": round(max(1.8, min(6.0, c["end"] - c["start"] + 0.8)), 2),
+                 "text": c["text"]} for c in self.caption_log if c["id"] > after]
+        return {"cues": cues, "next": self.caption_seq, "mode": self.mode}
 
     def _extract(self, seg: dict) -> None:
         """Read the captions of this segment (with the one before it, so a caption that began earlier is whole)."""
@@ -299,6 +358,9 @@ class Session:
         if not fresh:
             return
         self.cues_seen = True
+        if self.mode in ("pending", "captions"):
+            for c in sorted(cues, key=lambda c: c["start"]):
+                self._caption(c["start"], c["end"], c["text"])
         if self.state == "nocaptions":
             self.state = "live"
         horizon = max(c["end"] for c in self.cues) - KEEP_CUES

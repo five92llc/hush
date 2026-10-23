@@ -734,3 +734,9 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 
 .ranges .chips { display: flex; flex-wrap: wrap; gap: .35rem; }
 .ranges .chip { background: var(--dusk-2); border-radius: 999px; padding: .2rem .7rem; font-size: var(--s-1); }
+
+.guide-num { display: flex; gap: .4rem; padding: 0 1rem .5rem; align-items: center; flex-wrap: wrap; }
+.guide-num input { flex: 1 1 8rem; min-width: 0; }
+
+.icon-btn.cc { width: auto; padding: 0 .55rem; font-weight: 800; font-size: .8rem; letter-spacing: .02em; }
+.icon-btn.cc[aria-pressed="true"] { background: var(--lamp); color: var(--ink); }

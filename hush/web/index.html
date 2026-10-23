@@ -265,8 +265,8 @@
           <input id="volume" type="range" min="0" max="1" step="0.02" value="1">
         </label>
         <button id="guide-btn" class="btn subtle" type="button" aria-controls="guide" aria-expanded="false" title="Channel list (G)" hidden>Channels</button>
-        <button id="chan-num-btn" class="btn subtle admin-only" type="button" title="Change this channel's number" hidden>Number</button>
         <button id="panel-btn" class="btn subtle admin-only" type="button" aria-controls="panel" aria-expanded="false">Language</button>
+        <button id="cc-btn" class="icon-btn cc" type="button" aria-pressed="false" aria-label="Captions (C)" title="Captions (C)">CC</button>
         <button id="settings-btn" class="icon-btn" type="button" aria-label="Audio and subtitles" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 13h4M12 13h6M6 16h8"/></svg>
         </button>
@@ -304,6 +304,11 @@
         <select id="guide-group" aria-label="Group"><option value="">All groups</option></select>
         <button id="guide-fav" class="btn subtle" type="button" aria-pressed="false">☆ Favorites</button>
       </div>
+      <form id="guide-num" class="guide-num">
+        <input id="guide-num-in" type="number" min="1" max="99999" inputmode="numeric" placeholder="Channel number" aria-label="Channel number">
+        <button class="btn primary" type="submit">Go</button>
+        <button id="guide-num-set" class="btn ghost admin-only" type="button" title="Give the channel you are watching this number">Set for this channel</button>
+      </form>
       <p id="guide-count" class="hint guide-count"></p>
       <ol id="guide-list" class="guide-list"></ol>
     </aside>

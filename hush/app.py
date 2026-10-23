@@ -451,6 +451,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not ref.live and not ref.url:
             raise HTTPException(400, "Only live channels use the live filter")
         cats = {c for c in str(body.get("cats", "")).split(",") if c} or None
+        if body.get("mute") is False:
+            cats = set()                                           # captions only: nothing is muted
         if prof["kids"]:
             cats = None                                            # a kids profile always gets everything filtered
         try:
@@ -470,6 +472,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not s:
             raise HTTPException(404)
         return s.status()
+
+    @app.get("/api/livefilter/{sid}/captions", dependencies=[need])
+    def livefilter_captions(sid: str, after: int = 0):
+        """Captions for the channel, a few lines at a time: each says how many seconds from now to show it."""
+        s = livefilter.get(sid)
+        if not s:
+            raise HTTPException(404)
+        s.last = time.time()
+        return s.captions_after(after)
 
     @app.get("/api/livefilter/{sid}/{name}", dependencies=[need])
     async def livefilter_file(request: Request, sid: str, name: str):
