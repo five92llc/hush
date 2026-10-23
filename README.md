@@ -271,3 +271,7 @@ Settings is a board of cards (Display, Top bar, Library, Tuning-in screen, Peopl
 ## Screensaver
 
 When nothing is playing and no key or pointer has been used for a while (set under **Settings → Display**, off / 2 / 5 / 10 / 20 / 30 minutes; 10 by default), Hush shows a big clock, the date, the weather, world clocks and one slide at a time (forecast, scores, headlines, quote and the rest of the top bar slides), over slowly drifting fan art from your library. The text moves a little now and then so no pixel stays lit. Any key, tap or mouse movement brings Hush back without acting on that press. The top bar panel is centred and shrinks, then drops small details, to fit the room it has.
+
+## Logo
+
+The icon is a letter H whose crossbar is a play button (`hush/web/icon.svg`; wordmark and TV banner in `docs/logo/`). It is used for the browser tab, the home-screen icon of the phone remote, the Android and Fire TV launcher and banner, and the LG icons.
