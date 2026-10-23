@@ -506,6 +506,7 @@ const Refresh = {
   },
 };
 ["#refresh-btn", "#refresh-btn2"].forEach((id) => $(id).addEventListener("click", () => Refresh.start()));
+$("#about-reload-btn").addEventListener("click", () => location.reload());
 $("#app-update-btn").addEventListener("click", () => window.HushApp?.checkForUpdate());
 $("#app-server-btn").addEventListener("click", () => window.HushApp?.changeServer());
 $("#pl-settings-btn").addEventListener("click", () => {
@@ -3436,7 +3437,8 @@ async function route() {
     $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
     WeatherCard.load();
     const app = window.HushApp;                                       // present only inside the Android app
-    $("#app-card").hidden = !app;
+    $("#app-card").hidden = $("#app-server-row").hidden = !app;
+    $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";
     if (app) $("#app-info").textContent = `Hush app ${app.version()} · connected to ${app.server()}`;
     const e = S.config?.encoder;
     $("#enc-info").textContent = !e ? "Unknown"

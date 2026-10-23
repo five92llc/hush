@@ -139,11 +139,13 @@
       <div class="pref"><div><strong>Profiles</strong><p class="hint">Names, avatars and kids rules.</p></div>
         <a class="btn subtle" href="#/profiles">Manage profiles</a></div>
     </div>
-    <div class="prefs-card" id="app-card" hidden>
-      <h2>This app</h2>
-      <div class="pref"><div><strong>Hush app</strong><p id="app-info" class="hint"></p></div>
-        <button id="app-update-btn" class="btn subtle" type="button">Check for updates</button></div>
-      <div class="pref"><div><strong>Server address</strong><p class="hint">Change which Hush server this app connects to.</p></div>
+    <div class="prefs-card" id="about-card">
+      <h2>About</h2>
+      <div class="pref"><div><strong>Hush server</strong><p id="server-info" class="hint"></p></div>
+        <button id="about-reload-btn" class="btn subtle" type="button">Reload page</button></div>
+      <div class="pref" id="app-card" hidden><div><strong>Hush app</strong><p id="app-info" class="hint"></p></div>
+        <button id="app-update-btn" class="btn subtle" type="button">Update app</button></div>
+      <div class="pref" id="app-server-row" hidden><div><strong>Server address</strong><p class="hint">Change which Hush server this app connects to.</p></div>
         <button id="app-server-btn" class="btn subtle" type="button">Change server</button></div>
     </div>
     <div class="prefs-card admin-only">

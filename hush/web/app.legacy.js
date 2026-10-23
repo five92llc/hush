@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 19b18d428498eda94cff5122e067d9a33ae2000c71318012fe154737385f7149) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 606b60743ae50197368cfed96d3ed3dba7ed72213411ffcc477e045c4794577a) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -698,6 +698,7 @@ const Refresh = {
   }
 };
 ["#refresh-btn", "#refresh-btn2"].forEach((id) => $(id).addEventListener("click", () => Refresh.start()));
+$("#about-reload-btn").addEventListener("click", () => location.reload());
 $("#app-update-btn").addEventListener("click", () => {
   var _a;
   return (_a = window.HushApp) == null ? void 0 : _a.checkForUpdate();
@@ -5298,7 +5299,7 @@ function go(hash) {
   else location.hash = hash;
 }
 async function route() {
-  var _a, _b, _c;
+  var _a, _b, _c, _d;
   requestAnimationFrame(() => Player.placeMini());
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   const [view, src, id] = [parts[0], parts[1], parts.slice(2).join("/")];
@@ -5334,9 +5335,10 @@ async function route() {
     TV.focusSoon();
     WeatherCard.load();
     const app = window.HushApp;
-    $("#app-card").hidden = !app;
+    $("#app-card").hidden = $("#app-server-row").hidden = !app;
+    $("#server-info").textContent = ((_c = S.config) == null ? void 0 : _c.version) ? `Version ${S.config.version}` : "";
     if (app) $("#app-info").textContent = `Hush app ${app.version()} · connected to ${app.server()}`;
-    const e = (_c = S.config) == null ? void 0 : _c.encoder;
+    const e = (_d = S.config) == null ? void 0 : _d.encoder;
     $("#enc-info").textContent = !e ? "Unknown" : e.encoder === "libx264" ? "The processor (CPU) re-encodes video when a screen can't play a file as it is. No GPU was found; with one, set video_encoder: auto." : `${e.gpu || e.encoder} re-encodes video when needed (${e.encoder}).`;
     return;
   }
