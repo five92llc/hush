@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 c5430bb3a15c8724fde2dd03c069795720a6fbcb4d65c6a632ef049606b804bf) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 71625eeccf46960f361d9f474d518c37556ff8e54a1dca500ad59a42967836b3) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -5260,7 +5260,8 @@ const TV = {
     }
     const hash = location.hash.replace(/^#\/?/, "").split("/");
     const [view, src] = [hash[0], hash[1]];
-    if (view === "title") go(Catalog.cameFrom && Catalog.cameFrom !== "#/title" ? Catalog.cameFrom : "#/movies");
+    if (view === "settings" && src) go("#/settings");
+    else if (view === "title") go(Catalog.cameFrom && Catalog.cameFrom !== "#/title" ? Catalog.cameFrom : "#/movies");
     else if (view === "show") go("#/shows");
     else if (view === "b") {
       const parent = S.dirParent[S.currentDir];
@@ -5708,6 +5709,47 @@ function go(hash) {
   if (location.hash === hash) route();
   else location.hash = hash;
 }
+const Settings = {
+  SECTIONS: [
+    ["display", "Display", "🖥️", "Big screen mode and the phone remote", false],
+    ["topbar", "Top bar", "🎛️", "Clock, weather, scores, headlines and more", false],
+    ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true],
+    ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
+    ["people", "People", "👥", "Profiles and who can watch what", true],
+    ["server", "Server", "⚙️", "How video is prepared for your screens", true],
+    ["security", "Security", "🔒", "The password for Hush", true],
+    ["about", "About", "ℹ️", "Versions, app updates and the server address", false]
+  ],
+  cards: {},
+  init() {
+    const byTitle = {};
+    $$("#prefs > .prefs-card").forEach((c) => {
+      var _a;
+      byTitle[(_a = c.querySelector("h2")) == null ? void 0 : _a.textContent.trim()] = c;
+    });
+    for (const [id, title, , , admin] of this.SECTIONS) {
+      const c = byTitle[title];
+      if (c) {
+        c.dataset.sec = id;
+        c.classList.toggle("admin-only", admin);
+        this.cards[id] = c;
+      }
+    }
+    $("#settings-hub").replaceChildren(...this.SECTIONS.filter(([id]) => this.cards[id]).map(([id, title, icon2, desc, admin]) => h("a", { class: `set-tile${admin ? " admin-only" : ""}`, href: `#/settings/${id}` }, h("span", { class: "set-ico" }, icon2), h("strong", {}, title), h("small", {}, desc))));
+  },
+  show(sec) {
+    var _a, _b;
+    if (!this.cards.display) this.init();
+    const open = this.cards[sec] ? sec : "";
+    $("#prefs").classList.toggle("in-section", !!open);
+    $("#settings-hub").hidden = !!open;
+    $("#prefs-back").hidden = !open;
+    $("#prefs-title").textContent = open ? this.SECTIONS.find((s) => s[0] === open)[1] : "Settings";
+    for (const [id, c] of Object.entries(this.cards)) c.hidden = id !== open;
+    (_b = (_a = document.activeElement) == null ? void 0 : _a.blur) == null ? void 0 : _b.call(_a);
+    TV.focusSoon(60);
+  }
+};
 async function route() {
   var _a, _b, _c, _d;
   requestAnimationFrame(() => Player.placeMini());
@@ -5742,7 +5784,7 @@ async function route() {
   if (view === "settings") {
     $("#library").hidden = true;
     $("#prefs").hidden = false;
-    TV.focusSoon();
+    Settings.show(src);
     WeatherCard.load();
     ClockCard.load();
     TickerSettings.load();

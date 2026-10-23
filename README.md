@@ -263,3 +263,5 @@ In the player settings, **Sound sync** adds delay to the sound (− / + in 50 ms
 ## Top bar panel
 
 The bar at the top slides between: the clock and date, weather now, weather details, a five-day forecast, sunset countdown and moon phase, world clocks, what is on the channel you are watching (from the guide), your shows' next episodes, qBittorrent downloads, sports scores (ESPN), headlines (any RSS feed, BBC News by default), NASA's photo of the day, the server's health (load, memory, free disk, scans), a quote of the day, and the server version. Under **Settings → Top bar** choose which slides this screen shows. Grown-ups also pick the world-clock cities, the sports leagues and the headline feed. Kids profiles never see headlines, downloads or server health. Slides with nothing to show (no downloads running, no guide for the channel) are skipped.
+
+Settings is a board of cards (Display, Top bar, Library, Tuning-in screen, People, Server, Security, About); each opens its own page, and Back returns to the board.

@@ -3378,7 +3378,8 @@ const TV = {
     }
     const hash = location.hash.replace(/^#\/?/, "").split("/");
     const [view, src] = [hash[0], hash[1]];
-    if (view === "title") go(Catalog.cameFrom && Catalog.cameFrom !== "#/title" ? Catalog.cameFrom : "#/movies");
+    if (view === "settings" && src) go("#/settings");                     // inside one card of the settings: back to the board
+    else if (view === "title") go(Catalog.cameFrom && Catalog.cameFrom !== "#/title" ? Catalog.cameFrom : "#/movies");
     else if (view === "show") go("#/shows");
     else if (view === "b") {
       const parent = S.dirParent[S.currentDir];
@@ -3644,6 +3645,34 @@ if (IS_TV_DEVICE) hideCursorNow();
 
 /* ===================================================== routing */
 function go(hash) { if (location.hash === hash) route(); else location.hash = hash; }
+/** Settings: a board of cards; each opens its own page of options. */
+const Settings = {
+  SECTIONS: [
+    ["display", "Display", "🖥️", "Big screen mode and the phone remote", false], ["topbar", "Top bar", "🎛️", "Clock, weather, scores, headlines and more", false],
+    ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true], ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
+    ["people", "People", "👥", "Profiles and who can watch what", true], ["server", "Server", "⚙️", "How video is prepared for your screens", true],
+    ["security", "Security", "🔒", "The password for Hush", true], ["about", "About", "ℹ️", "Versions, app updates and the server address", false],
+  ],
+  cards: {},
+  init() {
+    const byTitle = {};
+    $$("#prefs > .prefs-card").forEach((c) => { byTitle[c.querySelector("h2")?.textContent.trim()] = c; });
+    for (const [id, title, , , admin] of this.SECTIONS) { const c = byTitle[title]; if (c) { c.dataset.sec = id; c.classList.toggle("admin-only", admin); this.cards[id] = c; } }
+    $("#settings-hub").replaceChildren(...this.SECTIONS.filter(([id]) => this.cards[id]).map(([id, title, icon, desc, admin]) =>
+      h("a", { class: `set-tile${admin ? " admin-only" : ""}`, href: `#/settings/${id}` }, h("span", { class: "set-ico" }, icon), h("strong", {}, title), h("small", {}, desc))));
+  },
+  show(sec) {
+    if (!this.cards.display) this.init();
+    const open = this.cards[sec] ? sec : "";
+    $("#prefs").classList.toggle("in-section", !!open);
+    $("#settings-hub").hidden = !!open; $("#prefs-back").hidden = !open;
+    $("#prefs-title").textContent = open ? this.SECTIONS.find((s) => s[0] === open)[1] : "Settings";
+    for (const [id, c] of Object.entries(this.cards)) c.hidden = id !== open;
+    document.activeElement?.blur?.();
+    TV.focusSoon(60);
+  },
+};
+
 async function route() {
   requestAnimationFrame(() => Player.placeMini());           // the sidebar may have appeared or gone
   const parts = location.hash.replace(/^#\/?/, "").split("/");
@@ -3661,7 +3690,7 @@ async function route() {
   if (!$("#player").hidden && !Player.mini) { if (Player.keepPlaying()) Player.minimize(); else Player.close(false); }
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
-    $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
+    $("#library").hidden = true; $("#prefs").hidden = false; Settings.show(src);
     WeatherCard.load(); ClockCard.load(); TickerSettings.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
