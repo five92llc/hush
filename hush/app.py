@@ -164,7 +164,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
                     "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
-                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber")
+                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -426,6 +426,21 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return {"configured": True, "place": loc["name"], "lat": loc["lat"], "lon": loc["lon"], **weather.current(loc["lat"], loc["lon"], loc.get("unit", "c"))}
         except httpx.HTTPError:
             return {"configured": True, "place": loc["name"], "unavailable": True}
+
+    @app.get("/api/clocks", dependencies=[need])
+    def clocks_get():
+        return db.get_setting("world_clocks", []) or []
+
+    @app.put("/api/clocks/set", dependencies=[need])
+    def clocks_set(body: list = Body(...)):
+        """The cities whose time the top bar shows: [{name, tz}], at most 12."""
+        out = []
+        for c in body[:12]:
+            name, tz = str((c or {}).get("name", ""))[:60].strip(), str((c or {}).get("tz", ""))[:60].strip()
+            if name and tz and re.fullmatch(r"[A-Za-z0-9_+\-/]+", tz):
+                out.append({"name": name, "tz": tz})
+        db.set_setting("world_clocks", out)
+        return out
 
     @app.get("/api/weather/search", dependencies=[need])
     def weather_search(q: str):

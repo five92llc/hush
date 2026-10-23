@@ -47,7 +47,7 @@
 <div id="app" class="app" hidden>
   <header class="topbar">
     <span class="brand-mark small">Hush</span>
-    <span id="app-ver" class="app-ver" hidden></span>
+    <div id="ticker" class="ticker" aria-hidden="true" hidden><div id="ticker-slide" class="tk-slide"></div><div id="ticker-dots" class="tk-dots"></div></div>
     <div class="topbar-actions">
       <button id="profile-btn" class="btn ghost profile-chip" type="button" aria-haspopup="dialog" title="Switch profile">
         <span id="profile-avatar" class="avatar" aria-hidden="true"></span><span id="profile-name"></span>
@@ -147,6 +147,18 @@
         <button id="app-update-btn" class="btn subtle" type="button">Update app</button></div>
       <div class="pref" id="app-server-row" hidden><div><strong>Server address</strong><p class="hint">Change which Hush server this app connects to.</p></div>
         <button id="app-server-btn" class="btn subtle" type="button">Change server</button></div>
+    </div>
+    <div class="prefs-card" id="topbar-card">
+      <h2>Top bar</h2>
+      <p class="hint">The panel at the top slides between these. Choose what it shows on this screen.</p>
+      <div id="tk-toggles" class="tk-toggles"></div>
+      <div class="admin-only">
+        <div class="pref"><div><strong>World clocks</strong><p id="clocks-info" class="hint">No cities yet. Search for one to add it.</p></div></div>
+        <div id="clocks-list" class="found"></div>
+        <form id="clock-form" class="row"><input id="clock-q" type="search" placeholder="Add a city (London, Tokyo, Lagos...)" aria-label="City for a world clock" autocomplete="off">
+          <button class="btn subtle" type="submit">Search</button></form>
+        <div id="clock-results" class="found"></div>
+      </div>
     </div>
     <div class="prefs-card admin-only">
       <h2>Tuning-in screen</h2>

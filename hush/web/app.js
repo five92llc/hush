@@ -450,6 +450,121 @@ $("#guide-num-set").addEventListener("click", async () => {
   } catch (err) { toast(err.message); }
 });
 
+/** The top bar panel: slides between the clock, the weather, the forecast, world clocks and the server version. */
+const Ticker = {
+  SLIDES: [["clock", "Clock and date"], ["weather", "Weather now"], ["details", "Weather details"], ["forecast", "Forecast"], ["world", "World clocks"], ["server", "Server version"]],
+  weather: null, clocks: [], at: 0, order: [], timer: null, tick: null, ready: false,
+  enabled(id) { return store.get(`tk-${id}`, true) !== false; },
+  async refresh() {
+    try { this.weather = await api("/api/weather"); } catch { /* keep the last one */ }
+    try { this.clocks = await api("/api/clocks"); } catch { /* keep the last one */ }
+    this.build();
+  },
+  fmtTime(tz, seconds) {
+    try { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), ...(tz ? { timeZone: tz } : {}) }); }
+    catch { return "--:--"; }
+  },
+  dayName(iso) { try { return new Date(`${iso}T12:00:00`).toLocaleDateString([], { weekday: "short" }); } catch { return iso; } },
+  pages() {
+    const w = this.weather, ok = w?.configured && !w.unavailable;
+    const out = [];
+    for (const [id] of this.SLIDES) {
+      if (!this.enabled(id)) continue;
+      if (id === "clock") out.push({ id, render: () => this.clockSlide() });
+      else if (id === "weather" && ok) out.push({ id, render: () => this.weatherSlide(w) });
+      else if (id === "details" && ok) out.push({ id, render: () => this.detailsSlide(w) });
+      else if (id === "forecast" && ok && w.days?.length) out.push({ id, render: () => this.forecastSlide(w) });
+      else if (id === "world" && this.clocks.length) for (let i = 0; i < this.clocks.length; i += 3) { const part = this.clocks.slice(i, i + 3); out.push({ id, render: () => this.worldSlide(part) }); }
+      else if (id === "server" && S.config?.version) out.push({ id, render: () => h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🖥️"), h("span", { class: "tk-main" }, "Hush server"), h("span", { class: "tk-sub" }, S.config.version)) });
+    }
+    return out;
+  },
+  clockSlide() {
+    const t = h("span", { class: "tk-big" }), d = h("span", { class: "tk-sub" });
+    const upd = () => { t.textContent = this.fmtTime(null, true); d.textContent = new Date().toLocaleDateString([], { weekday: "long", month: "short", day: "numeric" }); };
+    upd(); this.tick = setInterval(upd, 1000);
+    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🕒"), t, d);
+  },
+  weatherSlide(w) {
+    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, w.icon || "🌡️"), h("span", { class: "tk-big" }, `${w.temp}${w.unit}`),
+      h("span", { class: "tk-main" }, w.text), h("span", { class: "tk-sub" }, `${w.place} · H ${w.high}° L ${w.low}°`));
+  },
+  detailsSlide(w) {
+    const bit = (k, v) => h("span", { class: "tk-chip" }, h("em", {}, k), v);
+    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, w.icon || "🌡️"), h("span", { class: "tk-main" }, `Feels like ${w.feels}°`),
+      bit("Humidity", w.humidity != null ? `${w.humidity}%` : "–"), bit("Wind", `${w.wind} ${w.wind_unit}`), bit("Rain", w.rain != null ? `${w.rain}%` : "–"),
+      w.sunrise ? Object.assign(bit("Sun", `${w.sunrise} – ${w.sunset}`), { className: "tk-chip tk-wide" }) : null);
+  },
+  forecastSlide(w) {
+    return h("div", { class: "tk-row" }, ...w.days.slice(0, 5).map((d, i) => h("span", { class: "tk-day", title: d.text },
+      h("em", {}, i === 0 ? "Today" : this.dayName(d.date)), h("span", { class: "tk-ico sm" }, d.icon), `${d.high}°`, h("small", {}, `${d.low}°`))));
+  },
+  worldSlide(list) {
+    const cells = list.map((c) => { const t = h("strong", {}, this.fmtTime(c.tz)); return { c, t }; });
+    const upd = () => cells.forEach(({ c, t }) => { t.textContent = this.fmtTime(c.tz); });
+    this.tick = setInterval(upd, 5000);
+    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🌍"), ...cells.map(({ c, t }) => h("span", { class: "tk-city" }, h("em", {}, c.name), t)));
+  },
+  build() {
+    this.order = this.pages();
+    const box = $("#ticker");
+    box.hidden = !this.order.length;
+    $("#ticker-dots").replaceChildren(...this.order.map(() => h("i", {})));
+    this.at = Math.min(this.at, Math.max(0, this.order.length - 1));
+    this.show(false);
+    this.start();
+  },
+  show(animate = true) {
+    clearInterval(this.tick); this.tick = null;
+    const p = this.order[this.at]; if (!p) return;
+    const slide = $("#ticker-slide");
+    slide.replaceChildren(p.render());
+    slide.classList.remove("in"); if (animate) { void slide.offsetWidth; slide.classList.add("in"); }
+    [...$("#ticker-dots").children].forEach((d, i) => d.classList.toggle("on", i === this.at));
+  },
+  start() {
+    clearInterval(this.timer);
+    if (this.order.length > 1) this.timer = setInterval(() => { if (document.hidden) return; this.at = (this.at + 1) % this.order.length; this.show(); }, 8000);
+  },
+  init() {
+    const box = $("#tk-toggles");
+    if (box) box.replaceChildren(...this.SLIDES.map(([id, label]) => h("label", { class: "check" },
+      h("input", { type: "checkbox", checked: this.enabled(id), onchange: (e) => { store.set(`tk-${id}`, e.target.checked); this.build(); } }), ` ${label}`)));
+    this.refresh();
+    setInterval(() => this.refresh(), 15 * 60 * 1000);
+  },
+};
+
+/** Settings -> Top bar: the cities for the world clocks. */
+const ClockCard = {
+  list: [],
+  async load() {
+    try { this.list = await api("/api/clocks"); } catch { return; }
+    this.draw();
+  },
+  draw() {
+    $("#clocks-info").textContent = this.list.length ? `${this.list.length} ${this.list.length === 1 ? "city" : "cities"} (up to 12).` : "No cities yet. Search for one to add it.";
+    $("#clocks-list").replaceChildren(...this.list.map((c, i) => h("div", { class: "found-row" },
+      h("div", {}, h("strong", {}, c.name), h("div", { class: "hint" }, `${c.tz} · ${Ticker.fmtTime(c.tz)}`)),
+      h("button", { class: "btn ghost", type: "button", onclick: () => this.save(this.list.filter((_, j) => j !== i)) }, "Remove"))));
+  },
+  async save(list) {
+    try { this.list = await api("/api/clocks/set", { method: "PUT", body: list }); this.draw(); Ticker.clocks = this.list; Ticker.build(); }
+    catch (err) { toast(err.message); }
+  },
+};
+$("#clock-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = $("#clock-q").value.trim(), box = $("#clock-results");
+  if (q.length < 2) return;
+  try {
+    const rs = (await api(`/api/weather/search?q=${encodeURIComponent(q)}`)).filter((r) => r.timezone);
+    box.replaceChildren(...(rs.length ? rs.map((r) => h("div", { class: "found-row" },
+      h("div", {}, h("strong", {}, r.name), h("div", { class: "hint" }, [r.region, r.country].filter(Boolean).join(", "))),
+      h("button", { class: "btn subtle", type: "button", onclick: () => { ClockCard.save([...ClockCard.list, { name: r.name, tz: r.timezone }]); box.replaceChildren(); $("#clock-q").value = ""; } }, "Add"))) : [h("p", { class: "hint" }, "Nothing found")]));
+  } catch (err) { box.replaceChildren(h("p", { class: "error" }, err.message)); }
+});
+
 /** Settings -> Tuning-in screen: where you live, for the weather shown while a channel opens. */
 const WeatherCard = {
   loc: null,
@@ -462,7 +577,7 @@ const WeatherCard = {
     if (w.configured) $("#weather-unit").value = w.unit === "°F" ? "f" : "c";
   },
   async save(place) {
-    try { await api("/api/weather/location", { method: "PUT", body: place }); toast(place.name ? "Weather location saved" : "Weather removed"); $("#weather-results").replaceChildren(); WaitScreen.weather = null; this.load(); }
+    try { await api("/api/weather/location", { method: "PUT", body: place }); toast(place.name ? "Weather location saved" : "Weather removed"); $("#weather-results").replaceChildren(); WaitScreen.weather = null; this.load(); Ticker.refresh(); }
     catch (err) { toast(err.message); }
   },
 };
@@ -3444,7 +3559,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
-    WeatherCard.load();
+    WeatherCard.load(); ClockCard.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";
@@ -3478,7 +3593,7 @@ async function start() {
   Profiles.apply();
   try {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
-    if (S.config?.version) { const v = $("#app-ver"); v.textContent = `server ${S.config.version}`; v.hidden = false; }
+    Ticker.init();
   } catch { return; }
   route();
   Jobs.poll();

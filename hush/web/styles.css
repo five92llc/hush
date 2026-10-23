@@ -745,3 +745,26 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .avsync { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
 .avsync output { min-width: 4.5rem; text-align: center; font-variant-numeric: tabular-nums; }
 .avsync .hint { flex-basis: 100%; }
+
+/* ---------- top bar panel ---------- */
+.app-ver { display: none; }
+.ticker { flex: 1 1 auto; min-width: 0; max-width: 46rem; margin: 0 1rem; padding: .3rem 1rem .5rem; border-radius: 999px; overflow: hidden; position: relative;
+  background: linear-gradient(135deg, rgba(255,255,255,.07), rgba(255,255,255,.02)); border: 1px solid var(--dusk-2); backdrop-filter: blur(6px); }
+.tk-slide { display: block; min-height: 2.1rem; }
+.tk-slide.in { animation: tk-in .55s cubic-bezier(.2,.8,.2,1); }
+@keyframes tk-in { from { opacity: 0; transform: translateY(70%); } to { opacity: 1; transform: none; } }
+.tk-row { display: flex; align-items: center; gap: .75rem; min-height: 2.1rem; white-space: nowrap; overflow: hidden; }
+.tk-ico { font-size: 1.5rem; line-height: 1; } .tk-ico.sm { font-size: 1.05rem; }
+.tk-big { font-size: 1.45rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .01em; }
+.tk-main { font-weight: 600; } .tk-sub { opacity: .65; font-size: .85rem; overflow: hidden; text-overflow: ellipsis; }
+.tk-chip { font-size: .85rem; } .tk-chip em { font-style: normal; opacity: .6; margin-right: .3rem; }
+.tk-day { display: inline-flex; align-items: center; gap: .3rem; font-size: .9rem; font-weight: 600; } .tk-day em { font-style: normal; opacity: .65; font-weight: 500; } .tk-day small { opacity: .55; }
+.tk-city { display: inline-flex; flex-direction: column; line-height: 1.1; margin-right: .6rem; } .tk-city em { font-style: normal; font-size: .72rem; opacity: .65; } .tk-city strong { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
+.tk-dots { position: absolute; left: 0; right: 0; bottom: .15rem; display: flex; justify-content: center; gap: .25rem; }
+.tk-dots i { width: .28rem; height: .28rem; border-radius: 50%; background: currentColor; opacity: .25; transition: opacity .3s, transform .3s; }
+.tk-dots i.on { opacity: .9; transform: scale(1.3); }
+.tk-toggles { display: flex; flex-wrap: wrap; gap: .4rem 1.2rem; margin: .4rem 0 1rem; }
+@media (max-width: 899px) { html:not(.tv) .ticker { display: none; } }
+.tk-wide { display: none; } @media (min-width: 1200px) { .tk-wide { display: inline; } }
+.tk-row .tk-ico + .tk-big { margin-left: .1rem; }
+@media (max-width: 1099px) { .tk-day:nth-child(n+5) { display: none; } .tk-row:has(.tk-day) { gap: .55rem; } }

@@ -314,13 +314,25 @@ def test_weather_search_and_current(monkeypatch):
 
     def handler(req: httpx.Request) -> httpx.Response:
         if "geocoding" in req.url.host:
-            return httpx.Response(200, json={"results": [{"name": "Austin", "admin1": "Texas", "country": "United States", "latitude": 30.27, "longitude": -97.74}]})
+            return httpx.Response(200, json={"results": [{"name": "Austin", "admin1": "Texas", "country": "United States", "latitude": 30.27, "longitude": -97.74, "timezone": "America/Chicago"}]})
         return httpx.Response(200, json={"current": {"temperature_2m": 71.6, "weather_code": 2}, "daily": {"temperature_2m_max": [80.2], "temperature_2m_min": [60.1]}, "timezone": "America/Chicago"})
     c = httpx.Client(transport=httpx.MockTransport(handler))
-    assert weather.search("Austin", c) == [{"name": "Austin", "region": "Texas", "country": "United States", "lat": 30.27, "lon": -97.74}]
+    assert weather.search("Austin", c) == [{"name": "Austin", "region": "Texas", "country": "United States", "lat": 30.27, "lon": -97.74, "timezone": "America/Chicago"}]
     weather._cache.clear()
     now = weather.current(30.27, -97.74, "f", c)
-    assert now == {"temp": 72, "text": "Partly cloudy", "high": 80, "low": 60, "unit": "°F", "timezone": "America/Chicago"}
+    assert (now["temp"], now["text"], now["high"], now["low"], now["unit"]) == (72, "Partly cloudy", 80, 60, "°F")
+    assert now["icon"] and now["days"] == [] and now["wind_unit"] == "mph"
+
+
+def test_world_clocks_are_saved_and_cleaned(tmp_path):
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir(); cfg.cache_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    r = c.put("/api/clocks/set", json=[{"name": "Tokyo", "tz": "Asia/Tokyo"}, {"name": "Bad", "tz": "../etc"}, {"name": "", "tz": "UTC"}])
+    assert r.status_code == 200 and r.json() == [{"name": "Tokyo", "tz": "Asia/Tokyo"}]
+    assert c.get("/api/clocks").json() == [{"name": "Tokyo", "tz": "Asia/Tokyo"}]
 
 
 def test_the_phone_remote_can_send_text():
