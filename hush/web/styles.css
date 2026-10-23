@@ -811,3 +811,6 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .ticker:not([hidden]) ~ .topbar-actions { min-width: 0; }
 @media (max-width: 899px) { html:not(.tv) .topbar { display: flex; justify-content: space-between; } }
 .sv-info .tk-row { justify-content: flex-start; }
+.dl-articles { max-height: 18rem; overflow-y: auto; padding-right: .4rem; overscroll-behavior: contain; }
+.dl.is-hidden { opacity: .55; }
+.set-tile.exit { border-style: dashed; }

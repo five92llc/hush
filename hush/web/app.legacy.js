@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 dd7884ebeae031d2c59c9cdd1f7b53424547c9924fd79f9b9e30e552f7ab701c) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 9a89076e2fc485a10751516b69bc158018e13f9cd11acd784a151d54e53cd89a) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -2038,6 +2038,7 @@ const Catalog = {
         b.disabled = false;
       } }, link, h("button", { class: "btn primary", type: "submit" }, "Add to qBittorrent"));
     };
+    let showHidden = false;
     const refreshList = async () => {
       let s;
       try {
@@ -2068,7 +2069,8 @@ const Catalog = {
         addWrap.replaceChildren();
         return;
       }
-      const listSig = JSON.stringify(s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed, t.category, t.save_path]));
+      const hidden = new Set(store.get("qbit_hidden", []));
+      const listSig = JSON.stringify([showHidden, [...hidden], s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed, t.category, t.save_path])]);
       if (listSig === listBox.dataset.sig) return;
       listBox.dataset.sig = listSig;
       if (!addWrap.firstChild) {
@@ -2078,44 +2080,66 @@ const Catalog = {
         }
         addWrap.append(destBox(), addBox());
       }
-      listBox.replaceChildren(h("h2", {}, "Downloads"), ...s.torrents.length ? s.torrents.map((t) => h(
-        "div",
-        { class: "dl" },
+      const hide2 = (hash, on) => {
+        const set = new Set(store.get("qbit_hidden", []));
+        on ? set.add(hash) : set.delete(hash);
+        store.set("qbit_hidden", [...set]);
+        listBox.dataset.sig = "";
+        refreshList();
+      };
+      const nHidden = s.torrents.filter((t) => hidden.has(t.hash)).length;
+      const shown = s.torrents.filter((t) => showHidden || !hidden.has(t.hash));
+      listBox.replaceChildren(
         h(
           "div",
           { class: "dl-top" },
-          h("strong", { class: "dl-name", title: t.name }, t.name),
-          h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))
+          h("h2", {}, "Downloads"),
+          nHidden ? h("button", { class: "btn ghost", type: "button", onclick: () => {
+            showHidden = !showHidden;
+            listBox.dataset.sig = "";
+            refreshList();
+          } }, showHidden ? `Hide the ${nHidden} hidden` : `Show ${nHidden} hidden`) : null
         ),
-        t.save_path ? h("div", { class: "hint", title: "Where qBittorrent saves it" }, t.save_path) : null,
-        h("div", { class: "pbar big" }, h("i", { style: `width:${Math.round(t.progress * 100)}%` })),
-        h(
+        ...shown.length ? shown.map((t) => h(
           "div",
-          { class: "dl-actions" },
-          t.paused ? h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "resume") }, "Resume") : h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "pause") }, "Pause"),
-          cats.categories.length ? h("select", { "aria-label": `Category for ${t.name}`, onchange: async (e) => {
-            try {
-              await api(`/api/qbit/category/${t.hash}`, { method: "POST", body: { category: e.target.value } });
-              toast("Category changed");
-            } catch (err) {
-              toast(err.message);
-            }
-          } }, h("option", { value: "" }, "No category"), ...cats.categories.map((c) => h("option", { value: c.name, selected: c.name === t.category }, c.name))) : null,
-          h("button", { class: "btn ghost", type: "button", title: "Move the files to another folder", onclick: async () => {
-            const p = prompt("Move to which folder? (a folder on the qBittorrent machine)", t.save_path || "");
-            if (!p) return;
-            try {
-              await api(`/api/qbit/location/${t.hash}`, { method: "POST", body: { path: p } });
-              toast("qBittorrent is moving it");
-            } catch (err) {
-              toast(err.message);
-            }
-          } }, "Move…"),
-          h("button", { class: "btn ghost", type: "button", title: "Takes it off the list; the files stay", onclick: () => {
-            if (confirm(`Remove "${t.name}" from qBittorrent's list? The files are kept.`)) act(t.hash, "remove");
-          } }, "Remove")
-        )
-      )) : [h("p", { class: "hint" }, "Nothing downloading right now.")]);
+          { class: `dl${hidden.has(t.hash) ? " is-hidden" : ""}` },
+          h(
+            "div",
+            { class: "dl-top" },
+            h("strong", { class: "dl-name", title: t.name }, t.name),
+            h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))
+          ),
+          t.save_path ? h("div", { class: "hint", title: "Where qBittorrent saves it" }, t.save_path) : null,
+          h("div", { class: "pbar big" }, h("i", { style: `width:${Math.round(t.progress * 100)}%` })),
+          h(
+            "div",
+            { class: "dl-actions" },
+            t.paused ? h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "resume") }, "Resume") : h("button", { class: "btn subtle", type: "button", onclick: () => act(t.hash, "pause") }, "Pause"),
+            cats.categories.length ? h("select", { "aria-label": `Category for ${t.name}`, onchange: async (e) => {
+              try {
+                await api(`/api/qbit/category/${t.hash}`, { method: "POST", body: { category: e.target.value } });
+                toast("Category changed");
+              } catch (err) {
+                toast(err.message);
+              }
+            } }, h("option", { value: "" }, "No category"), ...cats.categories.map((c) => h("option", { value: c.name, selected: c.name === t.category }, c.name))) : null,
+            h("button", { class: "btn ghost", type: "button", title: "Move the files to another folder", onclick: async () => {
+              const p = prompt("Move to which folder? (a folder on the qBittorrent machine)", t.save_path || "");
+              if (!p) return;
+              try {
+                await api(`/api/qbit/location/${t.hash}`, { method: "POST", body: { path: p } });
+                toast("qBittorrent is moving it");
+              } catch (err) {
+                toast(err.message);
+              }
+            } }, "Move…"),
+            h("button", { class: "btn ghost", type: "button", title: hidden.has(t.hash) ? "Show it in the list again" : "Hide it from this list (it stays in qBittorrent)", onclick: () => hide2(t.hash, !hidden.has(t.hash)) }, hidden.has(t.hash) ? "Unhide" : "Hide"),
+            h("button", { class: "btn ghost", type: "button", title: "Takes it off the list; the files stay", onclick: () => {
+              if (confirm(`Remove "${t.name}" from qBittorrent's list? The files are kept.`)) act(t.hash, "remove");
+            } }, "Remove")
+          )
+        )) : [h("p", { class: "hint" }, nHidden ? "Everything here is hidden." : "Nothing downloading right now.")]
+      );
     };
     const refreshRss = async () => {
       let r;
@@ -2141,7 +2165,7 @@ const Catalog = {
             }
           } }, "Check now")),
           f.has_error ? h("p", { class: "error" }, "qBittorrent could not read this feed") : null,
-          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 10).map((a) => h(
+          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 40).map((a) => h(
             "li",
             {},
             h("span", { class: "grow" }, a.title, a.date ? h("span", { class: "hint" }, ` · ${new Date(a.date).toLocaleDateString()}`) : null),
@@ -2722,12 +2746,17 @@ const Catalog = {
     const rows = [
       this.shelf("Continue watching", null, cont.map((it) => h(
         "a",
-        { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
+        { class: "card wide", "data-clear": "1", title: "Info or Delete removes it from this list", href: `#/p/${it.source_id}/${it.item_id}` },
         h(
           "div",
           { class: "art" },
           it.art_url ? h("img", { src: thumb(it.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
-          it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null
+          it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null,
+          it.media_key ? h("button", { class: "x", type: "button", title: "Remove from Continue watching", "aria-label": `Remove ${it.title}`, onclick: (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            clearContinue(it, e.currentTarget.closest(".card"));
+          } }, "✕") : null
         ),
         h("span", { class: "name" }, it.title),
         h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))
@@ -2924,7 +2953,7 @@ const Catalog = {
     for (const it of items) {
       const card = h(
         "a",
-        { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
+        { class: "card wide", "data-clear": "1", title: "Info or Delete removes it from this list", href: `#/p/${it.source_id}/${it.item_id}` },
         h(
           "div",
           { class: "art" },
@@ -5454,10 +5483,15 @@ const TV = {
   },
   /** Returns true when the key was handled here. */
   handleKey(e) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m;
     const k = normKey(e);
     const typing = (_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || k === "Backspace" && !typing;
+    if ((k === "Delete" || k === "Info" || k === "ContextMenu" || e.keyCode === 457 || e.keyCode === 46) && ((_d = (_c = e.target).matches) == null ? void 0 : _d.call(_c, "[data-clear]"))) {
+      e.preventDefault();
+      (_e = e.target.querySelector(".x")) == null ? void 0 : _e.click();
+      return true;
+    }
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) {
       e.preventDefault();
       TVSelect.open(e.target);
@@ -5468,7 +5502,7 @@ const TV = {
       TVKeyboard.open(e.target);
       return true;
     }
-    if (k === "Enter" && (e.target.id === "timeline" || ((_d = (_c = e.target).matches) == null ? void 0 : _d.call(_c, "input[type=range]")))) {
+    if (k === "Enter" && (e.target.id === "timeline" || ((_g = (_f = e.target).matches) == null ? void 0 : _g.call(_f, "input[type=range]")))) {
       e.preventDefault();
       const on = e.target.dataset.adjust !== "1";
       e.target.dataset.adjust = on ? "1" : "0";
@@ -5485,7 +5519,7 @@ const TV = {
     }
     const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[k];
     if (!dir) {
-      if (k === "Enter" && playerOpen && !overlay && !((_e = document.activeElement) == null ? void 0 : _e.closest("#controls"))) {
+      if (k === "Enter" && playerOpen && !overlay && !((_h = document.activeElement) == null ? void 0 : _h.closest("#controls"))) {
         e.preventDefault();
         togglePlay();
         idle.bump();
@@ -5502,14 +5536,14 @@ const TV = {
       this.lastStep = now;
     }
     if (typing && (dir === "left" || dir === "right")) return false;
-    if (((_g = (_f = e.target).matches) == null ? void 0 : _g.call(_f, "input[type=range]")) && e.target.dataset.adjust === "1") return false;
+    if (((_j = (_i = e.target).matches) == null ? void 0 : _j.call(_i, "input[type=range]")) && e.target.dataset.adjust === "1") return false;
     if (playerOpen && !overlay) {
       e.preventDefault();
-      const ctl = (_h = document.activeElement) == null ? void 0 : _h.closest("#controls");
+      const ctl = (_k = document.activeElement) == null ? void 0 : _k.closest("#controls");
       const hidden = $("#player").classList.contains("idle");
       if (!ctl || hidden) {
         idle.bump();
-        (((_i = Player.lastControl) == null ? void 0 : _i.isConnected) && Player.lastControl.closest("#controls") ? Player.lastControl : $("#play-btn")).focus({ preventScroll: true });
+        (((_l = Player.lastControl) == null ? void 0 : _l.isConnected) && Player.lastControl.closest("#controls") ? Player.lastControl : $("#play-btn")).focus({ preventScroll: true });
         return true;
       }
       const tl = $("#timeline");
@@ -5523,7 +5557,7 @@ const TV = {
       }
       this.move(dir);
       idle.bump();
-      if ((_j = document.activeElement) == null ? void 0 : _j.closest("#controls")) Player.lastControl = document.activeElement;
+      if ((_m = document.activeElement) == null ? void 0 : _m.closest("#controls")) Player.lastControl = document.activeElement;
       return true;
     }
     e.preventDefault();
@@ -5903,6 +5937,7 @@ const Settings = {
     ["security", "Security", "🔒", "The password for Hush", true],
     ["about", "About", "ℹ️", "Versions, app updates and the server address", false]
   ],
+  EXIT: ["exit", "Exit settings", "🏠", "Back to Home"],
   cards: {},
   init() {
     const byTitle = {};
@@ -5919,6 +5954,8 @@ const Settings = {
       }
     }
     $("#settings-hub").replaceChildren(...this.SECTIONS.filter(([id]) => this.cards[id]).map(([id, title, icon2, desc, admin]) => h("a", { class: `set-tile${admin ? " admin-only" : ""}`, href: `#/settings/${id}` }, h("span", { class: "set-ico" }, icon2), h("strong", {}, title), h("small", {}, desc))));
+    const [, etitle, eicon, edesc] = this.EXIT;
+    $("#settings-hub").append(h("a", { class: "set-tile exit", href: "#/home" }, h("span", { class: "set-ico" }, eicon), h("strong", {}, etitle), h("small", {}, edesc)));
   },
   show(sec) {
     var _a, _b;
@@ -5933,6 +5970,19 @@ const Settings = {
     TV.focusSoon(60);
   }
 };
+async function clearContinue(it, card) {
+  var _a;
+  try {
+    await api(`/api/progress/${it.media_key}`, { method: "DELETE" });
+    const holder = card.parentElement;
+    card.remove();
+    if (holder && !holder.querySelector(".card")) (holder.closest("section") || holder).remove();
+    toast("Removed from Continue watching");
+    (_a = TV.focusSoon) == null ? void 0 : _a.call(TV, 60);
+  } catch (err) {
+    toast(err.message);
+  }
+}
 async function route() {
   var _a, _b, _c, _d;
   requestAnimationFrame(() => Player.placeMini());

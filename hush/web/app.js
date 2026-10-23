@@ -1345,6 +1345,7 @@ const Catalog = {
       } }, link, h("button", { class: "btn primary", type: "submit" }, "Add to qBittorrent"));
     };
 
+    let showHidden = false;
     const refreshList = async () => {
       let s;
       try { s = await api("/api/qbit"); } catch (err) { listBox.replaceChildren(h("p", { class: "error" }, err.message)); return; }
@@ -1359,14 +1360,20 @@ const Catalog = {
         s.connected ? h("button", { class: "btn ghost", type: "button", onclick: () => { conn.querySelector("form")?.remove() || conn.append(form()); } }, "Change connection") : form());
       }
       if (!s.connected) { listBox.replaceChildren(); rssBox.replaceChildren(); addWrap.replaceChildren(); return; }
-      const listSig = JSON.stringify(s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed, t.category, t.save_path]));
+      const hidden = new Set(store.get("qbit_hidden", []));
+      const listSig = JSON.stringify([showHidden, [...hidden], s.torrents.map((t) => [t.hash, t.progress, t.state, t.dlspeed, t.category, t.save_path])]);
       if (listSig === listBox.dataset.sig) return;
       listBox.dataset.sig = listSig;
       if (!addWrap.firstChild) {                                         // built once, so a link being pasted is never wiped
         try { cats = await api("/api/qbit/categories"); } catch { /* categories are optional */ }
         addWrap.append(destBox(), addBox());
       }
-      listBox.replaceChildren(h("h2", {}, "Downloads"), ...(s.torrents.length ? s.torrents.map((t) => h("div", { class: "dl" },
+      const hide = (hash, on) => { const set = new Set(store.get("qbit_hidden", [])); on ? set.add(hash) : set.delete(hash); store.set("qbit_hidden", [...set]); listBox.dataset.sig = ""; refreshList(); };
+      const nHidden = s.torrents.filter((t) => hidden.has(t.hash)).length;
+      const shown = s.torrents.filter((t) => showHidden || !hidden.has(t.hash));
+      listBox.replaceChildren(h("div", { class: "dl-top" }, h("h2", {}, "Downloads"),
+        nHidden ? h("button", { class: "btn ghost", type: "button", onclick: () => { showHidden = !showHidden; listBox.dataset.sig = ""; refreshList(); } }, showHidden ? `Hide the ${nHidden} hidden` : `Show ${nHidden} hidden`) : null),
+        ...(shown.length ? shown.map((t) => h("div", { class: `dl${hidden.has(t.hash) ? " is-hidden" : ""}` },
         h("div", { class: "dl-top" }, h("strong", { class: "dl-name", title: t.name }, t.name),
           h("span", { class: "hint" }, [stateText(t), fmtSize(t.size), speed(t.dlspeed), t.done ? "" : eta(t.eta)].filter(Boolean).join(" · "))),
         t.save_path ? h("div", { class: "hint", title: "Where qBittorrent saves it" }, t.save_path) : null,
@@ -1381,7 +1388,8 @@ const Catalog = {
             if (!p) return;
             try { await api(`/api/qbit/location/${t.hash}`, { method: "POST", body: { path: p } }); toast("qBittorrent is moving it"); } catch (err) { toast(err.message); }
           } }, "Move…"),
-          h("button", { class: "btn ghost", type: "button", title: "Takes it off the list; the files stay", onclick: () => { if (confirm(`Remove "${t.name}" from qBittorrent's list? The files are kept.`)) act(t.hash, "remove"); } }, "Remove")))) : [h("p", { class: "hint" }, "Nothing downloading right now.")]));
+          h("button", { class: "btn ghost", type: "button", title: hidden.has(t.hash) ? "Show it in the list again" : "Hide it from this list (it stays in qBittorrent)", onclick: () => hide(t.hash, !hidden.has(t.hash)) }, hidden.has(t.hash) ? "Unhide" : "Hide"),
+          h("button", { class: "btn ghost", type: "button", title: "Takes it off the list; the files stay", onclick: () => { if (confirm(`Remove "${t.name}" from qBittorrent's list? The files are kept.`)) act(t.hash, "remove"); } }, "Remove")))) : [h("p", { class: "hint" }, nHidden ? "Everything here is hidden." : "Nothing downloading right now.")]));
     };
 
     const refreshRss = async () => {
@@ -1393,7 +1401,7 @@ const Catalog = {
             e.currentTarget.disabled = true; try { await api("/api/qbit/rss/refresh", { method: "POST", body: { name: f.name } }); toast("qBittorrent is checking the feed"); setTimeout(refreshRss, 4000); } catch (err) { toast(err.message); }
           } }, "Check now")),
           f.has_error ? h("p", { class: "error" }, "qBittorrent could not read this feed") : null,
-          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 10).map((a) => h("li", {},
+          h("ul", { class: "dl-articles" }, ...f.articles.slice(0, 40).map((a) => h("li", {},
             h("span", { class: "grow" }, a.title, a.date ? h("span", { class: "hint" }, ` · ${new Date(a.date).toLocaleDateString()}`) : null),
             a.in_client ? h("span", { class: "hint" }, "In qBittorrent")
               : h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
@@ -1730,9 +1738,10 @@ const Catalog = {
       h("span", { class: "name" }, m.title), h("span", { class: "sub" }, isShow ? plural(m.episodes, "episode") : (m.year || "")));
     movies.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title))); shows.sort((a, b) => sortKey(a.title).localeCompare(sortKey(b.title)));
     const rows = [
-      this.shelf("Continue watching", null, cont.map((it) => h("a", { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
+      this.shelf("Continue watching", null, cont.map((it) => h("a", { class: "card wide", "data-clear": "1", title: "Info or Delete removes it from this list", href: `#/p/${it.source_id}/${it.item_id}` },
         h("div", { class: "art" }, it.art_url ? h("img", { src: thumb(it.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
-          it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null),
+          it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null,
+          it.media_key ? h("button", { class: "x", type: "button", title: "Remove from Continue watching", "aria-label": `Remove ${it.title}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); clearContinue(it, e.currentTarget.closest(".card")); } }, "✕") : null),
         h("span", { class: "name" }, it.title),
         h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))))),
       this.shelf("Up next on My List", "#/mylist", upNext.slice(0, 16).map((i) => h("a", { class: "card wide", href: `#/p/${i.progress.next.source_id}/${i.progress.next.item_id}`,
@@ -1840,7 +1849,7 @@ const Catalog = {
     const row = h("section", { class: "continue" }, h("h2", {}, "Continue watching"));
     const grid = h("div", { class: "grid shelf" });
     for (const it of items) {
-      const card = h("a", { class: "card wide", href: `#/p/${it.source_id}/${it.item_id}` },
+      const card = h("a", { class: "card wide", "data-clear": "1", title: "Info or Delete removes it from this list", href: `#/p/${it.source_id}/${it.item_id}` },
         h("div", { class: "art" }, it.art_url ? h("img", { src: thumb(it.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, it.title),
           it.fraction != null ? h("div", { class: "pbar" }, h("i", { style: `width:${Math.round(it.fraction * 100)}%` })) : null,
           h("button", { class: "x", type: "button", title: "Remove from Continue watching", "aria-label": `Remove ${it.title}`, onclick: async (e) => {
@@ -3492,6 +3501,9 @@ const TV = {
     const k = normKey(e);
     const typing = e.target.matches?.("input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || (k === "Backspace" && !typing);
+    if ((k === "Delete" || k === "Info" || k === "ContextMenu" || e.keyCode === 457 || e.keyCode === 46) && e.target.matches?.("[data-clear]")) {
+      e.preventDefault(); e.target.querySelector(".x")?.click(); return true;
+    }
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) { e.preventDefault(); TVSelect.open(e.target); return true; }
     if (k === "Enter" && !TVKeyboard.el && TVKeyboard.typeable(e.target)) { e.preventDefault(); TVKeyboard.open(e.target); return true; }
     if (k === "Enter" && (e.target.id === "timeline" || e.target.matches?.("input[type=range]"))) {                          // OK on the progress bar: left/right now seek until OK or Back
@@ -3753,6 +3765,7 @@ const Settings = {
     ["people", "People", "👥", "Profiles and who can watch what", true], ["server", "Server", "⚙️", "How video is prepared for your screens", true],
     ["security", "Security", "🔒", "The password for Hush", true], ["about", "About", "ℹ️", "Versions, app updates and the server address", false],
   ],
+  EXIT: ["exit", "Exit settings", "🏠", "Back to Home"],
   cards: {},
   init() {
     const byTitle = {};
@@ -3760,6 +3773,8 @@ const Settings = {
     for (const [id, title, , , admin] of this.SECTIONS) { const c = byTitle[title]; if (c) { c.dataset.sec = id; c.classList.toggle("admin-only", admin); this.cards[id] = c; } }
     $("#settings-hub").replaceChildren(...this.SECTIONS.filter(([id]) => this.cards[id]).map(([id, title, icon, desc, admin]) =>
       h("a", { class: `set-tile${admin ? " admin-only" : ""}`, href: `#/settings/${id}` }, h("span", { class: "set-ico" }, icon), h("strong", {}, title), h("small", {}, desc))));
+    const [, etitle, eicon, edesc] = this.EXIT;
+    $("#settings-hub").append(h("a", { class: "set-tile exit", href: "#/home" }, h("span", { class: "set-ico" }, eicon), h("strong", {}, etitle), h("small", {}, edesc)));
   },
   show(sec) {
     if (!this.cards.display) this.init();
@@ -3772,6 +3787,17 @@ const Settings = {
     TV.focusSoon(60);
   },
 };
+
+/** Takes a title off "Continue watching" (its place in the file is forgotten; the title stays in the library). */
+async function clearContinue(it, card) {
+  try {
+    await api(`/api/progress/${it.media_key}`, { method: "DELETE" });
+    const holder = card.parentElement; card.remove();
+    if (holder && !holder.querySelector(".card")) (holder.closest("section") || holder).remove();
+    toast("Removed from Continue watching");
+    TV.focusSoon?.(60);
+  } catch (err) { toast(err.message); }
+}
 
 async function route() {
   requestAnimationFrame(() => Player.placeMini());           // the sidebar may have appeared or gone
