@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 e3c58103f34c05f545a1a7e1e28884ff8bcc9d2bdf6f344b62beb02c1accf34c) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 dd7884ebeae031d2c59c9cdd1f7b53424547c9924fd79f9b9e30e552f7ab701c) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -1027,10 +1027,15 @@ const Saver = {
     box.replaceChildren(pages[this.i].render());
     void box.offsetWidth;
     box.classList.add("in");
+    if (this.on) this.drift();
   },
   drift() {
-    const c = $("#sv-card"), x = Math.round((Math.random() - 0.5) * 18), y = Math.round((Math.random() - 0.5) * 16);
-    c.style.transform = `translate(${x}vw, ${y}vh)`;
+    const c = $("#sv-card"), m = Math.round(innerWidth * 0.04);
+    const slackX = Math.max(0, innerWidth - c.offsetWidth - 2 * m), slackY = Math.max(0, innerHeight - c.offsetHeight - 2 * m);
+    const first = !c.dataset.placed;
+    c.dataset.placed = "1";
+    const x = m + Math.round(slackX * (first ? 0.1 : Math.random())), y = m + Math.round(slackY * (first ? 0.85 : Math.random()));
+    c.style.transform = `translate(${x}px, ${y}px)`;
   },
   async show() {
     var _a, _b;

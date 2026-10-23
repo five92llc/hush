@@ -670,11 +670,14 @@ const Saver = {
     const pages = Ticker.pages().filter((p) => !["clock", "world", "weather", "server"].includes(p.id));
     if (!pages.length) { $("#sv-info").replaceChildren(); return; }
     this.i = ((this.i ?? -1) + 1) % pages.length;
-    const box = $("#sv-info"); box.classList.remove("in"); box.replaceChildren(pages[this.i].render()); void box.offsetWidth; box.classList.add("in");
+    const box = $("#sv-info"); box.classList.remove("in"); box.replaceChildren(pages[this.i].render()); void box.offsetWidth; box.classList.add("in"); if (this.on) this.drift();
   },
   drift() {                                              // the card wanders a little so no pixel stays lit
-    const c = $("#sv-card"), x = Math.round((Math.random() - 0.5) * 18), y = Math.round((Math.random() - 0.5) * 16);
-    c.style.transform = `translate(${x}vw, ${y}vh)`;
+    const c = $("#sv-card"), m = Math.round(innerWidth * 0.04);
+    const slackX = Math.max(0, innerWidth - c.offsetWidth - 2 * m), slackY = Math.max(0, innerHeight - c.offsetHeight - 2 * m);
+    const first = !c.dataset.placed; c.dataset.placed = "1";
+    const x = m + Math.round(slackX * (first ? 0.1 : Math.random())), y = m + Math.round(slackY * (first ? 0.85 : Math.random()));     // always inside the screen
+    c.style.transform = `translate(${x}px, ${y}px)`;
   },
   async show() {
     if (this.on) return;

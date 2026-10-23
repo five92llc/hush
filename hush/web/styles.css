@@ -793,7 +793,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .sv-bg.show { opacity: .55; animation: sv-pan 40s ease-in-out infinite alternate; }
 @keyframes sv-pan { from { transform: scale(1.04) translate(0, 0); } to { transform: scale(1.14) translate(-1.5%, -1%); } }
 .sv-shade { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 70%, rgba(0,0,0,.55), rgba(0,0,0,.2) 55%, rgba(0,0,0,.6)); }
-.sv-card { position: absolute; left: 6vw; bottom: 9vh; max-width: 80vw; transition: transform 6s ease-in-out; text-shadow: 0 2px 18px rgba(0,0,0,.6); }
+.sv-card { position: absolute; left: 0; top: 0; max-width: 92vw; box-sizing: border-box; transition: transform 6s ease-in-out; text-shadow: 0 2px 18px rgba(0,0,0,.6); }
 .sv-time { font-size: clamp(4rem, 15vw, 11rem); font-weight: 700; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
 .sv-date { font-size: clamp(1.1rem, 2.6vw, 2rem); opacity: .85; margin: .3rem 0 1rem; }
 .sv-weather { display: flex; align-items: center; gap: .7rem; font-size: clamp(1.1rem, 2.4vw, 1.8rem); } .sv-wico { font-size: 1.4em; } .sv-wtemp { font-weight: 700; } .sv-wtext { opacity: .8; }
