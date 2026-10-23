@@ -2985,7 +2985,23 @@ video.addEventListener("play", () => { $("#player").classList.add("playing"); $(
 video.addEventListener("pause", () => { $("#player").classList.remove("playing"); $("#play-btn").setAttribute("aria-label", "Play"); Player.Audio.reset(); idle.show(); });
 video.addEventListener("seeked", () => Player.Audio.reset());
 video.addEventListener("ratechange", () => Player.Audio.reset());
-video.addEventListener("waiting", () => Player.Audio.reset());
+/** Stalls are measured and sent to the server log (Hush's own: nothing leaves your network), so slow spots can be traced to the stream, the network or the screen. */
+const Stall = {
+  since: 0, count: 0, total: 0,
+  begin() { if (!this.since && Player.info && !video.seeking) this.since = performance.now(); },
+  end() {
+    if (!this.since) return;
+    const ms = performance.now() - this.since; this.since = 0;
+    if (ms < 1200) return;
+    this.count++; this.total += ms;
+    const ahead = video.buffered.length ? Math.max(0, video.buffered.end(video.buffered.length - 1) - video.currentTime) : 0, c = navigator.connection || {};
+    window.hushReport?.({ kind: "stall", message: `stalled ${(ms / 1000).toFixed(1)}s at ${Math.round(Player.now())}s (stall #${this.count}, ${(this.total / 1000).toFixed(0)}s lost in all; mode ${Player.mode}${Player.hls ? ", hls" : ""}${Player.liveFiltered ? ", live filter" : ""}, ${Player.info.live ? "live" : "file"}, codec ${Player.info.probe?.video?.[0]?.codec || "?"}, buffer ahead ${ahead.toFixed(1)}s, link ${c.effectiveType || "?"} ${c.downlink || "?"}Mbps rtt ${c.rtt || "?"}ms)` });
+  },
+  reset() { this.since = 0; this.count = 0; this.total = 0; },
+};
+video.addEventListener("waiting", () => { Player.Audio.reset(); Stall.begin(); });
+for (const ev of ["playing", "canplaythrough", "seeked"]) video.addEventListener(ev, () => Stall.end());
+video.addEventListener("emptied", () => Stall.reset());
 video.addEventListener("playing", () => { WaitScreen.stop(); Player.message(null); Player.Audio.reset(); Player.report(true); if (!Progress.armed) Progress.arm(); Player.watchPicture(); });
 video.addEventListener("pause", () => { if (!video.ended) Progress.save(true); });
 $("#resume-restart").addEventListener("click", () => {

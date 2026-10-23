@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 9a89076e2fc485a10751516b69bc158018e13f9cd11acd784a151d54e53cd89a) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 fa38fc747a11dec1e55366d16b050df4419c0a287ce1c8ea6698828db67f5193) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -4648,7 +4648,36 @@ video.addEventListener("pause", () => {
 });
 video.addEventListener("seeked", () => Player.Audio.reset());
 video.addEventListener("ratechange", () => Player.Audio.reset());
-video.addEventListener("waiting", () => Player.Audio.reset());
+const Stall = {
+  since: 0,
+  count: 0,
+  total: 0,
+  begin() {
+    if (!this.since && Player.info && !video.seeking) this.since = performance.now();
+  },
+  end() {
+    var _a, _b, _c, _d;
+    if (!this.since) return;
+    const ms = performance.now() - this.since;
+    this.since = 0;
+    if (ms < 1200) return;
+    this.count++;
+    this.total += ms;
+    const ahead = video.buffered.length ? Math.max(0, video.buffered.end(video.buffered.length - 1) - video.currentTime) : 0, c = navigator.connection || {};
+    (_d = window.hushReport) == null ? void 0 : _d.call(window, { kind: "stall", message: `stalled ${(ms / 1e3).toFixed(1)}s at ${Math.round(Player.now())}s (stall #${this.count}, ${(this.total / 1e3).toFixed(0)}s lost in all; mode ${Player.mode}${Player.hls ? ", hls" : ""}${Player.liveFiltered ? ", live filter" : ""}, ${Player.info.live ? "live" : "file"}, codec ${((_c = (_b = (_a = Player.info.probe) == null ? void 0 : _a.video) == null ? void 0 : _b[0]) == null ? void 0 : _c.codec) || "?"}, buffer ahead ${ahead.toFixed(1)}s, link ${c.effectiveType || "?"} ${c.downlink || "?"}Mbps rtt ${c.rtt || "?"}ms)` });
+  },
+  reset() {
+    this.since = 0;
+    this.count = 0;
+    this.total = 0;
+  }
+};
+video.addEventListener("waiting", () => {
+  Player.Audio.reset();
+  Stall.begin();
+});
+for (const ev of ["playing", "canplaythrough", "seeked"]) video.addEventListener(ev, () => Stall.end());
+video.addEventListener("emptied", () => Stall.reset());
 video.addEventListener("playing", () => {
   WaitScreen.stop();
   Player.message(null);

@@ -64,14 +64,19 @@ class HLSManager:
         return sid
 
     def _wait_ready(self, sid: str, timeout: float) -> None:
-        s = self.sessions[sid]
+        s = self.sessions.get(sid)
+        if not s:
+            raise HLSError("This stream was replaced by a newer one")
         playlist = s.folder / "index.m3u8"
         end = time.time() + timeout
         while time.time() < end:
             if playlist.exists() and ".ts" in playlist.read_text(errors="ignore"):
                 return
             if s.proc.poll() is not None and not (playlist.exists() and ".ts" in playlist.read_text(errors="ignore")):
-                tail = (s.folder / "ffmpeg.log").read_text(errors="ignore")[-300:].strip()
+                try:
+                    tail = (s.folder / "ffmpeg.log").read_text(errors="ignore")[-300:].strip()
+                except OSError:
+                    raise HLSError("This stream was replaced by a newer one")           # the same tab started something else meanwhile
                 raise HLSError(f"ffmpeg stopped: {tail or 'unknown error'}")
             time.sleep(0.15)
         raise HLSError("The stream did not start in time")
