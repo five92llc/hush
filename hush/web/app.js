@@ -1969,6 +1969,16 @@ const Player = {
     }).catch(() => {});
   },
 
+  /* ---------- sound sync ---------- */
+  avsync: Number(store.get("avsync", 0)) || 0,
+  setAvsync(ms) {
+    if (IS_WEBKIT || IS_LG) { toast("Sound sync isn't available on this screen's player."); return; }
+    this.Audio.ensure();
+    this.avsync = Math.max(0, Math.min(3000, ms)); store.set("avsync", this.avsync);
+    this.Audio.setDelay(this.avsync);
+    $("#avsync-val").textContent = `${this.avsync} ms`;
+  },
+
   /* ---------- captions: one button for every kind of playback ---------- */
   captionsOn: false,
   applyCaptionButton() { const b = $("#cc-btn"); b.setAttribute("aria-pressed", String(this.captionsOn)); b.title = this.captionsOn ? "Captions on (C)" : "Captions off (C)"; },
@@ -2181,8 +2191,11 @@ const Player = {
         this.mute = ctx.createGain(); this.master = ctx.createGain(); this.toneGain = ctx.createGain();
         this.toneGain.gain.value = 0;
         const osc = ctx.createOscillator(); osc.type = "sine"; osc.frequency.value = 660;
-        source.connect(this.mute).connect(this.master).connect(ctx.destination);
-        osc.connect(this.toneGain).connect(this.master);
+        this.delay = ctx.createDelay(3);                                  // sound sync: holds the sound back (the mutes and tones pass through it too, so they stay in step)
+        this.delay.delayTime.value = Player.avsync / 1000;
+        source.connect(this.mute).connect(this.delay);
+        osc.connect(this.toneGain).connect(this.delay);
+        this.delay.connect(this.master).connect(ctx.destination);
         osc.start();
         this.ctx = ctx;
         this.master.gain.value = Number($("#volume").value);
@@ -2192,6 +2205,7 @@ const Player = {
       }
       if (!this.timer) this.timer = setInterval(() => this.tick(), 25);
     },
+    setDelay(ms) { if (this.delay) this.delay.delayTime.setTargetAtTime(ms / 1000, this.ctx.currentTime, 0.02); },
     volume(v) { if (this.master) this.master.gain.value = v; else video.volume = v; },
     set(muted, at) {
       if (Player.serverMuted()) { video.muted = false; return; }
@@ -2727,6 +2741,11 @@ $("#filter-btn").addEventListener("click", () => {
 });
 $("#mode-select").addEventListener("change", (e) => { Player.bleep = e.target.value === "bleep"; store.set(pk("mode"), e.target.value); Player.Audio.reset(); Player.renderPanel(); });
 $("#sub-select").addEventListener("change", (e) => { Player.loadSubs(e.target.value); Player.captionsOn = !!e.target.value; store.set(pk("cc"), Player.captionsOn); Player.applyCaptionButton(); });
+$("#avsync-less").addEventListener("click", () => Player.setAvsync(Player.avsync - 50));
+$("#avsync-more").addEventListener("click", () => Player.setAvsync(Player.avsync + 50));
+$("#avsync-reset").addEventListener("click", () => Player.setAvsync(0));
+$("#avsync-val").textContent = `${Player.avsync} ms`;
+if (window.HushApp?.version) { const v = $("#app-ver"); v.textContent = `app ${window.HushApp.version()}`; v.hidden = false; }
 $("#cc-btn").addEventListener("click", () => Player.setCaptions(!Player.captionsOn));
 $("#audio-select").addEventListener("change", async (e) => {
   const t = Player.now();
@@ -2836,6 +2855,7 @@ document.addEventListener("keydown", (e) => {
   const map = {
     n: () => Queue.next(), p: () => Queue.prev(), s: () => { if (!$("#shuffle-btn").hidden) Queue.toggleShuffle(); }, r: () => { if (!$("#repeat-btn").hidden) Queue.cycleRepeat(); },
     c: () => Player.setCaptions(!Player.captionsOn),
+    ",": () => Player.setAvsync(Player.avsync - 50), ".": () => Player.setAvsync(Player.avsync + 50),
     " ": togglePlay, k: togglePlay, w: () => Player.toggleMini(), f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10), l: () => Player.seek(Player.now() + 10),
     ...((IS_TV_DEVICE || TV.on) ? {} : { arrowleft: () => Player.seek(Player.now() - 10), arrowright: () => Player.seek(Player.now() + 10) }),

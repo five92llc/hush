@@ -47,6 +47,7 @@
 <div id="app" class="app" hidden>
   <header class="topbar">
     <a href="#/" class="brand-mark small" aria-label="Hush home">Hush</a>
+    <span id="app-ver" class="app-ver" hidden></span>
     <div class="topbar-actions">
       <button id="profile-btn" class="btn ghost profile-chip" type="button" aria-haspopup="dialog" title="Switch profile">
         <span id="profile-avatar" class="avatar" aria-hidden="true"></span><span id="profile-name"></span>
@@ -280,6 +281,14 @@
       <div id="settings" class="settings" hidden>
         <label>Audio track <select id="audio-select"></select></label>
         <label>Subtitles <select id="sub-select"><option value="">Off</option></select></label>
+        <div class="avsync" id="avsync-row">
+          <span>Sound sync</span>
+          <button id="avsync-less" class="btn ghost" type="button" aria-label="Sound earlier by 50 milliseconds">−</button>
+          <output id="avsync-val">0 ms</output>
+          <button id="avsync-more" class="btn ghost" type="button" aria-label="Sound later by 50 milliseconds">+</button>
+          <button id="avsync-reset" class="btn ghost" type="button">Reset</button>
+          <small class="hint">If the sound comes before the picture, add delay. Keys: , and .</small>
+        </div>
         <label class="check"><input id="mini-toggle" type="checkbox" checked> Keep playing in a mini player when I go back to the library</label>
         <label class="check"><input id="autoplay-toggle" type="checkbox" checked> Autoplay: start a title when it opens and go on to the next one</label>
         <label>When filtering

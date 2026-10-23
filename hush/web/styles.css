@@ -740,3 +740,8 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 
 .icon-btn.cc { width: auto; padding: 0 .55rem; font-weight: 800; font-size: .8rem; letter-spacing: .02em; }
 .icon-btn.cc[aria-pressed="true"] { background: var(--lamp); color: var(--ink); }
+
+.app-ver { align-self: center; margin-left: .6rem; font-size: .75rem; color: var(--muted, #8a8fa0); letter-spacing: .02em; }
+.avsync { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
+.avsync output { min-width: 4.5rem; text-align: center; font-variant-numeric: tabular-nums; }
+.avsync .hint { flex-basis: 100%; }

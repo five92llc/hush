@@ -257,3 +257,5 @@ Every Live TV channel has a **permanent number**, like a real lineup. Existing c
 Every player has a **CC** button (or press **C**, or use *Captions* on the phone remote). On a **live channel** Hush treats every channel as captioned: it shows the broadcast's own captions when the stream carries them and otherwise listens to the channel and writes the lines itself, about 10 seconds behind live (the same delay the language filter uses). With the filter off, captions are shown but nothing is muted. On **movies and shows** CC turns on the English subtitle track, or the words from the scan when there is no track. Your choice is remembered per profile. **Shuffle** and **Repeat** only appear while music is playing.
 
 On Live TV the channel number is typed into the box in the **Channels** pop-out, and the Language button is hidden.
+
+In the player settings, **Sound sync** adds delay to the sound (− / + in 50 ms steps, or the , and . keys) when it plays before the picture. It is remembered, and is not available on LG and Apple players. The Android app shows its version at the top of the page.
