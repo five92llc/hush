@@ -451,33 +451,111 @@ $("#guide-num-set").addEventListener("click", async () => {
 });
 
 /** The top bar panel: slides between the clock, the weather, the forecast, world clocks and the server version. */
+const QUOTES = [
+  ["The best way out is always through.", "Robert Frost"], ["Well begun is half done.", "Aristotle"], ["Fortune favors the bold.", "Virgil"],
+  ["It always seems impossible until it's done.", "Nelson Mandela"], ["Simplicity is the ultimate sophistication.", "Leonardo da Vinci"],
+  ["What we think, we become.", "Buddha"], ["The only way to do great work is to love what you do.", "Steve Jobs"], ["Stay hungry, stay foolish.", "Stewart Brand"],
+  ["Do what you can, with what you have, where you are.", "Theodore Roosevelt"], ["Quality is not an act, it is a habit.", "Will Durant"],
+  ["Not all those who wander are lost.", "J.R.R. Tolkien"], ["Action is the foundational key to all success.", "Pablo Picasso"],
+  ["Energy and persistence conquer all things.", "Benjamin Franklin"], ["Whether you think you can or you can't, you're right.", "Henry Ford"],
+  ["Turn your wounds into wisdom.", "Oprah Winfrey"], ["Happiness depends upon ourselves.", "Aristotle"], ["Make each day your masterpiece.", "John Wooden"],
+  ["Everything you can imagine is real.", "Pablo Picasso"], ["The journey of a thousand miles begins with a single step.", "Lao Tzu"],
+  ["Knowledge is power.", "Francis Bacon"], ["The future depends on what you do today.", "Mahatma Gandhi"], ["Kindness is a language everyone understands.", "Mark Twain"],
+  ["In the middle of difficulty lies opportunity.", "Albert Einstein"], ["Dream big and dare to fail.", "Norman Vaughan"], ["Hope is a good breakfast.", "Francis Bacon"],
+  ["Rest is not idleness.", "John Lubbock"], ["Small steps every day.", "Proverb"], ["A smooth sea never made a skilled sailor.", "Proverb"],
+  ["Where there is love there is life.", "Mahatma Gandhi"], ["Wherever you go, go with all your heart.", "Confucius"], ["Joy is the simplest form of gratitude.", "Karl Barth"],
+];
+const MOONS = [["New moon", "🌑"], ["Waxing crescent", "🌒"], ["First quarter", "🌓"], ["Waxing gibbous", "🌔"], ["Full moon", "🌕"], ["Waning gibbous", "🌖"], ["Last quarter", "🌗"], ["Waning crescent", "🌘"]];
+
+/** The top bar panel: slides between the clock, weather, scores, headlines and more. */
 const Ticker = {
-  SLIDES: [["clock", "Clock and date"], ["weather", "Weather now"], ["details", "Weather details"], ["forecast", "Forecast"], ["world", "World clocks"], ["server", "Server version"]],
-  weather: null, clocks: [], at: 0, order: [], timer: null, tick: null, ready: false,
+  SLIDES: [["clock", "Clock and date"], ["weather", "Weather now"], ["details", "Weather details"], ["forecast", "Forecast"], ["sun", "Sunset and moon"], ["world", "World clocks"],
+    ["channel", "What's on this channel"], ["coming", "Coming up (your shows)"], ["downloads", "Downloads"], ["sports", "Sports scores"], ["news", "Headlines"],
+    ["photo", "Photo of the day"], ["health", "Server health"], ["quote", "Quote of the day"], ["server", "Server version"]],
+  data: {}, clocks: [], at: 0, order: [], timer: null, tick: null,
   enabled(id) { return store.get(`tk-${id}`, true) !== false; },
-  async refresh() {
-    try { this.weather = await api("/api/weather"); } catch { /* keep the last one */ }
-    try { this.clocks = await api("/api/clocks"); } catch { /* keep the last one */ }
-    this.build();
+  get(path, key) { return api(path).then((v) => { this.data[key] = v; }).catch(() => { this.data[key] = null; }); },
+  async refreshSlow() {
+    const want = (id) => this.enabled(id);
+    const jobs = [this.get("/api/weather", "weather"), api("/api/clocks").then((v) => { this.clocks = v; }).catch(() => {})];
+    if (want("coming")) jobs.push(this.get("/api/library/upcoming", "coming"));
+    if (want("news") && !isKids()) jobs.push(this.get("/api/ticker/news", "news"));
+    if (want("photo")) jobs.push(this.get("/api/ticker/photo", "photo"));
+    await Promise.all(jobs); this.refreshPages();
+  },
+  async refreshFast() {
+    const want = (id) => this.enabled(id) && !document.hidden;
+    const jobs = [];
+    if (want("sports")) jobs.push(this.get("/api/ticker/sports", "sports"));
+    if (want("downloads") && !isKids()) jobs.push(this.get("/api/qbit", "downloads"));
+    if (want("health") && !isKids()) jobs.push(this.get("/api/ticker/health", "health"));
+    if (want("channel") && Player.chan && Player.info?.live) jobs.push(api(`/api/live/epg?keys=${Player.chan}`).then((v) => { this.data.epg = { key: Player.chan, ...(v[Player.chan] || {}) }; }).catch(() => {}));
+    await Promise.all(jobs); this.refreshPages();
   },
   fmtTime(tz, seconds) {
     try { return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(seconds ? { second: "2-digit" } : {}), ...(tz ? { timeZone: tz } : {}) }); }
     catch { return "--:--"; }
   },
   dayName(iso) { try { return new Date(`${iso}T12:00:00`).toLocaleDateString([], { weekday: "short" }); } catch { return iso; } },
+  row(icon, ...rest) { return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, icon), ...rest); },
+  moon() {
+    const age = ((Date.now() / 86400000 + 2440587.5 - 2451550.1) / 29.530588853) % 1, a = age < 0 ? age + 1 : age;
+    const [name, icon] = MOONS[Math.round(a * 8) % 8];
+    return { name, icon, lit: Math.round((1 - Math.cos(a * 2 * Math.PI)) / 2 * 100) };
+  },
+  untilSun(w) {
+    const mins = (hhmm) => { const [a, b] = (hhmm || "0:0").split(":").map(Number); return a * 60 + b; };
+    let now;
+    try { const parts = new Intl.DateTimeFormat("en-GB", { timeZone: w.timezone || undefined, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()).split(":").map(Number); now = parts[0] * 60 + parts[1]; }
+    catch { const d = new Date(); now = d.getHours() * 60 + d.getMinutes(); }
+    const rise = mins(w.sunrise), set = mins(w.sunset);
+    let label, d;
+    if (now < rise) { label = "Sunrise in"; d = rise - now; } else if (now < set) { label = "Sunset in"; d = set - now; } else { label = "Sunrise in"; d = 1440 - now + rise; }
+    return `${label} ${Math.floor(d / 60)}h ${String(d % 60).padStart(2, "0")}m`;
+  },
   pages() {
-    const w = this.weather, ok = w?.configured && !w.unavailable;
+    const w = this.data.weather, ok = w?.configured && !w.unavailable, D = this.data;
     const out = [];
     for (const [id] of this.SLIDES) {
       if (!this.enabled(id)) continue;
-      if (id === "clock") out.push({ id, render: () => this.clockSlide() });
-      else if (id === "weather" && ok) out.push({ id, render: () => this.weatherSlide(w) });
-      else if (id === "details" && ok) out.push({ id, render: () => this.detailsSlide(w) });
-      else if (id === "forecast" && ok && w.days?.length) out.push({ id, render: () => this.forecastSlide(w) });
-      else if (id === "world" && this.clocks.length) for (let i = 0; i < this.clocks.length; i += 3) { const part = this.clocks.slice(i, i + 3); out.push({ id, render: () => this.worldSlide(part) }); }
-      else if (id === "server" && S.config?.version) out.push({ id, render: () => h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🖥️"), h("span", { class: "tk-main" }, "Hush server"), h("span", { class: "tk-sub" }, S.config.version)) });
+      const add = (render) => out.push({ id, render });
+      if (id === "clock") add(() => this.clockSlide());
+      else if (id === "weather" && ok) add(() => this.weatherSlide(w));
+      else if (id === "details" && ok) add(() => this.detailsSlide(w));
+      else if (id === "forecast" && ok && w.days?.length) add(() => this.forecastSlide(w));
+      else if (id === "sun") add(() => { const m = this.moon(); return this.row(m.icon, h("span", { class: "tk-main" }, m.name), h("span", { class: "tk-sub" }, `${m.lit}% lit`), ok && w.sunset ? h("span", { class: "tk-chip" }, this.untilSun(w)) : null); });
+      else if (id === "world" && this.clocks.length) for (let i = 0; i < this.clocks.length; i += 3) { const part = this.clocks.slice(i, i + 3); add(() => this.worldSlide(part)); }
+      else if (id === "channel" && Player.chan && Player.info?.live && D.epg?.key === Player.chan && D.epg.now) add(() => {
+        const e = D.epg, until = new Date(e.now.stop * 1000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+        return this.row("📺", h("span", { class: "tk-main" }, e.now.title), h("span", { class: "tk-sub" }, `until ${until}${e.next ? ` · next: ${e.next.title}` : ""}`));
+      });
+      else if (id === "coming" && D.coming?.length) add(() => { const u = D.coming[0], more = D.coming[1];
+        return this.row("🗓️", h("span", { class: "tk-main" }, u.show_title), h("span", { class: "tk-sub" }, `S${u.season}E${u.episode} · ${when(u.airs_at)}${more ? ` · then ${more.show_title}` : ""}`)); });
+      else if (id === "downloads" && D.downloads?.connected) {
+        const act = (D.downloads.torrents || []).filter((t) => !t.done && !t.paused);
+        if (act.length) add(() => { const speed = act.reduce((n, t) => n + t.dlspeed, 0), t = act[0];
+          return this.row("⬇️", h("span", { class: "tk-main" }, `${act.length} downloading`), h("span", { class: "tk-chip" }, `${(speed / 1048576).toFixed(1)} MB/s`),
+            h("span", { class: "tk-sub" }, `${t.name.slice(0, 48)} · ${Math.round(t.progress * 100)}%`)); });
+      } else if (id === "sports" && D.sports?.length) { const games = D.sports; for (let i = 0; i < Math.min(games.length, 9); i += 3) { const part = games.slice(i, i + 3); add(() => this.sportsSlide(part)); } }
+      else if (id === "news" && D.news?.length) for (const n of D.news.slice(0, 3)) add(() => this.row("📰", h("span", { class: "tk-main tk-wrap" }, n.title), h("span", { class: "tk-sub" }, n.source)));
+      else if (id === "photo" && D.photo?.available) add(() => h("div", { class: "tk-row" }, h("img", { class: "tk-photo", src: `${D.photo.url}?d=${D.photo.date || ""}`, alt: "" }), h("span", { class: "tk-main tk-wrap" }, D.photo.title), h("span", { class: "tk-sub" }, "NASA photo of the day")));
+      else if (id === "health" && D.health && D.health.load != null) add(() => { const x = D.health;
+        return this.row("🖥️", h("span", { class: "tk-chip" }, h("em", {}, "Load"), `${x.load} / ${x.cpus}`), x.mem_pct != null ? h("span", { class: "tk-chip" }, h("em", {}, "Memory"), `${x.mem_pct}%`) : null,
+          x.disk_free_gb != null ? h("span", { class: "tk-chip" }, h("em", {}, "Disk free"), `${x.disk_free_gb} GB`) : null,
+          x.scans ? h("span", { class: "tk-chip" }, h("em", {}, "Scans"), x.scans) : null, x.live_sessions ? h("span", { class: "tk-chip" }, h("em", {}, "Live filters"), x.live_sessions) : null); });
+      else if (id === "quote") add(() => { const day = Math.floor(Date.now() / 86400000), q = QUOTES[day % QUOTES.length];
+        return this.row("💬", h("span", { class: "tk-main tk-wrap" }, `“${q[0]}”`), h("span", { class: "tk-sub" }, q[1])); });
+      else if (id === "server" && S.config?.version) add(() => this.row("🖥️", h("span", { class: "tk-main" }, "Hush server"), h("span", { class: "tk-sub" }, S.config.version)));
     }
     return out;
+  },
+  sportsSlide(games) {
+    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🏟️"), ...games.map((g) => {
+      const live = g.state === "in", pre = g.state === "pre";
+      const score = pre ? `${g.away} @ ${g.home}` : `${g.away} ${g.away_score} – ${g.home_score} ${g.home}`;
+      const note = pre ? new Date(g.date).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }) : g.detail;
+      return h("span", { class: `tk-game${live ? " live" : ""}` }, h("em", {}, g.league), h("strong", {}, score), h("small", {}, note));
+    }));
   },
   clockSlide() {
     const t = h("span", { class: "tk-big" }), d = h("span", { class: "tk-sub" });
@@ -486,12 +564,11 @@ const Ticker = {
     return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🕒"), t, d);
   },
   weatherSlide(w) {
-    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, w.icon || "🌡️"), h("span", { class: "tk-big" }, `${w.temp}${w.unit}`),
-      h("span", { class: "tk-main" }, w.text), h("span", { class: "tk-sub" }, `${w.place} · H ${w.high}° L ${w.low}°`));
+    return this.row(w.icon || "🌡️", h("span", { class: "tk-big" }, `${w.temp}${w.unit}`), h("span", { class: "tk-main" }, w.text), h("span", { class: "tk-sub" }, `${w.place} · H ${w.high}° L ${w.low}°`));
   },
   detailsSlide(w) {
     const bit = (k, v) => h("span", { class: "tk-chip" }, h("em", {}, k), v);
-    return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, w.icon || "🌡️"), h("span", { class: "tk-main" }, `Feels like ${w.feels}°`),
+    return this.row(w.icon || "🌡️", h("span", { class: "tk-main" }, `Feels like ${w.feels}°`),
       bit("Humidity", w.humidity != null ? `${w.humidity}%` : "–"), bit("Wind", `${w.wind} ${w.wind_unit}`), bit("Rain", w.rain != null ? `${w.rain}%` : "–"),
       w.sunrise ? Object.assign(bit("Sun", `${w.sunrise} – ${w.sunset}`), { className: "tk-chip tk-wide" }) : null);
   },
@@ -500,18 +577,20 @@ const Ticker = {
       h("em", {}, i === 0 ? "Today" : this.dayName(d.date)), h("span", { class: "tk-ico sm" }, d.icon), `${d.high}°`, h("small", {}, `${d.low}°`))));
   },
   worldSlide(list) {
-    const cells = list.map((c) => { const t = h("strong", {}, this.fmtTime(c.tz)); return { c, t }; });
-    const upd = () => cells.forEach(({ c, t }) => { t.textContent = this.fmtTime(c.tz); });
-    this.tick = setInterval(upd, 5000);
+    const cells = list.map((c) => ({ c, t: h("strong", {}, this.fmtTime(c.tz)) }));
+    this.tick = setInterval(() => cells.forEach(({ c, t }) => { t.textContent = this.fmtTime(c.tz); }), 5000);
     return h("div", { class: "tk-row" }, h("span", { class: "tk-ico" }, "🌍"), ...cells.map(({ c, t }) => h("span", { class: "tk-city" }, h("em", {}, c.name), t)));
   },
-  build() {
+  /** Work out the slides again (new data, or something started playing) and keep showing the one we are on. */
+  refreshPages() {
+    const keep = this.order[this.at]?.id;
     this.order = this.pages();
-    const box = $("#ticker");
-    box.hidden = !this.order.length;
+    $("#ticker").hidden = !this.order.length;
     $("#ticker-dots").replaceChildren(...this.order.map(() => h("i", {})));
-    this.at = Math.min(this.at, Math.max(0, this.order.length - 1));
-    this.show(false);
+    const same = this.order.findIndex((p) => p.id === keep);
+    this.at = same >= 0 ? same : Math.min(this.at, Math.max(0, this.order.length - 1));
+    if (!$("#ticker-slide").firstChild || same < 0) this.show(false);
+    [...$("#ticker-dots").children].forEach((d, i) => d.classList.toggle("on", i === this.at));
     this.start();
   },
   show(animate = true) {
@@ -524,16 +603,39 @@ const Ticker = {
   },
   start() {
     clearInterval(this.timer);
-    if (this.order.length > 1) this.timer = setInterval(() => { if (document.hidden) return; this.at = (this.at + 1) % this.order.length; this.show(); }, 8000);
+    if (this.order.length > 1) this.timer = setInterval(() => {
+      if (document.hidden) return;
+      const fresh = this.pages(); if (fresh.length !== this.order.length) { this.order = fresh; $("#ticker-dots").replaceChildren(...fresh.map(() => h("i", {}))); }
+      this.at = (this.at + 1) % this.order.length; this.show();
+    }, 8000);
   },
+  rebuild() { this.refreshSlow(); this.refreshFast(); },
   init() {
     const box = $("#tk-toggles");
     if (box) box.replaceChildren(...this.SLIDES.map(([id, label]) => h("label", { class: "check" },
-      h("input", { type: "checkbox", checked: this.enabled(id), onchange: (e) => { store.set(`tk-${id}`, e.target.checked); this.build(); } }), ` ${label}`)));
-    this.refresh();
-    setInterval(() => this.refresh(), 15 * 60 * 1000);
+      h("input", { type: "checkbox", checked: this.enabled(id), onchange: (e) => { store.set(`tk-${id}`, e.target.checked); this.rebuild(); } }), ` ${label}`)));
+    this.rebuild();
+    setInterval(() => this.refreshSlow(), 15 * 60 * 1000);
+    setInterval(() => this.refreshFast(), 60 * 1000);
   },
 };
+
+/** Settings -> Top bar: leagues for the scores and the feed for the headlines. */
+const TickerSettings = {
+  cur: { leagues: [], rss: "" },
+  async load() {
+    try { const s = await api("/api/ticker/settings"); this.cur = s; $("#tk-rss").value = s.rss || ""; $("#tk-rss").placeholder = s.default_rss;
+      $("#tk-leagues").replaceChildren(...Object.entries(s.available).map(([id, label]) => h("label", { class: "check", "data-id": id },
+        h("input", { type: "checkbox", checked: s.leagues.includes(id), onchange: () => this.save() }), ` ${label}`)));
+    } catch { /* not for kids */ }
+  },
+  async save() {
+    const leagues = [...$("#tk-leagues").children].filter((l) => l.querySelector("input").checked).map((l) => l.dataset.id);
+    try { this.cur = await api("/api/ticker/settings", { method: "PUT", body: { leagues, rss: $("#tk-rss").value.trim() } }); toast("Saved"); Ticker.refreshSlow(); Ticker.refreshFast(); }
+    catch (err) { toast(err.message); }
+  },
+};
+$("#tk-rss-form").addEventListener("submit", (e) => { e.preventDefault(); TickerSettings.save(); });
 
 /** Settings -> Top bar: the cities for the world clocks. */
 const ClockCard = {
@@ -549,7 +651,7 @@ const ClockCard = {
       h("button", { class: "btn ghost", type: "button", onclick: () => this.save(this.list.filter((_, j) => j !== i)) }, "Remove"))));
   },
   async save(list) {
-    try { this.list = await api("/api/clocks/set", { method: "PUT", body: list }); this.draw(); Ticker.clocks = this.list; Ticker.build(); }
+    try { this.list = await api("/api/clocks/set", { method: "PUT", body: list }); this.draw(); Ticker.clocks = this.list; Ticker.refreshPages(); }
     catch (err) { toast(err.message); }
   },
 };
@@ -577,7 +679,7 @@ const WeatherCard = {
     if (w.configured) $("#weather-unit").value = w.unit === "°F" ? "f" : "c";
   },
   async save(place) {
-    try { await api("/api/weather/location", { method: "PUT", body: place }); toast(place.name ? "Weather location saved" : "Weather removed"); $("#weather-results").replaceChildren(); WaitScreen.weather = null; this.load(); Ticker.refresh(); }
+    try { await api("/api/weather/location", { method: "PUT", body: place }); toast(place.name ? "Weather location saved" : "Weather removed"); $("#weather-results").replaceChildren(); WaitScreen.weather = null; this.load(); Ticker.refreshSlow(); }
     catch (err) { toast(err.message); }
   },
 };
@@ -3560,7 +3662,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; TV.focusSoon();
-    WeatherCard.load(); ClockCard.load();
+    WeatherCard.load(); ClockCard.load(); TickerSettings.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";

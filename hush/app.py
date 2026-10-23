@@ -18,7 +18,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, epg, hw, media, mylist, profiles as rules, stream, weather
+from . import discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
 from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
@@ -164,7 +164,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
                     "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
-                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set")
+                    "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
+                    "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -426,6 +427,46 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return {"configured": True, "place": loc["name"], "lat": loc["lat"], "lon": loc["lon"], **weather.current(loc["lat"], loc["lon"], loc.get("unit", "c"))}
         except httpx.HTTPError:
             return {"configured": True, "place": loc["name"], "unavailable": True}
+
+    # ---- top bar panel: scores, headlines, photo, health ------------------------------------
+    @app.get("/api/ticker/settings", dependencies=[need])
+    def ticker_settings():
+        s = db.get_setting("ticker", None) or {}
+        return {"leagues": s.get("leagues", []), "rss": s.get("rss", ""), "available": {k: v[2] for k, v in ticker.LEAGUES.items()}, "default_rss": ticker.DEFAULT_RSS}
+
+    @app.put("/api/ticker/settings", dependencies=[need])
+    def ticker_settings_set(body: dict = Body(...)):
+        leagues = [x for x in body.get("leagues", []) if x in ticker.LEAGUES]
+        rss = str(body.get("rss", "")).strip()[:400]
+        if rss and not rss.startswith(("http://", "https://")):
+            raise HTTPException(400, "The feed address must start with http:// or https://")
+        db.set_setting("ticker", {"leagues": leagues, "rss": rss})
+        return ticker_settings()
+
+    @app.get("/api/ticker/sports", dependencies=[need])
+    def ticker_sports():
+        return ticker.scores((db.get_setting("ticker", None) or {}).get("leagues", []))
+
+    @app.get("/api/ticker/news", dependencies=[need])
+    def ticker_news():
+        return ticker.headlines((db.get_setting("ticker", None) or {}).get("rss", ""))
+
+    @app.get("/api/ticker/photo", dependencies=[need])
+    def ticker_photo():
+        info = ticker.photo(cfg.cache_dir / "apod.jpg")
+        return {"available": bool(info), **(info or {}), "url": "/api/ticker/photo.jpg"}
+
+    @app.get("/api/ticker/photo.jpg", dependencies=[need])
+    def ticker_photo_file():
+        f = cfg.cache_dir / "apod.jpg"
+        if not f.exists():
+            raise HTTPException(404)
+        return FileResponse(f, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.get("/api/ticker/health", dependencies=[need])
+    def ticker_health():
+        return {**ticker.health(cfg.data_dir), "scans": len(db.active_jobs()),
+                "live_sessions": len(livefilter.sessions)}
 
     @app.get("/api/clocks", dependencies=[need])
     def clocks_get():

@@ -768,3 +768,9 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .tk-wide { display: none; } @media (min-width: 1200px) { .tk-wide { display: inline; } }
 .tk-row .tk-ico + .tk-big { margin-left: .1rem; }
 @media (max-width: 1099px) { .tk-day:nth-child(n+5) { display: none; } .tk-row:has(.tk-day) { gap: .55rem; } }
+.tk-wrap { white-space: normal; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; max-width: 26rem; }
+.tk-photo { width: 3.4rem; height: 2.1rem; object-fit: cover; border-radius: .4rem; }
+.tk-game { display: inline-flex; flex-direction: column; line-height: 1.1; margin-right: .6rem; } .tk-game em { font-style: normal; font-size: .68rem; opacity: .6; }
+.tk-game strong { font-size: .95rem; font-variant-numeric: tabular-nums; } .tk-game small { font-size: .7rem; opacity: .65; }
+.tk-game.live strong { color: var(--hush, #f2b84b); } .tk-game.live small { color: var(--hush, #f2b84b); opacity: 1; }
+@media (max-width: 1099px) { .tk-game:nth-of-type(n+3) { display: none; } }
