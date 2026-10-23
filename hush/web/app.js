@@ -2004,13 +2004,21 @@ const Player = {
     } catch { /* none */ }
     return false;
   },
+  /** A live channel changes between plain and filtered/captioned: show the tuning screen, then start it again. */
+  async restartLive() {
+    if (!(this.info?.live && this.chan)) return;
+    WaitScreen.start("Switching…", this.wantsLiveFilter() ? 25 : 6);
+    video.pause();
+    await this.startAt(0);
+    video.play().catch(() => {});
+  },
   async setCaptions(on) {
     this.captionsOn = !!on; store.set(pk("cc"), this.captionsOn); this.applyCaptionButton();
     clearTimeout(this.capTimer);
     if (!this.info) return;
     if (!on) { this.subCues = null; $("#subs").replaceChildren(); $("#sub-select").value = ""; }
     if (this.info.live && this.chan) {
-      if (this.wantsLiveFilter() !== !!this.liveSid) { this.startAt(0).then(() => video.play().catch(() => {})); }   // the delayed, captioned stream starts or stops
+      if (this.wantsLiveFilter() !== !!this.liveSid) this.restartLive();   // the delayed, captioned stream starts or stops
       else if (on && this.liveSid) { this.subCues = []; this.capAfter = 0; this.pollCaptions(this.liveSid); }
       toast(on ? "Captions on" : "Captions off");
       return;
@@ -2100,10 +2108,16 @@ const Player = {
       this.pendingSeek = t - landing > 0.3 ? t - landing : null;
       let url;
       if (this.wantsLiveFilter()) {
-        WaitScreen.label("Starting the language filter", 18);
-        this.message("Starting the language filter (about 15 seconds)…");
+        WaitScreen.label("Starting the language filter", 25);
+        this.message("Starting the language filter (about 25 seconds)…");
         try { url = await this.openLiveFilter(); this.liveFiltered = true; }
-        catch (err) { if (tok === this.openToken) this.message(err.message, true); return; }
+        catch (err) {
+          if (tok !== this.openToken) return;
+          if (isKids()) { this.message(err.message, true); return; }
+          toast(`The filter couldn't start (${err.message}). Playing the channel without it.`);   // never leave the screen dead
+          this.releaseLiveFilter();
+          url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+        }
       } else {
         this.releaseLiveFilter();
         url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
@@ -2709,7 +2723,7 @@ $("#filter-btn").addEventListener("click", () => {
   Player.filterOn = !Player.filterOn; store.set(pk("filterOn"), Player.filterOn);
   Player.applyFilterButton(); Player.Audio.reset();
   toast(Player.filterOn ? "Filter on" : "Filter off. Every word will play.");
-  if (Player.info?.live && Player.chan) Player.startAt(0).then(() => video.play().catch(() => {}));      // a live channel restarts with or without the live filter
+  Player.restartLive();                                          // a live channel restarts with or without the live filter
 });
 $("#mode-select").addEventListener("change", (e) => { Player.bleep = e.target.value === "bleep"; store.set(pk("mode"), e.target.value); Player.Audio.reset(); Player.renderPanel(); });
 $("#sub-select").addEventListener("change", (e) => { Player.loadSubs(e.target.value); Player.captionsOn = !!e.target.value; store.set(pk("cc"), Player.captionsOn); Player.applyCaptionButton(); });

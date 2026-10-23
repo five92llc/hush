@@ -492,7 +492,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 raise HTTPException(404)
             s.last = time.time()
             cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-fflags", "+genpts", "-i", str(s.out / "index.m3u8"),
-                   "-c", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
+                   "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
             return await stream.ffmpeg_response(request, cmd, "video/mp4")
         f = livefilter.file(sid, name)
         if not f:
