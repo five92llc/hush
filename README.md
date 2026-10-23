@@ -258,4 +258,4 @@ Every player has a **CC** button (or press **C**, or use *Captions* on the phone
 
 On Live TV the channel number is typed into the box in the **Channels** pop-out, and the Language button is hidden.
 
-In the player settings, **Sound sync** adds delay to the sound (− / + in 50 ms steps, or the , and . keys) when it plays before the picture. It is remembered, and is not available on LG and Apple players. The Android app shows its version at the top of the page.
+In the player settings, **Sound sync** adds delay to the sound (− / + in 50 ms steps, or the , and . keys) when it plays before the picture. It is remembered, and is not available on LG and Apple players. The server version (release number and when it was last updated) shows at the top of the page; the Android app's own version is in Settings.

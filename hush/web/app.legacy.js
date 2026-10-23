@@ -1,5 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 b058ccda4d8765348495b5534c5e272fef498fd1ba31138c96251300059c05f6) by scripts/build-legacy.sh. Do not edit. */
-var _a;
+/* app.legacy.js - built from app.js (sha256 19b18d428498eda94cff5122e067d9a33ae2000c71318012fe154737385f7149) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -155,7 +154,7 @@ class ApiError extends Error {
   }
 }
 async function api(path, opts = {}) {
-  var _a2;
+  var _a;
   const init = { credentials: "same-origin", ...opts, headers: { ...opts.headers || {} } };
   if (opts.body && typeof opts.body !== "string") {
     init.body = JSON.stringify(opts.body);
@@ -166,7 +165,7 @@ async function api(path, opts = {}) {
     showLogin();
     throw new ApiError(401, "Sign in to continue");
   }
-  const data = ((_a2 = r.headers.get("content-type")) == null ? void 0 : _a2.includes("json")) ? await r.json() : await r.text();
+  const data = ((_a = r.headers.get("content-type")) == null ? void 0 : _a.includes("json")) ? await r.json() : await r.text();
   if (!r.ok) throw new ApiError(r.status, data && data.detail || `Request failed (${r.status})`);
   return data;
 }
@@ -205,8 +204,8 @@ $("#password-btn").addEventListener("click", () => {
   $("#password-dialog").showModal();
 });
 $("#password-form").addEventListener("submit", async (e) => {
-  var _a2;
-  if (((_a2 = e.submitter) == null ? void 0 : _a2.value) !== "save") return;
+  var _a;
+  if (((_a = e.submitter) == null ? void 0 : _a.value) !== "save") return;
   e.preventDefault();
   if ($("#pw-new").value !== $("#pw-again").value) {
     $("#pw-error").textContent = "The new passwords don't match";
@@ -255,9 +254,9 @@ async function removeSource(s) {
 async function browse(sourceId, dirId = "") {
   S.source = sourceId;
   $$("#source-list li").forEach((li, i) => {
-    var _a2;
+    var _a;
     const btn = li.querySelector("button");
-    if (btn) btn.setAttribute("aria-current", String(((_a2 = S.sources[i]) == null ? void 0 : _a2.id) === sourceId));
+    if (btn) btn.setAttribute("aria-current", String(((_a = S.sources[i]) == null ? void 0 : _a.id) === sourceId));
   });
   const src = S.sources.find((s) => s.id === sourceId) || { name: sourceId === "url" ? "Opened links" : sourceId };
   renderCrumbs(src, dirId);
@@ -319,7 +318,7 @@ function renderEntries() {
   Queue.set(items.filter((e) => e.kind !== "dir").map((e) => ({ src: e.source_id || S.source, item: e.id, title: e.name })));
   const list = $("#entries");
   list.replaceChildren(...items.map((e) => {
-    var _a2;
+    var _a;
     const isDir = e.kind === "dir";
     const target = isDir ? `#/b/${S.source}/${e.id}` : `#/p/${e.source_id || S.source}/${e.id}`;
     return h(
@@ -330,7 +329,7 @@ function renderEntries() {
       h(
         "span",
         { class: "meta" },
-        isDir ? "" : [(_a2 = e.meta) == null ? void 0 : _a2.year, fmtSize(e.size)].filter(Boolean).join("  "),
+        isDir ? "" : [(_a = e.meta) == null ? void 0 : _a.year, fmtSize(e.size)].filter(Boolean).join("  "),
         e.watched ? h("span", { class: "resume" }, "  ✓ Watched") : e.resume ? h("span", { class: "resume" }, `  Resume ${fmt(e.resume)}`) : null
       ),
       isDir ? h("span") : e.filtered ? h("span", { class: "badge", title: "Language filter is ready" }, icon("hush", ""), "Filter ready") : h("button", { class: "btn subtle scan-btn", type: "button", onclick: (ev) => scanFromList(ev, e) }, "Scan")
@@ -491,8 +490,8 @@ $("#add-source-btn").addEventListener("click", () => {
   $("#source-dialog").showModal();
 });
 $("#source-form").addEventListener("submit", async (e) => {
-  var _a2;
-  if (((_a2 = e.submitter) == null ? void 0 : _a2.value) !== "save") return;
+  var _a;
+  if (((_a = e.submitter) == null ? void 0 : _a.value) !== "save") return;
   e.preventDefault();
   const data = Object.fromEntries(new FormData(e.target));
   for (const k of Object.keys(data)) if (data[k] === "") delete data[k];
@@ -588,7 +587,7 @@ $("#guide-num").addEventListener("submit", (e) => {
   }
 });
 $("#guide-num-set").addEventListener("click", async () => {
-  var _a2;
+  var _a;
   const cur = Queue.list[Queue.pos], n = Math.floor(Number($("#guide-num-in").value));
   if (!(cur == null ? void 0 : cur.chan) || !(n > 0)) {
     toast("Type the number you want in the box first");
@@ -609,7 +608,7 @@ $("#guide-num-set").addEventListener("click", async () => {
     Lineup.list = null;
     $("#guide-num-in").value = "";
     Queue.banner();
-    (_a2 = guide.reload) == null ? void 0 : _a2.call(guide);
+    (_a = guide.reload) == null ? void 0 : _a.call(guide);
     toast(r.swapped ? `Channel ${r.number}. ${r.swapped} took its old number.` : `Now channel ${r.number}`);
   } catch (err) {
     toast(err.message);
@@ -700,12 +699,12 @@ const Refresh = {
 };
 ["#refresh-btn", "#refresh-btn2"].forEach((id) => $(id).addEventListener("click", () => Refresh.start()));
 $("#app-update-btn").addEventListener("click", () => {
-  var _a2;
-  return (_a2 = window.HushApp) == null ? void 0 : _a2.checkForUpdate();
+  var _a;
+  return (_a = window.HushApp) == null ? void 0 : _a.checkForUpdate();
 });
 $("#app-server-btn").addEventListener("click", () => {
-  var _a2;
-  return (_a2 = window.HushApp) == null ? void 0 : _a2.changeServer();
+  var _a;
+  return (_a = window.HushApp) == null ? void 0 : _a.changeServer();
 });
 $("#pl-settings-btn").addEventListener("click", () => {
   Catalog.liveState = { q: "", group: "", favorites: false, hideDead: true, letter: "", ...Catalog.liveState || {}, panel: true };
@@ -768,16 +767,16 @@ function makeLetterBar(onPick) {
   } };
 }
 const pk = (k) => {
-  var _a2;
-  return `${((_a2 = S.profile) == null ? void 0 : _a2.id) || ""}.${k}`;
+  var _a;
+  return `${((_a = S.profile) == null ? void 0 : _a.id) || ""}.${k}`;
 };
 const isKids = () => {
-  var _a2;
-  return !!((_a2 = S.profile) == null ? void 0 : _a2.kids);
+  var _a;
+  return !!((_a = S.profile) == null ? void 0 : _a.kids);
 };
 const initialOf = (name) => {
-  var _a2;
-  return ((_a2 = (name || "?").trim()[0]) == null ? void 0 : _a2.toUpperCase()) || "?";
+  var _a;
+  return ((_a = (name || "?").trim()[0]) == null ? void 0 : _a.toUpperCase()) || "?";
 };
 function fillAvatar(el, p) {
   el.style.background = (p == null ? void 0 : p.color) || "";
@@ -802,12 +801,12 @@ const Profiles = {
   },
   /** Make the app match the chosen profile: kids see no admin tools and always get the filter. */
   apply() {
-    var _a2, _b, _c;
+    var _a, _b, _c;
     const p = S.profile, kids = isKids();
     document.documentElement.classList.toggle("kids", kids);
     fillAvatar($("#profile-avatar"), p);
     $("#profile-name").textContent = (p == null ? void 0 : p.name) || "";
-    $("#profile-btn").hidden = (((_a2 = this.data) == null ? void 0 : _a2.profiles.length) || 1) < 2 && !((_b = this.data) == null ? void 0 : _b.can_manage);
+    $("#profile-btn").hidden = (((_a = this.data) == null ? void 0 : _a.profiles.length) || 1) < 2 && !((_b = this.data) == null ? void 0 : _b.can_manage);
     const live = !kids || !!((_c = p == null ? void 0 : p.settings) == null ? void 0 : _c.allow_live);
     $$(".live-link").forEach((el) => {
       el.hidden = !live;
@@ -833,8 +832,8 @@ const Profiles = {
     $("#profile-picker").hidden = false;
     document.body.style.overflow = "hidden";
     setTimeout(() => {
-      var _a2;
-      return (_a2 = box.querySelector(".tile")) == null ? void 0 : _a2.focus();
+      var _a;
+      return (_a = box.querySelector(".tile")) == null ? void 0 : _a.focus();
     }, 50);
   },
   hide() {
@@ -951,16 +950,16 @@ const guide = {
     }
   },
   append(from) {
-    var _a2;
+    var _a;
     const list = $("#guide-list");
-    (_a2 = list.querySelector(".sentinel")) == null ? void 0 : _a2.remove();
+    (_a = list.querySelector(".sentinel")) == null ? void 0 : _a.remove();
     list.append(...this.feed.items.slice(from).map((c, k) => {
-      var _a3;
+      var _a2;
       const i = from + k;
       return h("li", {}, h(
         "button",
         { type: "button", "data-key": c.key, "aria-current": String(c.key === Player.chan), onclick: () => this.pick(i) },
-        h("span", { class: "n" }, (_a3 = c.number) != null ? _a3 : i + 1),
+        h("span", { class: "n" }, (_a2 = c.number) != null ? _a2 : i + 1),
         h("span", {}, splitTags(c.name).title)
       ));
     }));
@@ -969,8 +968,8 @@ const guide = {
     $("#guide-count").textContent = `${plural(this.feed.total, "channel")}`;
   },
   watch() {
-    var _a2;
-    (_a2 = this.observer) == null ? void 0 : _a2.disconnect();
+    var _a;
+    (_a = this.observer) == null ? void 0 : _a.disconnect();
     const s = $("#guide-list .sentinel");
     if (!s) return;
     this.observer = new IntersectionObserver((e) => {
@@ -1007,7 +1006,7 @@ const guide = {
     }
   },
   async open() {
-    var _a2;
+    var _a;
     if (!Player.chan) return;
     if (!$("#panel").hidden) togglePanel(false);
     $("#guide").hidden = false;
@@ -1024,14 +1023,14 @@ const guide = {
     $("#guide-list").replaceChildren();
     await this.more();
     for (let n = 0; n < 3 && !$(`#guide-list [data-key="${Player.chan}"]`) && !this.feed.done; n++) await this.more();
-    (_a2 = $(`#guide-list [data-key="${Player.chan}"]`)) == null ? void 0 : _a2.scrollIntoView({ block: "center" });
+    (_a = $(`#guide-list [data-key="${Player.chan}"]`)) == null ? void 0 : _a.scrollIntoView({ block: "center" });
     $("#guide-q").focus({ preventScroll: true });
   },
   close() {
-    var _a2;
+    var _a;
     $("#guide").hidden = true;
     $("#guide-btn").setAttribute("aria-expanded", "false");
-    (_a2 = this.observer) == null ? void 0 : _a2.disconnect();
+    (_a = this.observer) == null ? void 0 : _a.disconnect();
   },
   toggle() {
     $("#guide").hidden ? this.open() : this.close();
@@ -1065,11 +1064,11 @@ const Queue = {
     this.list = items;
   },
   sync(src, item) {
-    var _a2;
+    var _a;
     const i = this.list.findIndex((x) => x.src === src && x.item === item);
     if (i < 0) this.list = [{ src, item, title: "" }];
     this.pos = i < 0 ? 0 : i;
-    const key = ((_a2 = this.list[this.pos]) == null ? void 0 : _a2.chan) || null;
+    const key = ((_a = this.list[this.pos]) == null ? void 0 : _a.chan) || null;
     if (key && key !== this.curKey) this.lastKey = this.curKey;
     if (key) this.curKey = key;
     if (this.pending) this.pending = false;
@@ -1165,18 +1164,18 @@ const Queue = {
     });
   },
   banner(at = this.pos) {
-    var _a2, _b;
+    var _a, _b;
     const c = this.list[at];
     if (!(c == null ? void 0 : c.chan)) return;
-    $("#cb-num").textContent = (_b = (_a2 = this.list[at]) == null ? void 0 : _a2.number) != null ? _b : at + 1;
+    $("#cb-num").textContent = (_b = (_a = this.list[at]) == null ? void 0 : _a.number) != null ? _b : at + 1;
     $("#cb-name").textContent = splitTags(c.title).title;
     $("#cb-sub").textContent = [...splitTags(c.title).tags, ...(c.groups || []).slice(0, 2)].join(" · ");
     const logo = $("#cb-logo");
     logo.hidden = !c.logo;
     if (c.logo) logo.src = c.logo;
     this.guideLine(c.chan).then((line) => {
-      var _a3;
-      if (line && ((_a3 = this.list[at]) == null ? void 0 : _a3.chan) === c.chan) $("#cb-sub").textContent = line;
+      var _a2;
+      if (line && ((_a2 = this.list[at]) == null ? void 0 : _a2.chan) === c.chan) $("#cb-sub").textContent = line;
     });
     const b = $("#chan-banner");
     b.hidden = false;
@@ -1188,7 +1187,7 @@ const Queue = {
   /** Go to the channel at this position, loading more of the list first if it is further down. */
   /** Tune to a channel by its own number, from the whole lineup; up/down then follow the numbers from there. */
   async jumpToNumber(n) {
-    var _a2;
+    var _a;
     let line;
     try {
       line = await Lineup.load();
@@ -1202,7 +1201,7 @@ const Queue = {
       return;
     }
     const key = line[i].key;
-    if (((_a2 = this.list[this.pos]) == null ? void 0 : _a2.chan) === key) {
+    if (((_a = this.list[this.pos]) == null ? void 0 : _a.chan) === key) {
       this.banner();
       return;
     }
@@ -1220,10 +1219,10 @@ const Queue = {
     } else toast(`There is no channel ${i + 1}`);
   },
   async zap(dir) {
-    var _a2;
+    var _a;
     const n = this.list.length;
     if (n < 2) return;
-    let i = ((_a2 = this.zapTo) != null ? _a2 : this.pos) + dir;
+    let i = ((_a = this.zapTo) != null ? _a : this.pos) + dir;
     if (i < 0) i = this.list.length - 1;
     else if (i >= this.list.length && !(this.loadMore && await this.loadMore())) i = 0;
     this.zapTo = i;
@@ -1361,9 +1360,9 @@ const Catalog = {
     });
   },
   idle() {
-    var _a2, _b;
+    var _a, _b;
     if (document.querySelector("dialog[open]") || $("#library").hidden || !$("#player").hidden && !Player.mini) return false;
-    return !((_b = (_a2 = document.activeElement) == null ? void 0 : _a2.matches) == null ? void 0 : _b.call(_a2, "input, textarea, select"));
+    return !((_b = (_a = document.activeElement) == null ? void 0 : _a.matches) == null ? void 0 : _b.call(_a, "input, textarea, select"));
   },
   /** Downloads: a window onto your qBittorrent (its downloads and its RSS downloader). */
   async downloads() {
@@ -1383,8 +1382,8 @@ const Catalog = {
       }
     };
     const form = () => {
-      var _a2, _b, _c;
-      const url = h("input", { type: "text", placeholder: "http://192.168.100.50:8080", "aria-label": "qBittorrent address", spellcheck: "false", value: ((_a2 = this.qbPublic) == null ? void 0 : _a2.url) || "" });
+      var _a, _b, _c;
+      const url = h("input", { type: "text", placeholder: "http://192.168.100.50:8080", "aria-label": "qBittorrent address", spellcheck: "false", value: ((_a = this.qbPublic) == null ? void 0 : _a.url) || "" });
       const user = h("input", { type: "text", placeholder: "User name", "aria-label": "qBittorrent user name", autocomplete: "off", value: ((_b = this.qbPublic) == null ? void 0 : _b.username) || "" });
       const pass = h("input", { type: "password", placeholder: ((_c = this.qbPublic) == null ? void 0 : _c.has_password) ? "Password (saved)" : "Password", "aria-label": "qBittorrent password", autocomplete: "off" });
       return h("form", { class: "row", onsubmit: async (e) => {
@@ -1473,8 +1472,8 @@ const Catalog = {
             s.connected ? `Connected to qBittorrent ${s.version} at ${s.url}` : s.configured ? s.error || "Not connected" : "Connect Hush to the qBittorrent you already run. Hush only watches its downloads and RSS rules; qBittorrent decides what is saved and where."
           ),
           s.connected ? h("button", { class: "btn ghost", type: "button", onclick: () => {
-            var _a2;
-            ((_a2 = conn.querySelector("form")) == null ? void 0 : _a2.remove()) || conn.append(form());
+            var _a;
+            ((_a = conn.querySelector("form")) == null ? void 0 : _a.remove()) || conn.append(form());
           } }, "Change connection") : form()
         );
       }
@@ -1586,12 +1585,12 @@ const Catalog = {
     await refreshList();
     refreshRss();
     this.dlTimer = setInterval(() => {
-      var _a2, _b;
+      var _a, _b;
       if (location.hash !== "#/downloads" || document.hidden) {
         if (location.hash !== "#/downloads") clearInterval(this.dlTimer);
         return;
       }
-      if (((_b = (_a2 = document.activeElement) == null ? void 0 : _a2.matches) == null ? void 0 : _b.call(_a2, "input")) && this.box().contains(document.activeElement)) return;
+      if (((_b = (_a = document.activeElement) == null ? void 0 : _a.matches) == null ? void 0 : _b.call(_a, "input")) && this.box().contains(document.activeElement)) return;
       refreshList();
     }, 5e3);
   },
@@ -1625,8 +1624,8 @@ const Catalog = {
     const counts = { all: items.length };
     for (const k of Object.keys(names)) counts[k] = items.filter((i) => i.status === k).length;
     const rank = (i) => {
-      var _a2;
-      return ((_a2 = i.progress) == null ? void 0 : _a2.unwatched) ? 0 : i.airing ? 1 : 2;
+      var _a;
+      return ((_a = i.progress) == null ? void 0 : _a.unwatched) ? 0 : i.airing ? 1 : 2;
     };
     const shown = items.filter((i) => st.filter === "all" || i.status === st.filter).sort((a, b) => Object.keys(names).indexOf(a.status) - Object.keys(names).indexOf(b.status) || rank(a) - rank(b) || (a.title || "").localeCompare(b.title || ""));
     const chips = h("div", { class: "letters", role: "group", "aria-label": "Show" }, ...["all", ...Object.keys(names)].map((k) => h(
@@ -1638,9 +1637,9 @@ const Catalog = {
       `${k === "all" ? "All" : names[k]} ${counts[k]}`
     )));
     const card = (i) => {
-      var _a2, _b;
+      var _a, _b;
       const href = i.kind === "movie" ? `#/title/${i.media_key}` : i.show_key ? `#/show/${i.show_key}` : null;
-      const nx = (_a2 = i.progress) == null ? void 0 : _a2.next;
+      const nx = (_a = i.progress) == null ? void 0 : _a.next;
       const lines = [];
       if (i.kind === "movie") lines.push(i.watched ? "Watched" : i.position ? `Resume ${fmt(i.position)}` : "");
       else if (i.in_library) lines.push(nx ? `Next: S${nx.season}E${nx.episode}${nx.title ? ` · ${nx.title}` : ""}` : ((_b = i.progress) == null ? void 0 : _b.episodes) ? "All caught up" : "No episodes yet");
@@ -1718,12 +1717,12 @@ const Catalog = {
     );
   },
   async renumber(mode) {
-    var _a2;
+    var _a;
     if (!confirm(mode === "ranges" ? "Number every channel again? Each category gets its own block of numbers with room to grow (News 100-299, Sports 300-499...). Numbers you set yourself are replaced." : "Number every channel again from 1? Numbers you set yourself are replaced.")) return;
     try {
       const r = await api("/api/live/renumber", { method: "POST", body: { mode } });
       Lineup.list = null;
-      toast(((_a2 = r.ranges) == null ? void 0 : _a2.length) ? `${plural(r.numbered, "channel")} numbered into ${plural(r.ranges.length, "block")}` : `${plural(r.numbered, "channel")} renumbered`);
+      toast(((_a = r.ranges) == null ? void 0 : _a.length) ? `${plural(r.numbered, "channel")} numbered into ${plural(r.ranges.length, "block")}` : `${plural(r.numbered, "channel")} renumbered`);
       this.open("live");
     } catch (err) {
       toast(err.message);
@@ -1746,7 +1745,7 @@ const Catalog = {
   guidesBox() {
     const box = h("div", { class: "guides" });
     const render = async () => {
-      var _a2;
+      var _a;
       let g;
       try {
         g = await api("/api/live/guides");
@@ -1772,7 +1771,7 @@ const Catalog = {
       };
       box.replaceChildren(
         h("strong", {}, "Programme guide"),
-        h("p", { class: "hint" }, st ? `${plural(st.matched, "channel")} matched · ${plural(st.programmes, "programme")} · updated ${new Date(st.at * 1e3).toLocaleString()}${((_a2 = st.errors) == null ? void 0 : _a2.length) ? ` · ${st.errors.join("; ")}` : ""}` : "No guide yet. Add one so channels can show what is on now and next."),
+        h("p", { class: "hint" }, st ? `${plural(st.matched, "channel")} matched · ${plural(st.programmes, "programme")} · updated ${new Date(st.at * 1e3).toLocaleString()}${((_a = st.errors) == null ? void 0 : _a.length) ? ` · ${st.errors.join("; ")}` : ""}` : "No guide yet. Add one so channels can show what is on now and next."),
         ...[...g.urls, ...g.advertised].map((u) => h(
           "div",
           { class: "row" },
@@ -1819,7 +1818,7 @@ const Catalog = {
     let loaded = [], total = 0, stats = { dead: 0, favorites: 0, total: 0 };
     const toQueue = () => Queue.set(loaded.map((c) => chanItem(c)));
     const card = (c, n, setQueue = toQueue) => {
-      var _a2, _b;
+      var _a, _b;
       const star = h("button", {
         class: "star",
         type: "button",
@@ -1869,7 +1868,7 @@ const Catalog = {
           onmouseleave: stopPeek,
           onblur: stopPeek
         },
-        ((_a2 = c.number) != null ? _a2 : n != null ? n + 1 : null) != null ? h("span", { class: "num" }, (_b = c.number) != null ? _b : n + 1) : null,
+        ((_a = c.number) != null ? _a : n != null ? n + 1 : null) != null ? h("span", { class: "num" }, (_b = c.number) != null ? _b : n + 1) : null,
         h("div", { class: "logo" }, c.logo_url ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy", onerror: (e) => {
           e.target.replaceWith(h("span", { class: "noart" }, initials(c.name)));
         } }) : h("span", { class: "noart" }, initials(c.name))),
@@ -2108,8 +2107,8 @@ const Catalog = {
       get("/api/watchlist")
     ]);
     const upNext = mine.filter((i) => {
-      var _a2;
-      return i.status === "watching" && ((_a2 = i.progress) == null ? void 0 : _a2.next) && !i.progress.next.position;
+      var _a;
+      return i.status === "watching" && ((_a = i.progress) == null ? void 0 : _a.next) && !i.progress.next.position;
     });
     const chan = (list) => (c) => h(
       "a",
@@ -2286,8 +2285,8 @@ const Catalog = {
       }
     };
     $("#pd-form").onsubmit = async (e) => {
-      var _a2;
-      if (((_a2 = e.submitter) == null ? void 0 : _a2.value) !== "save") return;
+      var _a;
+      if (((_a = e.submitter) == null ? void 0 : _a.value) !== "save") return;
       e.preventDefault();
       const kids = $("#pd-kids").checked;
       const body = { name: $("#pd-name").value, kids, color, avatar, settings: kids ? {
@@ -2415,10 +2414,10 @@ const Catalog = {
     document.title = `${isShows ? "TV shows" : "Movies"} – Hush`;
   },
   async show(key) {
-    var _a2, _b, _c;
+    var _a, _b, _c;
     const { show, episodes, upcoming = [], list_status = null } = await api(`/api/library/shows/${key}`);
     const seasons = {};
-    for (const e of episodes) (seasons[_b = (_a2 = e.season) != null ? _a2 : 0] || (seasons[_b] = [])).push(e);
+    for (const e of episodes) (seasons[_b = (_a = e.season) != null ? _a : 0] || (seasons[_b] = [])).push(e);
     this.cameFrom = "#/shows";
     Queue.set(episodes.map((e) => ({ src: e.source_id, item: e.item_id, title: e.title || "" })));
     document.title = `${show.title} – Hush`;
@@ -2497,7 +2496,7 @@ const Catalog = {
     Jobs.poll();
   },
   async title(key) {
-    var _a2;
+    var _a;
     const m = await api(`/api/library/title/${key}`);
     const show = m.show_key ? (await api(`/api/library/shows/${m.show_key}`)).show : null;
     const caps = await api(`/api/captions/${m.source_id}/${m.item_id}`).catch(() => ({ tracks: [], transcript: false }));
@@ -2520,7 +2519,7 @@ const Catalog = {
           {},
           h("h1", {}, heading),
           m.kind === "episode" && m.title ? h("p", { class: "facts" }, m.title) : null,
-          h("div", { class: "facts" }, ...[m.kind === "movie" ? (_a2 = m.genres) == null ? void 0 : _a2.join(", ") : "", mins(m.runtime), m.rating ? `★ ${Number(m.rating).toFixed(1)}` : ""].filter(Boolean).map((t) => h("span", {}, t))),
+          h("div", { class: "facts" }, ...[m.kind === "movie" ? (_a = m.genres) == null ? void 0 : _a.join(", ") : "", mins(m.runtime), m.rating ? `★ ${Number(m.rating).toFixed(1)}` : ""].filter(Boolean).map((t) => h("span", {}, t))),
           m.overview ? h("p", { class: "overview" }, m.overview) : h("p", { class: "hint" }, "No summary yet."),
           h(
             "div",
@@ -2649,8 +2648,8 @@ const Tasks = {
     }
   },
   editing() {
-    var _a2, _b;
-    return !!((_b = (_a2 = document.activeElement) == null ? void 0 : _a2.closest) == null ? void 0 : _b.call(_a2, "#tasks-list select, #tasks-list input"));
+    var _a, _b;
+    return !!((_b = (_a = document.activeElement) == null ? void 0 : _a.closest) == null ? void 0 : _b.call(_a, "#tasks-list select, #tasks-list input"));
   },
   async save(id, patch) {
     try {
@@ -2789,9 +2788,9 @@ const Tasks = {
   },
   tidy: { source: "", layout: "flat", matched: true, plan: null, picked: /* @__PURE__ */ new Set(), busy: false, result: null },
   renderTidy() {
-    var _a2;
+    var _a;
     const t = this.tidy, locals = (this.data.sources || []).filter((s) => s.type === "local");
-    if (!t.source || !locals.some((s) => s.id === t.source)) t.source = ((_a2 = locals[0]) == null ? void 0 : _a2.id) || "";
+    if (!t.source || !locals.some((s) => s.id === t.source)) t.source = ((_a = locals[0]) == null ? void 0 : _a.id) || "";
     const preview = async () => {
       t.busy = true;
       t.result = null;
@@ -2976,7 +2975,7 @@ const Player = {
   pendingSeek: null,
   /* ---------- loading ---------- */
   async open(sourceId, itemId, opts = {}) {
-    var _a2, _b, _c;
+    var _a, _b, _c;
     const keepMini = !!opts.mini;
     const libraryWasHidden = $("#library").hidden;
     this.close(false);
@@ -2985,7 +2984,7 @@ const Player = {
     this.item = itemId;
     this.triedTranscode = false;
     const token = this.openToken = (this.openToken || 0) + 1;
-    (_a2 = this.openAbort) == null ? void 0 : _a2.abort();
+    (_a = this.openAbort) == null ? void 0 : _a.abort();
     const abort = this.openAbort = new AbortController();
     Queue.sync(sourceId, itemId);
     this.chan = ((_b = Queue.list[Queue.pos]) == null ? void 0 : _b.chan) || null;
@@ -3161,8 +3160,8 @@ const Player = {
   },
   /** A live channel changes between plain and filtered/captioned: show the tuning screen, then start it again. */
   async restartLive() {
-    var _a2;
-    if (!(((_a2 = this.info) == null ? void 0 : _a2.live) && this.chan)) return;
+    var _a;
+    if (!(((_a = this.info) == null ? void 0 : _a.live) && this.chan)) return;
     WaitScreen.start("Switching…", this.wantsLiveFilter() ? 25 : 6);
     video.pause();
     await this.startAt(0);
@@ -3214,8 +3213,8 @@ const Player = {
   },
   /** Live channels are filtered by their captions on the server, about 10 seconds behind the broadcast. */
   wantsLiveFilter() {
-    var _a2;
-    return !!(((_a2 = this.info) == null ? void 0 : _a2.live) && this.chan && (isKids() || this.filterOn || this.captionsOn));
+    var _a;
+    return !!(((_a = this.info) == null ? void 0 : _a.live) && this.chan && (isKids() || this.filterOn || this.captionsOn));
   },
   async openLiveFilter() {
     const body = { src: this.src, item: this.item, cats: [...this.cats].join(","), tab: TAB, mute: isKids() || this.filterOn };
@@ -3284,7 +3283,7 @@ const Player = {
     }, delay);
   },
   async startAt(t, initial = false) {
-    var _a2;
+    var _a;
     const wasPlaying = !video.paused || initial;
     const tok = this.openToken;
     if (this.mode === "direct") {
@@ -3336,7 +3335,7 @@ const Player = {
       if (tok !== this.openToken) return;
       video.src = url;
     }
-    this.message(this.serverMuted() || ((_a2 = this.info) == null ? void 0 : _a2.live) ? "Preparing the stream…" : null);
+    this.message(this.serverMuted() || ((_a = this.info) == null ? void 0 : _a.live) ? "Preparing the stream…" : null);
     this.Audio.reset();
     if (wasPlaying && !initial) video.play().catch(() => {
     });
@@ -3345,8 +3344,8 @@ const Player = {
     return this.offset + (video.currentTime || 0);
   },
   seek(t) {
-    var _a2;
-    if ((_a2 = this.info) == null ? void 0 : _a2.live) return;
+    var _a;
+    if ((_a = this.info) == null ? void 0 : _a.live) return;
     this.startAt(Math.max(0, Math.min(t, (this.duration || 1e9) - 0.5)));
   },
   async loadFilter() {
@@ -3365,8 +3364,8 @@ const Player = {
     this.Audio.reset();
   },
   categories() {
-    var _a2;
-    return ((_a2 = S.config) == null ? void 0 : _a2.categories) || [];
+    var _a;
+    return ((_a = S.config) == null ? void 0 : _a.categories) || [];
   },
   active(r) {
     return r.enabled !== false && (r.source === "manual" || this.cats.has(r.category));
@@ -3402,9 +3401,9 @@ const Player = {
     timer: null,
     fallback: false,
     ensure() {
-      var _a2;
+      var _a;
       if (this.ctx || this.fallback) {
-        (_a2 = this.ctx) == null ? void 0 : _a2.resume();
+        (_a = this.ctx) == null ? void 0 : _a.resume();
         return;
       }
       if (IS_WEBKIT || IS_LG) this.fallback = true;
@@ -3523,14 +3522,14 @@ const Player = {
     this.placeMini();
   },
   miniTitle() {
-    var _a2, _b, _c;
-    const queued = (_a2 = Queue.list[Queue.pos]) == null ? void 0 : _a2.title;
+    var _a, _b, _c;
+    const queued = (_a = Queue.list[Queue.pos]) == null ? void 0 : _a.title;
     const name = this.chan ? queued || ((_b = this.info) == null ? void 0 : _b.title) || "" : ((_c = this.info) == null ? void 0 : _c.title) || queued || "";
     $("#mini-title").textContent = IS_TV_DEVICE || TV.on ? "⛶ Full screen" : this.chan ? splitTags(name).title : name;
     $("#mini-title").title = name;
   },
   placeMini() {
-    var _a2;
+    var _a;
     if (!this.mini) return;
     const p = $("#player"), slot = $("#mini-slot");
     if (document.documentElement.classList.contains("tv")) {
@@ -3541,7 +3540,7 @@ const Player = {
     }
     const rail = $(".rail");
     const sidebar = !$("#library").hidden && rail && rail.offsetParent !== null && window.innerWidth > 760;
-    let left = 16, top = (((_a2 = $(".topbar")) == null ? void 0 : _a2.offsetHeight) || 48) + 10, width = 240;
+    let left = 16, top = (((_a = $(".topbar")) == null ? void 0 : _a.offsetHeight) || 48) + 10, width = 240;
     if (sidebar) {
       const r = rail.getBoundingClientRect();
       left = r.left + 16;
@@ -3589,9 +3588,9 @@ const Player = {
   },
   /** The "Now playing - full screen" buttons in the top bar and the big screen menu: shown only while the little player is playing. */
   syncNowPlaying() {
-    var _a2;
+    var _a;
     const on = !!(this.mini && this.src);
-    const title = (((_a2 = this.info) == null ? void 0 : _a2.title) || $("#now-title").textContent || "").trim();
+    const title = (((_a = this.info) == null ? void 0 : _a.title) || $("#now-title").textContent || "").trim();
     const label = `⛶ Full screen${title ? ": " + (title.length > 28 ? title.slice(0, 27) + "…" : title) : ""}`;
     const b = $("#np-btn");
     if (b) {
@@ -3641,8 +3640,8 @@ const Player = {
     clearTimeout(this.pictureTimer);
     const key = `${this.src}/${this.item}/${this.mode}`;
     this.pictureTimer = setTimeout(() => {
-      var _a2, _b, _c, _d;
-      const p = (_a2 = this.info) == null ? void 0 : _a2.probe;
+      var _a, _b, _c, _d;
+      const p = (_a = this.info) == null ? void 0 : _a.probe;
       if (this.mini || video.paused || !((_b = p == null ? void 0 : p.video) == null ? void 0 : _b.length) || `${this.src}/${this.item}/${this.mode}` !== key) return;
       let frames = null;
       try {
@@ -3690,7 +3689,7 @@ const Player = {
     })));
   },
   frame() {
-    var _a2;
+    var _a;
     if (this.mini) return;
     const t = this.now(), d = this.duration || 1;
     $("#t-now").textContent = fmt(t);
@@ -3708,7 +3707,7 @@ const Player = {
     const cur = $(".range.current");
     const id = inside == null ? void 0 : inside.id;
     if (cur && cur.dataset.id !== id) cur.classList.remove("current");
-    if (id) (_a2 = $(`.range[data-id="${id}"]`)) == null ? void 0 : _a2.classList.add("current");
+    if (id) (_a = $(`.range[data-id="${id}"]`)) == null ? void 0 : _a.classList.add("current");
   },
   /* ---------- subtitles (censored on screen too) ---------- */
   async loadSubs(track) {
@@ -3723,11 +3722,11 @@ const Player = {
     }
   },
   renderSubs(t) {
-    var _a2;
+    var _a;
     if (!this.subCues) return;
     const cue = this.subCues.find((c) => t >= c.start && t <= c.end);
     const box = $("#subs");
-    if ((box.dataset.cue || "") === String((_a2 = cue == null ? void 0 : cue.start) != null ? _a2 : "") && box.dataset.f === String(this.filterOn)) return;
+    if ((box.dataset.cue || "") === String((_a = cue == null ? void 0 : cue.start) != null ? _a : "") && box.dataset.f === String(this.filterOn)) return;
     box.dataset.cue = cue ? String(cue.start) : "";
     box.dataset.f = String(this.filterOn);
     if (!cue) {
@@ -3745,14 +3744,14 @@ const Player = {
   },
   /* ---------- language panel ---------- */
   renderPanel() {
-    var _a2, _b, _c, _d;
+    var _a, _b, _c, _d;
     const status = $("#panel-status");
     const hasFilter = !!this.filter;
     const running = this.job && (this.job.status === "running" || this.job.status === "queued");
     $("#cats").hidden = !hasFilter;
     $("#range-tools").hidden = !hasFilter;
     $("#panel-foot").hidden = !hasFilter;
-    const eng = ((_a2 = S.config) == null ? void 0 : _a2.engines) || {};
+    const eng = ((_a = S.config) == null ? void 0 : _a.engines) || {};
     if ((_b = this.info) == null ? void 0 : _b.live) {
       status.replaceChildren(h("p", {}, "This is a live stream, so it can't be scanned or filtered. It plays as it is."));
       $("#cats").hidden = $("#range-tools").hidden = $("#panel-foot").hidden = true;
@@ -3958,11 +3957,11 @@ const Player = {
     }
   },
   onJobs(list) {
-    var _a2;
+    var _a;
     if (!this.info || $("#player").hidden) return;
     const j = list.find((x) => x.media_key === this.info.media_key);
     if (!j) return;
-    const was = (_a2 = this.job) == null ? void 0 : _a2.status;
+    const was = (_a = this.job) == null ? void 0 : _a.status;
     this.job = j;
     if (j.status === "done" && was && was !== "done") {
       this.loadFilter().then(() => this.renderPanel());
@@ -4066,17 +4065,17 @@ function applyPendingSeek() {
 }
 ["progress", "canplay", "timeupdate"].forEach((ev) => video.addEventListener(ev, applyPendingSeek));
 video.addEventListener("ended", () => {
-  var _a2;
+  var _a;
   $("#player").classList.remove("playing");
   Progress.save(true, true);
-  if (autoplay() && !((_a2 = Player.info) == null ? void 0 : _a2.live)) Queue.next(true);
+  if (autoplay() && !((_a = Player.info) == null ? void 0 : _a.live)) Queue.next(true);
 });
 $("#autoplay-toggle").addEventListener("change", (e) => {
   store.set("autoplay", e.target.checked);
   toast(e.target.checked ? "Autoplay on" : "Autoplay off");
 });
 video.addEventListener("error", () => {
-  var _a2;
+  var _a;
   if (!Player.info) return;
   if (Player.mode === "direct") {
     Player.mode = Player.info.probe.video.length ? "transcode" : "audio";
@@ -4099,7 +4098,7 @@ video.addEventListener("error", () => {
     });
     return;
   }
-  const code = ((_a2 = video.error) == null ? void 0 : _a2.code) ? ` (error ${video.error.code})` : "";
+  const code = ((_a = video.error) == null ? void 0 : _a.code) ? ` (error ${video.error.code})` : "";
   const safari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
   Player.message(safari && Player.mode !== "direct" ? `Safari can't play Hush's live streams yet${code}. Open this page in Chrome, Firefox or Edge, or use "Watch on another player".` : `This file couldn't be played${code}. Check that the server can still reach it.`, true);
 });
@@ -4167,11 +4166,6 @@ $("#avsync-less").addEventListener("click", () => Player.setAvsync(Player.avsync
 $("#avsync-more").addEventListener("click", () => Player.setAvsync(Player.avsync + 50));
 $("#avsync-reset").addEventListener("click", () => Player.setAvsync(0));
 $("#avsync-val").textContent = `${Player.avsync} ms`;
-if ((_a = window.HushApp) == null ? void 0 : _a.version) {
-  const v = $("#app-ver");
-  v.textContent = `app ${window.HushApp.version()}`;
-  v.hidden = false;
-}
 $("#cc-btn").addEventListener("click", () => Player.setCaptions(!Player.captionsOn));
 $("#audio-select").addEventListener("change", async (e) => {
   const t = Player.now();
@@ -4195,11 +4189,11 @@ $("#settings-btn").addEventListener("click", (e) => {
   e.currentTarget.setAttribute("aria-expanded", String(!s.hidden));
 });
 function enterFullscreen() {
-  var _a2, _b, _c, _d;
+  var _a, _b, _c, _d;
   if (document.fullscreenElement || document.webkitFullscreenElement) return;
   const el = document.documentElement;
   try {
-    const p = (_a2 = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen) == null ? void 0 : _a2.call(el);
+    const p = (_a = el.requestFullscreen || el.webkitRequestFullscreen || el.mozRequestFullScreen || el.msRequestFullscreen) == null ? void 0 : _a.call(el);
     (_b = p == null ? void 0 : p.catch) == null ? void 0 : _b.call(p, () => {
     });
     (_d = (_c = navigator.keyboard) == null ? void 0 : _c.lock) == null ? void 0 : _d.call(_c, ["Escape"]).catch(() => {
@@ -4208,8 +4202,8 @@ function enterFullscreen() {
   }
 }
 function exitFullscreen() {
-  var _a2;
-  (_a2 = document.exitFullscreen || document.webkitExitFullscreen) == null ? void 0 : _a2.call(document);
+  var _a;
+  (_a = document.exitFullscreen || document.webkitExitFullscreen) == null ? void 0 : _a.call(document);
 }
 $("#fs-btn").addEventListener("click", () => document.fullscreenElement || document.webkitFullscreenElement ? exitFullscreen() : enterFullscreen());
 if (IS_TV_DEVICE) {
@@ -4452,8 +4446,8 @@ const TVKeyboard = {
     this.draw(true);
   },
   label() {
-    var _a2, _b;
-    return this.input.getAttribute("aria-label") || this.input.placeholder || ((_b = (_a2 = this.input.closest("label")) == null ? void 0 : _a2.textContent) == null ? void 0 : _b.trim()) || "Type here";
+    var _a, _b;
+    return this.input.getAttribute("aria-label") || this.input.placeholder || ((_b = (_a = this.input.closest("label")) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim()) || "Type here";
   },
   rows() {
     const L = (a) => a.map((c) => ({ t: this.shift ? c.toUpperCase() : c, v: this.shift ? c.toUpperCase() : c }));
@@ -4473,10 +4467,10 @@ const TVKeyboard = {
     ];
   },
   draw(focusFirst) {
-    var _a2, _b, _c;
+    var _a, _b, _c;
     const i = this.input, box = this.el.firstChild;
     const shown = i.type === "password" ? "•".repeat(i.value.length) : i.value;
-    const pos = (_a2 = i.selectionStart) != null ? _a2 : i.value.length;
+    const pos = (_a = i.selectionStart) != null ? _a : i.value.length;
     const text = i.type === "password" ? shown : i.value;
     const kb = h("div", { class: "tvkb-keys" });
     for (const row of this.rows()) {
@@ -4504,15 +4498,15 @@ const TVKeyboard = {
     const target = keys[keep] || (focusFirst ? keys[bar.children.length + 10] : keys[0]);
     target == null ? void 0 : target.focus({ preventScroll: true });
     setTimeout(() => {
-      var _a3;
-      if (this.el && !this.el.contains(document.activeElement)) (_a3 = (target == null ? void 0 : target.isConnected) ? target : this.el.querySelector(".tvkb-key")) == null ? void 0 : _a3.focus({ preventScroll: true });
+      var _a2;
+      if (this.el && !this.el.contains(document.activeElement)) (_a2 = (target == null ? void 0 : target.isConnected) ? target : this.el.querySelector(".tvkb-key")) == null ? void 0 : _a2.focus({ preventScroll: true });
     }, 150);
   },
   insert(t) {
-    var _a2, _b;
+    var _a, _b;
     const i = this.input;
     try {
-      const a = (_a2 = i.selectionStart) != null ? _a2 : i.value.length, b = (_b = i.selectionEnd) != null ? _b : a;
+      const a = (_a = i.selectionStart) != null ? _a : i.value.length, b = (_b = i.selectionEnd) != null ? _b : a;
       i.setRangeText(t, a, b, "end");
     } catch (e) {
       i.value += t;
@@ -4520,10 +4514,10 @@ const TVKeyboard = {
     i.dispatchEvent(new Event("input", { bubbles: true }));
   },
   back() {
-    var _a2, _b;
+    var _a, _b;
     const i = this.input;
     try {
-      const a = (_a2 = i.selectionStart) != null ? _a2 : i.value.length, b = (_b = i.selectionEnd) != null ? _b : a;
+      const a = (_a = i.selectionStart) != null ? _a : i.value.length, b = (_b = i.selectionEnd) != null ? _b : a;
       if (a !== b) i.setRangeText("", a, b, "end");
       else if (a > 0) i.setRangeText("", a - 1, a, "end");
     } catch (e) {
@@ -4532,10 +4526,10 @@ const TVKeyboard = {
     i.dispatchEvent(new Event("input", { bubbles: true }));
   },
   caret(d) {
-    var _a2;
+    var _a;
     const i = this.input;
     try {
-      const p = Math.max(0, Math.min(i.value.length, ((_a2 = i.selectionStart) != null ? _a2 : i.value.length) + d));
+      const p = Math.max(0, Math.min(i.value.length, ((_a = i.selectionStart) != null ? _a : i.value.length) + d));
       i.setSelectionRange(p, p);
     } catch (e) {
     }
@@ -4580,9 +4574,9 @@ const TVKeyboard = {
     }
   },
   close() {
-    var _a2;
+    var _a;
     const i = this.input;
-    (_a2 = this.el) == null ? void 0 : _a2.remove();
+    (_a = this.el) == null ? void 0 : _a.remove();
     this.el = null;
     this.input = null;
     if (i) {
@@ -4601,16 +4595,16 @@ document.addEventListener("focusin", (e) => {
   }
 }, true);
 document.addEventListener("focusout", (e) => {
-  var _a2;
+  var _a;
   const t = e.target;
-  if (((_a2 = t.dataset) == null ? void 0 : _a2.tvro) === "1" && !TVKeyboard.el) {
+  if (((_a = t.dataset) == null ? void 0 : _a.tvro) === "1" && !TVKeyboard.el) {
     t.readOnly = false;
     delete t.dataset.tvro;
   }
 }, true);
 document.addEventListener("mousedown", (e) => {
-  var _a2, _b;
-  const t = (_b = (_a2 = e.target).closest) == null ? void 0 : _b.call(_a2, "input, textarea");
+  var _a, _b;
+  const t = (_b = (_a = e.target).closest) == null ? void 0 : _b.call(_a, "input, textarea");
   if (t && TVKeyboard.active() && TVKeyboard.typeable(t)) {
     e.preventDefault();
     t.focus({ preventScroll: true });
@@ -4638,10 +4632,10 @@ const TVSelect = {
     return IS_TV_DEVICE || TV.on;
   },
   open(select) {
-    var _a2, _b, _c;
+    var _a, _b, _c;
     if (this.el) return;
     const host = select.closest("dialog") || document.body;
-    const label = select.getAttribute("aria-label") || ((_b = (_a2 = select.closest("label")) == null ? void 0 : _a2.textContent) == null ? void 0 : _b.trim()) || "Choose";
+    const label = select.getAttribute("aria-label") || ((_b = (_a = select.closest("label")) == null ? void 0 : _a.textContent) == null ? void 0 : _b.trim()) || "Choose";
     const opts = [...select.options].filter((o) => !o.disabled);
     this.select = select;
     const list = h("div", { class: "tvsel-list", role: "listbox" }, ...opts.map((o) => h("button", {
@@ -4665,17 +4659,17 @@ const TVSelect = {
     this.close();
   },
   close() {
-    var _a2;
+    var _a;
     const s = this.select;
-    (_a2 = this.el) == null ? void 0 : _a2.remove();
+    (_a = this.el) == null ? void 0 : _a.remove();
     this.el = null;
     this.select = null;
     s == null ? void 0 : s.focus({ preventScroll: true });
   }
 };
 document.addEventListener("mousedown", (e) => {
-  var _a2, _b;
-  const s = (_b = (_a2 = e.target).closest) == null ? void 0 : _b.call(_a2, "select");
+  var _a, _b;
+  const s = (_b = (_a = e.target).closest) == null ? void 0 : _b.call(_a, "select");
   if (s && TVSelect.active() && !s.disabled) {
     e.preventDefault();
     TVSelect.open(s);
@@ -4684,9 +4678,9 @@ document.addEventListener("mousedown", (e) => {
 const TV = {
   on: false,
   init() {
-    var _a2;
+    var _a;
     const cookie = (document.cookie.match(/(?:^|; )hush_tv=([01])/) || [])[1];
-    this.on = (_a2 = store.get("tv", null)) != null ? _a2 : cookie != null ? cookie === "1" : TVUA.test(navigator.userAgent);
+    this.on = (_a = store.get("tv", null)) != null ? _a : cookie != null ? cookie === "1" : TVUA.test(navigator.userAgent);
     this.apply();
     const watch = new MutationObserver(() => {
       clearTimeout(this.obsTimer);
@@ -4713,8 +4707,8 @@ const TV = {
     if (this.on) this.focusSoon(200);
   },
   navCurrent(view) {
-    var _a2;
-    const group = { home: "home", movies: "movies", title: ((_a2 = Catalog.cameFrom) == null ? void 0 : _a2.replace("#/", "")) || "movies", shows: "shows", show: "shows", live: "live", b: "folders", folders: "folders", mylist: "mylist" }[view];
+    var _a;
+    const group = { home: "home", movies: "movies", title: ((_a = Catalog.cameFrom) == null ? void 0 : _a.replace("#/", "")) || "movies", shows: "shows", show: "shows", live: "live", b: "folders", folders: "folders", mylist: "mylist" }[view];
     $$("#tv-nav a").forEach((a) => a.setAttribute("aria-current", String(a.hash === `#/${group}`)));
   },
   /* ---------- spatial navigation ---------- */
@@ -4743,8 +4737,8 @@ const TV = {
   focusFirst() {
     const roots = this.roots();
     const main = roots.filter((r) => {
-      var _a2;
-      return (_a2 = r.matches) == null ? void 0 : _a2.call(r, "#library, #tasks, #prefs, dialog, .guide, .panel, #controls");
+      var _a;
+      return (_a = r.matches) == null ? void 0 : _a.call(r, "#library, #tasks, #prefs, dialog, .guide, .panel, #controls");
     });
     const list = this.focusables(main.length ? main : roots);
     const target = list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
@@ -4808,7 +4802,7 @@ const TV = {
   },
   /* ---------- Back ---------- */
   back() {
-    var _a2;
+    var _a;
     if (TVKeyboard.el) {
       TVKeyboard.close();
       return;
@@ -4846,7 +4840,7 @@ const TV = {
       return;
     }
     if (!$("#player").hidden && !Player.mini) {
-      if ((_a2 = document.activeElement) == null ? void 0 : _a2.closest("#controls")) {
+      if ((_a = document.activeElement) == null ? void 0 : _a.closest("#controls")) {
         $("#stage").focus();
         return;
       }
@@ -4865,9 +4859,9 @@ const TV = {
   },
   /** Returns true when the key was handled here. */
   handleKey(e) {
-    var _a2, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
     const k = normKey(e);
-    const typing = (_b = (_a2 = e.target).matches) == null ? void 0 : _b.call(_a2, "input:not([type=checkbox]):not([type=range]), textarea");
+    const typing = (_b = (_a = e.target).matches) == null ? void 0 : _b.call(_a, "input:not([type=checkbox]):not([type=range]), textarea");
     const isBack = k === "Escape" || k === "GoBack" || k === "BrowserBack" || e.keyCode === 10009 || e.keyCode === 461 || k === "Backspace" && !typing;
     if (k === "Enter" && e.target.tagName === "SELECT" && !e.target.disabled) {
       e.preventDefault();
@@ -4947,8 +4941,8 @@ window.hushToggleMini = () => Player.toggleMini();
 const CAN_QUIT = !!window.HushApp || /WebAppManager/i.test(UA);
 $("#tv-quit").hidden = !CAN_QUIT;
 $("#tv-quit").addEventListener("click", () => {
-  var _a2, _b;
-  if ((_a2 = window.HushApp) == null ? void 0 : _a2.exit) {
+  var _a, _b;
+  if ((_a = window.HushApp) == null ? void 0 : _a.exit) {
     window.HushApp.exit();
     return;
   }
@@ -5089,10 +5083,10 @@ const Remote = {
     };
   },
   state() {
-    var _a2, _b;
+    var _a, _b;
     const active = !!Player.info && !!video.currentSrc && !$("#player").hidden;
     const q = Queue.list[Queue.pos];
-    const chan = active && Player.chan ? { num: (_a2 = q == null ? void 0 : q.number) != null ? _a2 : Queue.pos + 1, name: (q == null ? void 0 : q.title) || "", logo: (q == null ? void 0 : q.logo) || null } : null;
+    const chan = active && Player.chan ? { num: (_a = q == null ? void 0 : q.number) != null ? _a : Queue.pos + 1, name: (q == null ? void 0 : q.title) || "", logo: (q == null ? void 0 : q.logo) || null } : null;
     return {
       active,
       playing: active && !video.paused,
@@ -5155,12 +5149,12 @@ const Remote = {
     this.soonTimer = setTimeout(() => this.push(true), 150);
   },
   pressKey(key) {
-    var _a2;
+    var _a;
     if (!TV.on && ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Enter", "Escape"].includes(key) && $("#player").hidden && store.get("tv", null) === null && !/(?:^|; )hush_tv=/.test(document.cookie)) TV.set(true);
     const a = document.activeElement;
     const target = a && a !== document.body ? a : document.body;
     if (key === "Enter") {
-      const clickable = (_a2 = target.closest) == null ? void 0 : _a2.call(target, "a[href], button, summary, label, [role=button]");
+      const clickable = (_a = target.closest) == null ? void 0 : _a.call(target, "a[href], button, summary, label, [role=button]");
       if (clickable && !clickable.disabled) {
         clickable.click();
         return;
@@ -5260,11 +5254,11 @@ const Remote = {
 ["play", "pause", "ended", "loadedmetadata", "volumechange"].forEach((ev) => video.addEventListener(ev, () => Remote.soon()));
 window.addEventListener("hashchange", () => Remote.soon());
 $("#remote-btn").addEventListener("click", () => {
-  var _a2;
+  var _a;
   $("#remote-enable").checked = Remote.enabled();
   $("#remote-name").value = store.get("screenName", "") || "";
   $("#remote-url").value = `${location.origin}/remote`;
-  Remote.status(Remote.enabled() ? ((_a2 = Remote.ws) == null ? void 0 : _a2.readyState) === 1 ? `Connected as "${Remote.name()}"` : "Connecting…" : "Off");
+  Remote.status(Remote.enabled() ? ((_a = Remote.ws) == null ? void 0 : _a.readyState) === 1 ? `Connected as "${Remote.name()}"` : "Connecting…" : "Off");
   $("#remote-dialog").showModal();
 });
 $("#remote-enable").addEventListener("change", (e) => {
@@ -5304,7 +5298,7 @@ function go(hash) {
   else location.hash = hash;
 }
 async function route() {
-  var _a2, _b, _c;
+  var _a, _b, _c;
   requestAnimationFrame(() => Player.placeMini());
   const parts = location.hash.replace(/^#\/?/, "").split("/");
   const [view, src, id] = [parts[0], parts[1], parts.slice(2).join("/")];
@@ -5313,7 +5307,7 @@ async function route() {
     go("#/home");
     return;
   }
-  if (isKids() && (["b", "tasks", "folders", "profiles", "downloads"].includes(view) || view === "live" && !((_b = (_a2 = S.profile) == null ? void 0 : _a2.settings) == null ? void 0 : _b.allow_live))) {
+  if (isKids() && (["b", "tasks", "folders", "profiles", "downloads"].includes(view) || view === "live" && !((_b = (_a = S.profile) == null ? void 0 : _a.settings) == null ? void 0 : _b.allow_live))) {
     go("#/home");
     return;
   }
@@ -5371,6 +5365,7 @@ async function route() {
 }
 window.addEventListener("hashchange", route);
 async function start() {
+  var _a;
   $("#login").hidden = true;
   try {
     await Profiles.load();
@@ -5385,6 +5380,11 @@ async function start() {
   Profiles.apply();
   try {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
+    if ((_a = S.config) == null ? void 0 : _a.version) {
+      const v = $("#app-ver");
+      v.textContent = `server ${S.config.version}`;
+      v.hidden = false;
+    }
   } catch (e) {
     return;
   }

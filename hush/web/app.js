@@ -2745,7 +2745,6 @@ $("#avsync-less").addEventListener("click", () => Player.setAvsync(Player.avsync
 $("#avsync-more").addEventListener("click", () => Player.setAvsync(Player.avsync + 50));
 $("#avsync-reset").addEventListener("click", () => Player.setAvsync(0));
 $("#avsync-val").textContent = `${Player.avsync} ms`;
-if (window.HushApp?.version) { const v = $("#app-ver"); v.textContent = `app ${window.HushApp.version()}`; v.hidden = false; }
 $("#cc-btn").addEventListener("click", () => Player.setCaptions(!Player.captionsOn));
 $("#audio-select").addEventListener("change", async (e) => {
   const t = Player.now();
@@ -3468,6 +3467,7 @@ async function start() {
   Profiles.apply();
   try {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
+    if (S.config?.version) { const v = $("#app-ver"); v.textContent = `server ${S.config.version}`; v.hidden = false; }
   } catch { return; }
   route();
   Jobs.poll();

@@ -289,9 +289,15 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         resp.delete_cookie(COOKIE)
         return resp
 
+    def server_version() -> str:
+        """The release number plus when the files were last updated, so an update is visible at a glance."""
+        from . import __version__
+        newest = max((p.stat().st_mtime for p in Path(__file__).parent.rglob("*") if p.suffix in (".py", ".js", ".html", ".css")), default=0)
+        return f"{__version__} · {time.strftime('%b %d %H:%M', time.localtime(newest))}" if newest else __version__
+
     @app.get("/api/config", dependencies=[need])
     def config_info():
-        return {"encoder": hw.encoder_for(cfg), "engines": analyzer.engines(), "categories": analyzer.wordlist.categories_info(),
+        return {"version": server_version(), "encoder": hw.encoder_for(cfg), "engines": analyzer.engines(), "categories": analyzer.wordlist.categories_info(),
                 "source_types": ["local", "smb", "ftp", "sftp", "http", "dlna", "jellyfin", "plex"]}
 
     # ---- sources --------------------------------------------------------
