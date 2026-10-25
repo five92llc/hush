@@ -225,6 +225,16 @@
         <div class="wait-bar"><i id="wait-fill"></i></div>
       </div>
       <div id="stage-msg" class="stage-msg" hidden></div>
+      <div id="cast-bar" class="cast-bar" hidden>
+        <div class="cast-ico" aria-hidden="true">📡</div>
+        <div class="cast-text"><strong id="cast-name">Casting</strong><span id="cast-time" class="hint"></span></div>
+        <div class="cast-btns">
+          <button id="cast-back" class="btn ghost" type="button" aria-label="Back 10 seconds">−10</button>
+          <button id="cast-play" class="btn subtle" type="button">Pause</button>
+          <button id="cast-fwd" class="btn ghost" type="button" aria-label="Forward 10 seconds">+10</button>
+          <button id="cast-stop" class="btn primary" type="button">Stop casting</button>
+        </div>
+      </div>
       <div id="mini-bar" class="mini-bar">
         <button id="mini-title" class="t" type="button" title="Open the player">&nbsp;</button>
         <button id="mini-prev" class="icon-btn" type="button" aria-label="Previous" title="Previous">
@@ -301,6 +311,9 @@
         <button id="guide-btn" class="btn subtle" type="button" aria-controls="guide" aria-expanded="false" title="Channel list (G)" hidden>Channels</button>
         <button id="panel-btn" class="btn subtle admin-only" type="button" aria-controls="panel" aria-expanded="false">Language</button>
         <button id="cc-btn" class="icon-btn cc" type="button" aria-pressed="false" aria-label="Captions (C)" title="Captions (C)">CC</button>
+        <button id="cast-btn" class="icon-btn" type="button" hidden aria-label="Cast to a TV or speaker" title="AirPlay / Cast">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 18a3 3 0 0 1 3 3M3 14a7 7 0 0 1 7 7M3 10a11 11 0 0 1 11 11M5 6h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
         <button id="settings-btn" class="icon-btn" type="button" aria-label="Audio and subtitles" aria-expanded="false">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18v12H3z" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 13h4M12 13h6M6 16h8"/></svg>
         </button>

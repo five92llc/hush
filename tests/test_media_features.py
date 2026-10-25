@@ -338,3 +338,22 @@ def test_world_clocks_are_saved_and_cleaned(tmp_path):
 def test_the_phone_remote_can_send_text():
     from hush.remote import COMMANDS
     assert "text" in COMMANDS
+
+
+def test_cast_links_work_without_a_cookie_but_only_for_streams(tmp_path):
+    from fastapi.testclient import TestClient
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="pw", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir(); cfg.cache_dir.mkdir()
+    app = create_app(cfg)
+    c = TestClient(app)
+    assert c.post("/api/cast/token").status_code == 401                        # signing in comes first
+    assert c.post("/api/login", json={"password": "pw"}).status_code == 200
+    base = c.post("/api/cast/token").json()["base"]
+    prefix = "/c/" + base.split("/c/")[1]
+    fresh = TestClient(app)                                                     # a TV: no cookies at all
+    assert fresh.get("/api/hls/abc/index.m3u8").status_code == 401
+    assert fresh.get(prefix + "/api/hls/abc/index.m3u8").status_code == 404     # past the gate: the stream just is not there
+    assert fresh.get(prefix + "/api/library/movies").status_code == 403         # a token opens streams, nothing else
+    assert fresh.get("/c/forged-token/api/hls/abc/index.m3u8").status_code == 403
+    assert fresh.get(prefix + "/api/hls/../library/movies").status_code in (403, 404)

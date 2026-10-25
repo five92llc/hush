@@ -815,3 +815,10 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .dl.is-hidden { opacity: .55; }
 .set-tile.exit { border-style: dashed; }
 .brand-sub { margin: -.2rem 0 .6rem; font-size: var(--s-1); letter-spacing: .32em; text-transform: uppercase; color: var(--linen-dim); }
+
+/* ---------- casting ---------- */
+.cast-bar { position: absolute; left: 50%; bottom: 6.5rem; transform: translateX(-50%); display: flex; align-items: center; gap: 1rem; padding: .8rem 1.1rem; border-radius: 14px;
+  background: rgba(18,19,34,.92); border: 1px solid var(--line); z-index: 6; max-width: 94%; flex-wrap: wrap; justify-content: center; }
+.cast-bar[hidden] { display: none; }
+.cast-ico { font-size: 1.6rem; } .cast-text { display: grid; } .cast-btns { display: flex; gap: .4rem; }
+#cast-btn.on { color: var(--lamp); }

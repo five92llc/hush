@@ -275,3 +275,12 @@ When nothing is playing and no key or pointer has been used for a while (set und
 ## Logo
 
 The icon is a letter H whose crossbar is a play button (`hush/web/icon.svg`; wordmark and TV banner in `docs/logo/`). It is used for the browser tab, the home-screen icon of the phone remote, the Android and Fire TV launcher and banner, and the LG icons.
+
+## Casting (AirPlay and Chromecast)
+
+While something plays, a **cast button** appears in the player controls when a screen is in range.
+
+- **AirPlay** (Safari on Mac, iPhone and iPad): pick your Apple TV or AirPlay speaker. The video is sent, not your screen. For true screen mirroring use the system's own **Screen Mirroring** control, which shows Hush like anything else on the screen.
+- **Chromecast and Google TV** (Chrome on a computer or an Android phone): pick the device; the player screen shows what is casting with play/pause, ±10 seconds and **Stop casting**, and playback carries on here from where the TV got to.
+
+The language filter goes with it: Hush sends the screen a stream with the flagged words already muted (live channels are the same delayed, filtered feed). Because a TV cannot send your sign-in cookie, Hush gives it a private, expiring address (`/c/<token>/…`, 24 hours, streams only, for the profile that cast it; a password change invalidates it). Open Hush by its network address (not `localhost`) so the TV can reach it. Chrome loads Google's Cast script from gstatic.com the first time something plays; AirPlay needs nothing external. The Android TV and LG apps cannot cast from themselves.

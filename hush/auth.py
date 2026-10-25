@@ -94,8 +94,26 @@ class Auth:
         return (exp.isdigit() and int(exp) > time.time()
                 and hmac.compare_digest(sig, self._sig("url:" + path + ":" + exp)))
 
+    # ---- cast tokens: a TV or speaker fetching a stream cannot send our cookie, so the token rides in the path ----
+    def make_cast_token(self, profile_id: str, ttl: int = 24 * 3600) -> str:
+        exp = str(int(time.time()) + ttl)
+        return f"{exp}-{profile_id}-{self._sig('cast:' + profile_id + ':' + exp + ':' + self._epoch)}"
+
+    def cast_profile(self, token: str) -> str | None:
+        """The profile a cast token was made for, or None when it is forged, expired or from before a password change."""
+        try:
+            exp, rest = token.split("-", 1)
+            pid, sig = rest.rsplit("-", 1)
+        except ValueError:
+            return None
+        if exp.isdigit() and int(exp) > time.time() and hmac.compare_digest(sig, self._sig("cast:" + pid + ":" + exp + ":" + self._epoch)):
+            return pid
+        return None
+
     # ---- FastAPI dependency ---------------------------------------------
     def require(self, request: Request) -> None:
+        if request.scope.get("hush_cast_profile"):      # set only by the cast gate, never by a client
+            return
         if not self.enabled:
             return
         if self.valid_session(request.cookies.get(COOKIE)):

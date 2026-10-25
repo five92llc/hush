@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 fa38fc747a11dec1e55366d16b050df4419c0a287ce1c8ea6698828db67f5193) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 1c63e96358b2cf5f0dd6eeb5978a6c9396ee69df16eb39bc8390d196ba1a002f) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -3593,6 +3593,8 @@ const Player = {
     const keepMini = !!opts.mini;
     const libraryWasHidden = $("#library").hidden;
     this.close(false);
+    Cast.init();
+    Cast.button();
     if (keepMini) $("#library").hidden = libraryWasHidden;
     this.src = sourceId;
     this.item = itemId;
@@ -3673,6 +3675,7 @@ const Player = {
     this.renderPanel();
   },
   close(goBack = true) {
+    Cast.stop(false);
     WaitScreen.stop();
     this.releaseLiveFilter();
     this.endMini();
@@ -3818,6 +3821,43 @@ const Player = {
     if (this.mode !== "direct") q.set("mode", this.mode);
     return `/api/stream/${this.src}/${this.item}?${q}`;
   },
+  /** A server-muted HLS address a TV or speaker can fetch without our cookie: {url, at (the second of the title it starts at)}. */
+  async castSource() {
+    var _a, _b, _c;
+    if (/^(localhost|127\.|\[::1\])/.test(location.hostname)) throw new Error("open Hush by its network address (for example http://192.168.100.228) so the TV can reach it");
+    const base = (await api("/api/cast/token", { method: "POST" })).base;
+    const t = this.info.live ? 0 : this.now();
+    let path;
+    if (this.info.live && this.chan && this.wantsLiveFilter()) {
+      const body = { src: this.src, item: this.item, cats: [...this.cats].join(","), tab: TAB, mute: isKids() || this.filterOn };
+      path = (await api("/api/livefilter/open", { method: "POST", body })).hls;
+    } else {
+      const audioOnly = this.info.kind === "audio";
+      const mode = audioOnly ? "audio" : ((_c = (_b = (_a = this.info.probe) == null ? void 0 : _a.video) == null ? void 0 : _b[0]) == null ? void 0 : _c.codec) === "h264" ? "remux" : "transcode";
+      const q = new URLSearchParams({ start: t.toFixed(3), tab: TAB, filter: +this.filterOn, cats: [...this.cats].join(","), mode });
+      if (this.audioIndex != null) q.set("audio", this.audioIndex);
+      const r = await fetch(`/api/hls/start/${this.src}/${this.item}?${q}`, { credentials: "same-origin" });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "the stream could not start");
+      path = new URL(r.url).pathname;
+    }
+    return { url: `${base}${path}`, at: t };
+  },
+  /** Safari: while an AirPlay screen is in range, play through a tokenised address (the Apple TV cannot send our cookie). */
+  tokenBase: null,
+  tokenizing: false,
+  async armAirplay() {
+    if (this.tokenBase || this.tokenizing || !this.info || Cast.active) return;
+    this.tokenizing = true;
+    try {
+      this.tokenBase = (await api("/api/cast/token", { method: "POST" })).base;
+    } catch (e) {
+      this.tokenizing = false;
+      return;
+    }
+    this.tokenizing = false;
+    if (this.hls && this.mode !== "direct" && !video.paused) this.startAt(this.now()).then(() => video.play().catch(() => {
+    }));
+  },
   hls: IS_WEBKIT || IS_LG,
   hlsSig: "",
   hlsTimer: null,
@@ -3939,6 +3979,16 @@ const Player = {
       } else {
         this.releaseLiveFilter();
         url = this.hls ? this.hlsUrl(landing) : this.streamUrl(landing);
+      }
+      if (this.tokenBase && IS_WEBKIT && this.hls) {
+        try {
+          if (!/\/index\.m3u8/.test(url)) {
+            const r = await fetch(url, { credentials: "same-origin" });
+            if (r.ok) url = new URL(r.url).pathname;
+          }
+          url = this.tokenBase + new URL(url, location.origin).pathname;
+        } catch (e) {
+        }
       }
       if (IS_LG && this.hls && !this.liveFiltered) {
         try {
@@ -5999,6 +6049,173 @@ const Settings = {
     TV.focusSoon(60);
   }
 };
+const Cast = {
+  ctx: null,
+  rp: null,
+  rpc: null,
+  air: false,
+  state: "",
+  name: "",
+  base: 0,
+  startedAt: 0,
+  active: false,
+  token: null,
+  loading: false,
+  available() {
+    return !IS_LG && !window.HushApp;
+  },
+  init() {
+    if (this.loading || !this.available()) return;
+    this.loading = true;
+    video.setAttribute("x-webkit-airplay", "allow");
+    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+      video.addEventListener("webkitplaybacktargetavailabilitychanged", (e) => {
+        this.air = e.availability === "available";
+        this.button();
+        if (this.air) Player.armAirplay();
+      });
+      video.addEventListener("webkitcurrentplaybacktargetiswirelesschanged", () => {
+        toast(video.webkitCurrentPlaybackTargetIsWireless ? "Playing on the AirPlay screen" : "AirPlay stopped");
+      });
+    }
+    if (!IS_WEBKIT) {
+      window.__onGCastApiAvailable = (ok) => {
+        if (ok) this.setup();
+      };
+      const s = document.createElement("script");
+      s.async = true;
+      s.src = "https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1";
+      document.head.append(s);
+    }
+  },
+  setup() {
+    try {
+      const f = cast.framework;
+      this.ctx = f.CastContext.getInstance();
+      this.ctx.setOptions({ receiverApplicationId: chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID, autoJoinPolicy: chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED });
+      this.rp = new f.RemotePlayer();
+      this.rpc = new f.RemotePlayerController(this.rp);
+      this.ctx.addEventListener(f.CastContextEventType.CAST_STATE_CHANGED, (e) => {
+        this.state = e.castState;
+        this.button();
+      });
+      this.ctx.addEventListener(f.CastContextEventType.SESSION_STATE_CHANGED, (e) => {
+        if (e.sessionState === f.SessionState.SESSION_ENDED && this.active) this.ended();
+      });
+      const ev = f.RemotePlayerEventType;
+      this.rpc.addEventListener(ev.CURRENT_TIME_CHANGED, () => this.tick());
+      this.rpc.addEventListener(ev.DURATION_CHANGED, () => this.tick());
+      this.rpc.addEventListener(ev.IS_PAUSED_CHANGED, () => {
+        $("#cast-play").textContent = this.rp.isPaused ? "Play" : "Pause";
+      });
+      this.state = this.ctx.getCastState();
+      this.button();
+    } catch (e) {
+    }
+  },
+  button() {
+    const show = !!Player.info && !Player.mini && (window.WebKitPlaybackTargetAvailabilityEvent ? this.air : this.state && this.state !== "NO_DEVICES_AVAILABLE");
+    $("#cast-btn").hidden = !show;
+    $("#cast-btn").classList.toggle("on", this.active);
+  },
+  tick() {
+    if (!this.active) return;
+    $("#cast-time").textContent = `${fmt(this.base + (this.rp.currentTime || 0))} / ${fmt(Player.duration || this.rp.duration || 0)}`;
+  },
+  async click() {
+    if (!window.WebKitPlaybackTargetAvailabilityEvent) {
+      if (this.active) return;
+      try {
+        await this.ctx.requestSession();
+      } catch (e) {
+        return;
+      }
+      return this.start();
+    }
+    if (!Player.tokenBase) {
+      toast("Getting ready for AirPlay. Tap it again in a moment.");
+      Player.armAirplay();
+      return;
+    }
+    video.webkitShowPlaybackTargetPicker();
+  },
+  async start() {
+    var _a;
+    const sess = this.ctx.getCurrentSession();
+    if (!sess || !Player.info) return;
+    try {
+      toast("Starting on the TV…");
+      const { url, at } = await Player.castSource();
+      const live = !!Player.info.live;
+      const info = new chrome.cast.media.MediaInfo(url, "application/x-mpegURL");
+      info.streamType = live ? chrome.cast.media.StreamType.LIVE : chrome.cast.media.StreamType.BUFFERED;
+      info.metadata = new chrome.cast.media.GenericMediaMetadata();
+      info.metadata.title = Player.info.title || "Hush";
+      const req = new chrome.cast.media.LoadRequest(info);
+      req.autoplay = true;
+      req.currentTime = 0;
+      await sess.loadMedia(req);
+      this.active = true;
+      this.base = at;
+      this.name = ((_a = sess.getCastDevice()) == null ? void 0 : _a.friendlyName) || "the TV";
+      video.pause();
+      Player.casting = true;
+      $("#cast-name").textContent = `Casting to ${this.name}`;
+      $("#cast-bar").hidden = false;
+      $("#cast-play").textContent = "Pause";
+      this.tick();
+      this.button();
+    } catch (err) {
+      toast(`Couldn't cast: ${(err == null ? void 0 : err.description) || (err == null ? void 0 : err.message) || err || "the TV could not play it"}`);
+      try {
+        this.ctx.endCurrentSession(true);
+      } catch (e) {
+      }
+    }
+  },
+  /** Back on this screen: carry on from where the TV got to. */
+  ended() {
+    var _a;
+    const t = this.base + (((_a = this.rp) == null ? void 0 : _a.currentTime) || 0);
+    this.active = false;
+    Player.casting = false;
+    $("#cast-bar").hidden = true;
+    this.button();
+    if (this.resume !== false && Player.info && !Player.info.live) Player.startAt(t).then(() => video.play().catch(() => {
+    }));
+    else if (this.resume !== false && Player.info) Player.startAt(0).then(() => video.play().catch(() => {
+    }));
+    this.resume = void 0;
+  },
+  stop(resume = true) {
+    if (!this.active) return;
+    this.resume = resume;
+    try {
+      this.ctx.endCurrentSession(true);
+    } catch (e) {
+      this.ended();
+    }
+  }
+};
+$("#cast-btn").addEventListener("click", () => Cast.click());
+video.addEventListener("loadedmetadata", () => Cast.button());
+$("#cast-stop").addEventListener("click", () => Cast.stop(true));
+$("#cast-play").addEventListener("click", () => {
+  var _a;
+  return (_a = Cast.rpc) == null ? void 0 : _a.playOrPause();
+});
+$("#cast-back").addEventListener("click", () => {
+  if (Cast.rp) {
+    Cast.rp.currentTime = Math.max(0, Cast.rp.currentTime - 10);
+    Cast.rpc.seek();
+  }
+});
+$("#cast-fwd").addEventListener("click", () => {
+  if (Cast.rp) {
+    Cast.rp.currentTime = Cast.rp.currentTime + 10;
+    Cast.rpc.seek();
+  }
+});
 async function clearContinue(it, card) {
   var _a;
   try {

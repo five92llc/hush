@@ -130,7 +130,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         resp.headers.setdefault("X-Frame-Options", "DENY")
         if resp.headers.get("content-type", "").startswith("text/html"):
             resp.headers.setdefault("Content-Security-Policy",
-                                    "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; "
+                                    "default-src 'self'; script-src 'self' https://www.gstatic.com chrome-extension:; img-src 'self' data: blob:; media-src 'self' blob:; "
                                     "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
         return resp
 
@@ -148,7 +148,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return next((p for p in everyone if not p["kids"]), everyone[0])
 
     def get_profile(request: Request) -> dict:
-        pid = request.cookies.get(PROFILE_COOKIE)
+        pid = request.scope.get("hush_cast_profile") or request.cookies.get(PROFILE_COOKIE)
         return (db.get_profile(pid) if pid else None) or default_profile()
 
     def need_adult(prof: dict = Depends(get_profile)) -> dict:
@@ -218,6 +218,23 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 why = await run_in_threadpool(kids_refusal, prof, request.method, path)
                 if why:
                     return JSONResponse({"detail": why}, status_code=403)
+        return await call_next(request)
+
+    # Casting (AirPlay, Chromecast): the receiver fetches the stream itself, so the address carries a token: /c/<token>/api/hls/...
+    CAST_OPEN = ("/api/hls/", "/api/livefilter/")
+
+    @app.middleware("http")
+    async def cast_gate(request: Request, call_next):
+        path = request.scope["path"]
+        if path.startswith("/c/"):
+            token, _, rest = path[3:].partition("/")
+            rest = "/" + rest
+            pid = auth.cast_profile(token)
+            if request.method not in ("GET", "HEAD") or not pid or not rest.startswith(CAST_OPEN) or ".." in rest or not db.get_profile(pid):
+                return JSONResponse({"detail": "This cast link is not valid or has expired"}, status_code=403)
+            request.scope["path"] = rest
+            request.scope["raw_path"] = rest.encode()
+            request.scope["hush_cast_profile"] = pid
         return await call_next(request)
 
     # ---- helpers --------------------------------------------------------
@@ -763,6 +780,12 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 warming.add((src, item))
                 threading.Thread(target=work, args=(src, item), daemon=True).start()
         return {"ok": True}
+
+    @app.post("/api/cast/token", dependencies=[need])
+    def cast_token(request: Request, prof: dict = Depends(get_profile)):
+        """The address prefix a TV or speaker can fetch this profile's streams from (24 hours)."""
+        base = cfg.public_url.rstrip("/") or str(request.base_url).rstrip("/")
+        return {"base": f"{base}/c/{auth.make_cast_token(prof['id'])}", "expires_in_hours": 24}
 
     @app.get("/api/library/version", dependencies=[need])
     def library_version():
