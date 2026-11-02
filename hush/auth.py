@@ -110,6 +110,17 @@ class Auth:
             return pid
         return None
 
+    # ---- scoped tokens (the Android app sending its screen) ---------------------------------------------
+    def make_scoped(self, scope: str, ttl: int = 12 * 3600) -> str:
+        exp = str(int(time.time()) + ttl)
+        return f"{exp}.{self._sig(scope + ':' + exp + ':' + self._epoch)}"
+
+    def check_scoped(self, scope: str, token: str | None) -> bool:
+        if not token or "." not in token:
+            return False
+        exp, sig = token.split(".", 1)
+        return exp.isdigit() and int(exp) > time.time() and hmac.compare_digest(sig, self._sig(scope + ":" + exp + ":" + self._epoch))
+
     # ---- FastAPI dependency ---------------------------------------------
     def require(self, request: Request) -> None:
         if request.scope.get("hush_cast_profile"):      # set only by the cast gate, never by a client

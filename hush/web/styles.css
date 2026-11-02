@@ -822,3 +822,12 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .cast-bar[hidden] { display: none; }
 .cast-ico { font-size: 1.6rem; } .cast-text { display: grid; } .cast-btns { display: flex; gap: .4rem; }
 #cast-btn.on { color: var(--lamp); }
+
+/* ---------- mirroring ---------- */
+.mirror { position: fixed; inset: 0; z-index: 8500; background: #000; display: flex; align-items: center; justify-content: center; }
+.mirror[hidden] { display: none; }
+.mirror video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+.mirror-wait { position: absolute; color: var(--linen); font-size: 1.3rem; opacity: .8; }
+.mirror-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: .7rem; align-items: center; padding: .7rem 1rem; background: linear-gradient(rgba(0,0,0,.7), rgba(0,0,0,0)); opacity: 0; transition: opacity .3s; }
+.mirror:hover .mirror-bar, .mirror-bar:focus-within { opacity: 1; }
+.mirror-bar strong { margin-right: auto; }

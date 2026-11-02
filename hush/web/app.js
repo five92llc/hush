@@ -641,7 +641,7 @@ const Saver = {
   last: Date.now(), on: false, art: [], artAt: 0, layer: 0, timers: [], prevFocus: null,
   mins() { return Number(store.get("saver", 10)) || 0; },
   bg() { return store.get("saverbg", "art"); },
-  busy() { return !!(Player.info && !video.paused) || $("#login") && !$("#login").hidden || document.hidden; },
+  busy() { return !!(Player.info && !video.paused) || Mirror.open || $("#login") && !$("#login").hidden || document.hidden; },
   poke() { this.last = Date.now(); },
   async loadArt() {
     if (this.art.length && Date.now() - this.artAt < 30 * 60 * 1000) return;
@@ -3457,6 +3457,7 @@ const TV = {
   roots() {
     if (TVKeyboard.el) return [TVKeyboard.el];
     if (TVSelect.el) return [TVSelect.el];
+    if (Mirror.open) return [$("#mirror-bar")];
     const dlg = document.querySelector("dialog[open]");
     if (dlg) return [dlg];
     for (const id of ["#profile-picker", "#login"]) if (!$(id).hidden) return [$(id)];     // "Who's watching?" and sign-in sit above everything
@@ -3523,6 +3524,7 @@ const TV = {
   back() {
     if (TVKeyboard.el) { TVKeyboard.close(); return; }
     if (TVSelect.el) { TVSelect.close(); return; }
+    if (Mirror.open) { Mirror.close(); return; }
     const tlb = $("#timeline");
     if (tlb?.dataset.adjust === "1") { tlb.dataset.adjust = "0"; return; }
     if (!$("#profile-picker").hidden) { if (!$("#profiles-cancel").hidden) $("#profiles-cancel").click(); return; }
@@ -3812,7 +3814,7 @@ function go(hash) { if (location.hash === hash) route(); else location.hash = ha
 const Settings = {
   SECTIONS: [
     ["display", "Display", "🖥️", "Big screen mode and the phone remote", false], ["topbar", "Top bar", "🎛️", "Clock, weather, scores, headlines and more", false],
-    ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true], ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
+    ["mirror", "Mirroring", "📲", "Show a phone or tablet screen on Hush", false], ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true], ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
     ["people", "People", "👥", "Profiles and who can watch what", true], ["server", "Server", "⚙️", "How video is prepared for your screens", true],
     ["security", "Security", "🔒", "The password for Hush", true], ["about", "About", "ℹ️", "Versions, app updates and the server address", false],
   ],
@@ -3925,6 +3927,91 @@ $("#cast-play").addEventListener("click", () => Cast.rpc?.playOrPause());
 $("#cast-back").addEventListener("click", () => { if (Cast.rp) { Cast.rp.currentTime = Math.max(0, Cast.rp.currentTime - 10); Cast.rpc.seek(); } });
 $("#cast-fwd").addEventListener("click", () => { if (Cast.rp) { Cast.rp.currentTime = Cast.rp.currentTime + 10; Cast.rpc.seek(); } });
 
+/** Mirroring: a phone, tablet or Mac shows its screen on this one. The Hush server receives it and plays it as a live feed. */
+const Mirror = {
+  st: null, open: false, dismissed: "", timer: null, filter: false, sid: "",
+  auto() { const v = store.get("mirror-auto", null); return v === null ? !!(IS_TV_DEVICE || TV.on) : !!v; },
+  async poll() {
+    let st; try { st = await api("/api/mirror/state"); } catch { return; }
+    this.st = st; this.status();
+    if (st.active && this.auto() && !this.open && st.sid !== this.dismissed) this.show();
+    else if (!st.active && this.open) { this.hide(); toast("Mirroring ended"); this.dismissed = ""; }
+    else if (st.active && this.open && !video2().src && st.ready) this.play();
+  },
+  status() {
+    const st = this.st; if (!st) return;
+    const a = st.airplay;
+    $("#mirror-status").textContent = st.active ? `Mirroring from ${st.name} (${st.source === "airplay" ? "AirPlay" : "Android"})` : "Nothing is being mirrored.";
+    $("#mirror-name-hint").textContent = a.name || "Hush";
+    $("#mirror-air-info").textContent = a.missing.length ? `Not set up on the server yet (missing: ${a.missing.join(", ")}). See the README, section Mirroring.` : a.enabled ? (a.running ? `On. Visible to Apple devices as "${a.name}".` : "Starting…") : "Off. Switch on to let Apple devices mirror to Hush.";
+  },
+  async show() {
+    this.open = true; this.dismissed = "";
+    if (!$("#player").hidden && !Player.mini) { video.pause(); }
+    Saver.hide?.();
+    $("#mirror").hidden = false;
+    $("#mirror-title").textContent = `Mirroring from ${this.st?.name || "a device"}`;
+    $("#mirror-wait").hidden = false;
+    document.activeElement?.blur?.();
+    if (this.st?.ready) this.play();
+  },
+  async play() {
+    const v = video2(); const kids = isKids();
+    const filtered = kids || this.filter;
+    $("#mirror-filter").setAttribute("aria-pressed", String(filtered)); $("#mirror-filter").hidden = false;
+    $("#mirror-note").textContent = filtered ? "Filtered: about 10 seconds behind" : "Live";
+    let url;
+    try {
+      if (filtered) { const r = await api("/api/mirror/filter/open", { method: "POST", body: { tab: TAB } }); url = (IS_WEBKIT || IS_LG) ? r.hls : r.mp4; this.sid = r.sid; }
+      else url = (IS_WEBKIT || IS_LG) ? "/api/mirror/hls/index.m3u8" : "/api/mirror/stream.mp4";
+    } catch (err) { $("#mirror-wait").textContent = err.message; return; }
+    v.src = url; v.play().catch(() => { v.muted = true; v.play().catch(() => {}); toast("Press OK for sound"); });
+  },
+  hide() {
+    this.open = false; const v = video2(); v.pause(); v.removeAttribute("src"); v.load();
+    $("#mirror").hidden = true; $("#mirror-wait").textContent = "Waiting for the picture…"; Saver.poke?.();
+    if (this.sid) { try { navigator.sendBeacon("/api/livefilter/release", new Blob([JSON.stringify({ tab: TAB })], { type: "application/json" })); } catch { /* reaped */ } this.sid = ""; }
+    TV.focusSoon?.(60);
+  },
+  close() { this.dismissed = this.st?.sid || ""; this.hide(); },
+  init() {
+    const a = $("#mirror-auto"); a.checked = this.auto();
+    a.addEventListener("change", () => { store.set("mirror-auto", a.checked); toast(a.checked ? "This screen will show mirrors" : "This screen won't switch to mirrors by itself"); });
+    $("#mirror-close").addEventListener("click", () => this.close());
+    $("#mirror-open").addEventListener("click", () => { this.dismissed = ""; if (this.st?.active) { location.hash = "#/home"; this.show(); } else toast("Nothing is being mirrored yet"); });
+    $("#mirror-stop").addEventListener("click", async () => { try { await api("/api/mirror/stop", { method: "POST" }); } catch (e) { toast(e.message); } this.hide(); });
+    $("#mirror-filter").addEventListener("click", () => { this.filter = !this.filter; video2().removeAttribute("src"); this.play(); });
+    video2().addEventListener("playing", () => { $("#mirror-wait").hidden = true; });
+    video2().addEventListener("loadeddata", () => { if (this.open) video2().play().catch(() => {}); });
+    const f = $("#mirror-form");
+    f.addEventListener("submit", async (e) => { e.preventDefault(); await this.save({ name: $("#mirror-name").value.trim() || "Hush", pin: $("#mirror-pin").checked }); });
+    $("#mirror-air").addEventListener("change", (e) => this.save({ airplay: e.target.checked }));
+    $("#mirror-and").addEventListener("change", (e) => this.save({ android: e.target.checked }));
+    const app = window.HushApp;
+    if (app?.startShare) {
+      $("#mirror-share-row").hidden = false;
+      $("#mirror-share").addEventListener("click", async () => {
+        if (app.isSharing?.()) { app.stopShare(); $("#mirror-share").textContent = "Share this screen"; return; }
+        try {
+          const t = await api("/api/mirror/token", { method: "POST" });
+          if (!t.enabled) { toast("Sharing from Android is switched off in Settings → Mirroring on the Hush server"); return; }
+          app.startShare(t.url, t.token, "Android");
+          $("#mirror-share").textContent = "Stop sharing";
+        } catch (err) { toast(err.message); }
+      });
+    }
+    this.timer = setInterval(() => this.poll(), 3000); this.poll();
+  },
+  async save(body) {
+    try { this.st = await api("/api/mirror/settings", { method: "PUT", body }); this.status(); toast("Saved"); } catch (err) { toast(err.message); }
+  },
+  async loadSettings() {
+    await this.poll(); const a = this.st?.airplay; if (!a) return;
+    $("#mirror-air").checked = !!a.enabled; $("#mirror-name").value = a.name || ""; $("#mirror-pin").checked = !!a.pin; $("#mirror-and").checked = !!this.st.android; $("#mirror-auto").checked = this.auto();
+  },
+};
+const video2 = () => $("#mirror-video");
+
 /** Takes a title off "Continue watching" (its place in the file is forgotten; the title stays in the library). */
 async function clearContinue(it, card) {
   try {
@@ -3954,7 +4041,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; Settings.show(src);
-    WeatherCard.load(); ClockCard.load(); TickerSettings.load();
+    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";
@@ -3988,7 +4075,7 @@ async function start() {
   Profiles.apply();
   try {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
-    Ticker.init(); Saver.init();
+    Ticker.init(); Saver.init(); Mirror.init();
   } catch { return; }
   route();
   Jobs.poll();

@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 1c63e96358b2cf5f0dd6eeb5978a6c9396ee69df16eb39bc8390d196ba1a002f) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 259775f9c86e6f06603eb9bbd61ed162315a8f173cb46e774621c70db5eb1aad) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -977,7 +977,7 @@ const Saver = {
     return store.get("saverbg", "art");
   },
   busy() {
-    return !!(Player.info && !video.paused) || $("#login") && !$("#login").hidden || document.hidden;
+    return !!(Player.info && !video.paused) || Mirror.open || $("#login") && !$("#login").hidden || document.hidden;
   },
   poke() {
     this.last = Date.now();
@@ -5414,6 +5414,7 @@ const TV = {
   roots() {
     if (TVKeyboard.el) return [TVKeyboard.el];
     if (TVSelect.el) return [TVSelect.el];
+    if (Mirror.open) return [$("#mirror-bar")];
     const dlg = document.querySelector("dialog[open]");
     if (dlg) return [dlg];
     for (const id of ["#profile-picker", "#login"]) if (!$(id).hidden) return [$(id)];
@@ -5511,6 +5512,10 @@ const TV = {
     }
     if (TVSelect.el) {
       TVSelect.close();
+      return;
+    }
+    if (Mirror.open) {
+      Mirror.close();
       return;
     }
     const tlb = $("#timeline");
@@ -6009,6 +6014,7 @@ const Settings = {
   SECTIONS: [
     ["display", "Display", "🖥️", "Big screen mode and the phone remote", false],
     ["topbar", "Top bar", "🎛️", "Clock, weather, scores, headlines and more", false],
+    ["mirror", "Mirroring", "📲", "Show a phone or tablet screen on Hush", false],
     ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true],
     ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
     ["people", "People", "👥", "Profiles and who can watch what", true],
@@ -6216,6 +6222,196 @@ $("#cast-fwd").addEventListener("click", () => {
     Cast.rpc.seek();
   }
 });
+const Mirror = {
+  st: null,
+  open: false,
+  dismissed: "",
+  timer: null,
+  filter: false,
+  sid: "",
+  auto() {
+    const v = store.get("mirror-auto", null);
+    return v === null ? !!(IS_TV_DEVICE || TV.on) : !!v;
+  },
+  async poll() {
+    let st;
+    try {
+      st = await api("/api/mirror/state");
+    } catch (e) {
+      return;
+    }
+    this.st = st;
+    this.status();
+    if (st.active && this.auto() && !this.open && st.sid !== this.dismissed) this.show();
+    else if (!st.active && this.open) {
+      this.hide();
+      toast("Mirroring ended");
+      this.dismissed = "";
+    } else if (st.active && this.open && !video2().src && st.ready) this.play();
+  },
+  status() {
+    const st = this.st;
+    if (!st) return;
+    const a = st.airplay;
+    $("#mirror-status").textContent = st.active ? `Mirroring from ${st.name} (${st.source === "airplay" ? "AirPlay" : "Android"})` : "Nothing is being mirrored.";
+    $("#mirror-name-hint").textContent = a.name || "Hush";
+    $("#mirror-air-info").textContent = a.missing.length ? `Not set up on the server yet (missing: ${a.missing.join(", ")}). See the README, section Mirroring.` : a.enabled ? a.running ? `On. Visible to Apple devices as "${a.name}".` : "Starting…" : "Off. Switch on to let Apple devices mirror to Hush.";
+  },
+  async show() {
+    var _a, _b, _c, _d, _e;
+    this.open = true;
+    this.dismissed = "";
+    if (!$("#player").hidden && !Player.mini) {
+      video.pause();
+    }
+    (_a = Saver.hide) == null ? void 0 : _a.call(Saver);
+    $("#mirror").hidden = false;
+    $("#mirror-title").textContent = `Mirroring from ${((_b = this.st) == null ? void 0 : _b.name) || "a device"}`;
+    $("#mirror-wait").hidden = false;
+    (_d = (_c = document.activeElement) == null ? void 0 : _c.blur) == null ? void 0 : _d.call(_c);
+    if ((_e = this.st) == null ? void 0 : _e.ready) this.play();
+  },
+  async play() {
+    const v = video2();
+    const kids = isKids();
+    const filtered = kids || this.filter;
+    $("#mirror-filter").setAttribute("aria-pressed", String(filtered));
+    $("#mirror-filter").hidden = false;
+    $("#mirror-note").textContent = filtered ? "Filtered: about 10 seconds behind" : "Live";
+    let url;
+    try {
+      if (filtered) {
+        const r = await api("/api/mirror/filter/open", { method: "POST", body: { tab: TAB } });
+        url = IS_WEBKIT || IS_LG ? r.hls : r.mp4;
+        this.sid = r.sid;
+      } else url = IS_WEBKIT || IS_LG ? "/api/mirror/hls/index.m3u8" : "/api/mirror/stream.mp4";
+    } catch (err) {
+      $("#mirror-wait").textContent = err.message;
+      return;
+    }
+    v.src = url;
+    v.play().catch(() => {
+      v.muted = true;
+      v.play().catch(() => {
+      });
+      toast("Press OK for sound");
+    });
+  },
+  hide() {
+    var _a, _b;
+    this.open = false;
+    const v = video2();
+    v.pause();
+    v.removeAttribute("src");
+    v.load();
+    $("#mirror").hidden = true;
+    $("#mirror-wait").textContent = "Waiting for the picture…";
+    (_a = Saver.poke) == null ? void 0 : _a.call(Saver);
+    if (this.sid) {
+      try {
+        navigator.sendBeacon("/api/livefilter/release", new Blob([JSON.stringify({ tab: TAB })], { type: "application/json" }));
+      } catch (e) {
+      }
+      this.sid = "";
+    }
+    (_b = TV.focusSoon) == null ? void 0 : _b.call(TV, 60);
+  },
+  close() {
+    var _a;
+    this.dismissed = ((_a = this.st) == null ? void 0 : _a.sid) || "";
+    this.hide();
+  },
+  init() {
+    const a = $("#mirror-auto");
+    a.checked = this.auto();
+    a.addEventListener("change", () => {
+      store.set("mirror-auto", a.checked);
+      toast(a.checked ? "This screen will show mirrors" : "This screen won't switch to mirrors by itself");
+    });
+    $("#mirror-close").addEventListener("click", () => this.close());
+    $("#mirror-open").addEventListener("click", () => {
+      var _a;
+      this.dismissed = "";
+      if ((_a = this.st) == null ? void 0 : _a.active) {
+        location.hash = "#/home";
+        this.show();
+      } else toast("Nothing is being mirrored yet");
+    });
+    $("#mirror-stop").addEventListener("click", async () => {
+      try {
+        await api("/api/mirror/stop", { method: "POST" });
+      } catch (e) {
+        toast(e.message);
+      }
+      this.hide();
+    });
+    $("#mirror-filter").addEventListener("click", () => {
+      this.filter = !this.filter;
+      video2().removeAttribute("src");
+      this.play();
+    });
+    video2().addEventListener("playing", () => {
+      $("#mirror-wait").hidden = true;
+    });
+    video2().addEventListener("loadeddata", () => {
+      if (this.open) video2().play().catch(() => {
+      });
+    });
+    const f = $("#mirror-form");
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await this.save({ name: $("#mirror-name").value.trim() || "Hush", pin: $("#mirror-pin").checked });
+    });
+    $("#mirror-air").addEventListener("change", (e) => this.save({ airplay: e.target.checked }));
+    $("#mirror-and").addEventListener("change", (e) => this.save({ android: e.target.checked }));
+    const app = window.HushApp;
+    if (app == null ? void 0 : app.startShare) {
+      $("#mirror-share-row").hidden = false;
+      $("#mirror-share").addEventListener("click", async () => {
+        var _a;
+        if ((_a = app.isSharing) == null ? void 0 : _a.call(app)) {
+          app.stopShare();
+          $("#mirror-share").textContent = "Share this screen";
+          return;
+        }
+        try {
+          const t = await api("/api/mirror/token", { method: "POST" });
+          if (!t.enabled) {
+            toast("Sharing from Android is switched off in Settings → Mirroring on the Hush server");
+            return;
+          }
+          app.startShare(t.url, t.token, "Android");
+          $("#mirror-share").textContent = "Stop sharing";
+        } catch (err) {
+          toast(err.message);
+        }
+      });
+    }
+    this.timer = setInterval(() => this.poll(), 3e3);
+    this.poll();
+  },
+  async save(body) {
+    try {
+      this.st = await api("/api/mirror/settings", { method: "PUT", body });
+      this.status();
+      toast("Saved");
+    } catch (err) {
+      toast(err.message);
+    }
+  },
+  async loadSettings() {
+    var _a;
+    await this.poll();
+    const a = (_a = this.st) == null ? void 0 : _a.airplay;
+    if (!a) return;
+    $("#mirror-air").checked = !!a.enabled;
+    $("#mirror-name").value = a.name || "";
+    $("#mirror-pin").checked = !!a.pin;
+    $("#mirror-and").checked = !!this.st.android;
+    $("#mirror-auto").checked = this.auto();
+  }
+};
+const video2 = () => $("#mirror-video");
 async function clearContinue(it, card) {
   var _a;
   try {
@@ -6267,6 +6463,7 @@ async function route() {
     WeatherCard.load();
     ClockCard.load();
     TickerSettings.load();
+    Mirror.loadSettings();
     const app = window.HushApp;
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = ((_c = S.config) == null ? void 0 : _c.version) ? `Version ${S.config.version}` : "";
@@ -6316,6 +6513,7 @@ async function start() {
     [S.config] = await Promise.all([api("/api/config"), loadSources()]);
     Ticker.init();
     Saver.init();
+    Mirror.init();
   } catch (e) {
     return;
   }

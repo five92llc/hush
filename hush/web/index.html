@@ -179,6 +179,25 @@
           <button class="btn subtle" type="submit">Save</button></form>
       </div>
     </div>
+    <div class="prefs-card" id="mirror-card">
+      <h2>Mirroring</h2>
+      <p class="hint">Show a phone or tablet screen on a Hush screen. iPhone, iPad and Mac: open Control Centre, tap Screen Mirroring and pick <strong id="mirror-name-hint">Hush</strong>. Android: open Hush on the phone or tablet and tap <em>Share this screen</em>.</p>
+      <div class="pref" id="mirror-share-row" hidden><div><strong>Share this screen to Hush</strong><p class="hint" id="mirror-share-info">Sends what is on this phone or tablet to the Hush screen.</p></div>
+        <button id="mirror-share" class="btn primary" type="button">Share this screen</button></div>
+      <div class="pref"><div><strong>Show mirrors on this screen</strong><p class="hint">When someone starts mirroring, this screen switches to it by itself.</p></div>
+        <input id="mirror-auto" type="checkbox" aria-label="Show mirrors on this screen"></div>
+      <div class="pref"><div><strong>Mirror status</strong><p id="mirror-status" class="hint">Checking…</p></div>
+        <button id="mirror-open" class="btn subtle" type="button">Open the mirror view</button></div>
+      <div class="admin-only">
+        <div class="pref"><div><strong>AirPlay (iPhone, iPad, Mac)</strong><p id="mirror-air-info" class="hint"></p></div>
+          <input id="mirror-air" type="checkbox" aria-label="Receive AirPlay"></div>
+        <form id="mirror-form" class="row"><input id="mirror-name" type="text" maxlength="30" placeholder="Name shown on the phone (Hush)" aria-label="AirPlay name" autocomplete="off">
+          <label class="check"><input id="mirror-pin" type="checkbox"> Ask for a code the first time</label>
+          <button class="btn subtle" type="submit">Save</button></form>
+        <div class="pref"><div><strong>Android sharing</strong><p class="hint">Lets the Hush app on a phone or tablet send its screen.</p></div>
+          <input id="mirror-and" type="checkbox" aria-label="Allow Android sharing"></div>
+      </div>
+    </div>
     <div class="prefs-card admin-only">
       <h2>Tuning-in screen</h2>
       <div class="pref"><div><strong>Weather</strong><p id="weather-info" class="hint">Not set. Pick your town to show the weather while a channel opens.</p></div>
@@ -546,6 +565,17 @@
   <ul id="match-results" class="match-results"></ul>
 </dialog>
 
+<div id="mirror" class="mirror" hidden aria-label="Mirrored screen">
+  <video id="mirror-video" playsinline autoplay></video>
+  <div id="mirror-wait" class="mirror-wait">Waiting for the picture…</div>
+  <div id="mirror-bar" class="mirror-bar">
+    <strong id="mirror-title">Mirroring</strong>
+    <span id="mirror-note" class="hint"></span>
+    <button id="mirror-filter" class="btn subtle" type="button" aria-pressed="false">Filter profanity</button>
+    <button id="mirror-stop" class="btn ghost admin-only" type="button">Stop mirroring</button>
+    <button id="mirror-close" class="btn primary" type="button">Close</button>
+  </div>
+</div>
 <div id="saver" class="saver" hidden aria-hidden="true">
   <div class="sv-bg a"></div><div class="sv-bg b"></div><div class="sv-shade"></div>
   <div id="sv-card" class="sv-card">

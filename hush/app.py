@@ -20,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 
 from . import discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
+from .mirror import MirrorHub
 from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
 from .remote import RemoteHub
@@ -93,6 +94,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     library = MetadataService(cfg, db, registry)
     hls = HLSManager(cfg.data_dir / "hls")
     livefilter = LiveFilter(cfg, analyzer.wordlist, cfg.data_dir / "livefilter")
+    mirror = MirrorHub(cfg, db)
     livetv = LiveTV(cfg, db, registry)
     remote = RemoteHub()
     renamer = Renamer(db, registry)
@@ -112,6 +114,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     app = FastAPI(title="Hush", docs_url=None, redoc_url=None)
     app.state.cfg, app.state.db, app.state.analyzer, app.state.tasks, app.state.hls = cfg, db, analyzer, tasks, hls
+
+    @app.on_event("shutdown")
+    def _stop():
+        mirror.shutdown()
 
     @app.on_event("startup")
     def _start():
@@ -165,7 +171,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     KIDS_BLOCKED = ("/api/dlna", "/api/network", "/api/open-url", "/api/analyze", "/api/scan-folder", "/api/jobs", "/api/tasks",
                     "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
                     "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
-                    "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings")
+                    "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings",
+                    "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -786,6 +793,76 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         """The address prefix a TV or speaker can fetch this profile's streams from (24 hours)."""
         base = cfg.public_url.rstrip("/") or str(request.base_url).rstrip("/")
         return {"base": f"{base}/c/{auth.make_cast_token(prof['id'])}", "expires_in_hours": 24}
+
+    # ---- screen mirroring: an iPhone/iPad/Mac (AirPlay) or the Android app shows its screen on a Hush screen ------------------
+    @app.get("/api/mirror/state", dependencies=[need])
+    def mirror_state():
+        return mirror.state()
+
+    @app.put("/api/mirror/settings", dependencies=[need])
+    def mirror_settings(body: dict = Body(...)):
+        mirror.set_config(body)
+        return mirror.state()
+
+    @app.post("/api/mirror/stop", dependencies=[need])
+    def mirror_stop():
+        mirror.stop_session()
+        return {"ok": True}
+
+    @app.post("/api/mirror/token", dependencies=[need])
+    def mirror_token(request: Request):
+        """What the Android app needs to send its screen: the address and a 12-hour key."""
+        base = cfg.public_url.rstrip("/") or str(request.base_url).rstrip("/")
+        return {"url": f"{base}/api/mirror/ingest", "token": auth.make_scoped("mirror"), "enabled": mirror.config()["android"]}
+
+    @app.post("/api/mirror/ingest")
+    async def mirror_ingest(request: Request):
+        """The Android app's screen as a raw H.264 stream (sent while the person shares)."""
+        if not mirror.config()["android"]:
+            raise HTTPException(403, "Sharing from Android is switched off")
+        if auth.enabled and not auth.check_scoped("mirror", request.headers.get("x-hush-token")):
+            raise HTTPException(401, "Sign in to Hush on this device first")
+        s = await run_in_threadpool(mirror.start_ingest, request.headers.get("x-hush-device", "an Android device"))
+        try:
+            async for chunk in request.stream():
+                await run_in_threadpool(lambda c=chunk: (s.proc.stdin.write(c), s.proc.stdin.flush()))
+                s.bytes += len(chunk)
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            if mirror.session is s:
+                mirror.stop_session()
+        return {"ok": True}
+
+    @app.get("/api/mirror/hls/{name}", dependencies=[need])
+    def mirror_hls(name: str):
+        f = mirror.file(name)
+        if not f:
+            raise HTTPException(404)
+        if name.endswith(".m3u8"):
+            return FileResponse(f, media_type="application/vnd.apple.mpegurl", headers={"Cache-Control": "no-store"})
+        return FileResponse(f, media_type="video/mp2t", headers={"Cache-Control": "private, max-age=30"})
+
+    @app.get("/api/mirror/stream.mp4", dependencies=[need])
+    async def mirror_mp4(request: Request):
+        s = mirror.session
+        if not s or not s.ready:
+            raise HTTPException(404, "Nothing is being mirrored")
+        cmd = [cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin", "-live_start_index", "-1", "-fflags", "+genpts+nobuffer", "-i", str(s.folder / "index.m3u8"),
+               "-c", "copy", "-bsf:a", "aac_adtstoasc", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
+        return await stream.ffmpeg_response(request, cmd, "video/mp4")
+
+    @app.post("/api/mirror/filter/open", dependencies=[need])
+    def mirror_filter_open(body: dict = Body(default={}), prof: dict = Depends(get_profile)):
+        """The mirrored feed, listened to and bleeped like a live channel (about 10 seconds behind)."""
+        s = mirror.session
+        if not s or not s.ready:
+            raise HTTPException(409, "Nothing is being mirrored")
+        try:
+            sess = livefilter.open(f"mirror:{s.sid}", ["-i", str(s.folder / "index.m3u8")], None, str(body.get("tab", ""))[:40], bool(prof["kids"]))
+        except LiveFilterError as exc:
+            raise HTTPException(502, str(exc))
+        return {"sid": sess.sid, "hls": f"/api/livefilter/{sess.sid}/index.m3u8", "mp4": f"/api/livefilter/{sess.sid}/stream.mp4", "status": sess.status()}
 
     @app.get("/api/library/version", dependencies=[need])
     def library_version():
