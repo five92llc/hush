@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 259775f9c86e6f06603eb9bbd61ed162315a8f173cb46e774621c70db5eb1aad) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 47d1be9eef6508155ff3d309a9bcd4811ca40e26100011bd40f6dacbc0e32f73) by scripts/build-legacy.sh. Do not edit. */
 window.__hushBooted = true;
 "use strict";
 const $ = (s, el = document) => el.querySelector(s);
@@ -5376,6 +5376,7 @@ const TV = {
     const cookie = (document.cookie.match(/(?:^|; )hush_tv=([01])/) || [])[1];
     this.on = (_a = store.get("tv", null)) != null ? _a : cookie != null ? cookie === "1" : TVUA.test(navigator.userAgent);
     this.apply();
+    document.addEventListener("focusin", (e) => this.guardFocus(e), true);
     const watch = new MutationObserver(() => {
       clearTimeout(this.obsTimer);
       this.obsTimer = setTimeout(() => this.focusSoon(0), 350);
@@ -5436,7 +5437,7 @@ const TV = {
       return (_a = r.matches) == null ? void 0 : _a.call(r, "#library, #tasks, #prefs, dialog, .guide, .panel, #controls");
     });
     const list = this.focusables(main.length ? main : roots);
-    const home = !this.launched && list.find((el) => el.matches('.tv-nav a[href="#/home"]'));
+    const home = !this.launched && this.focusables(roots).find((el) => el.matches('.tv-nav a[href="#/home"]'));
     this.launched = true;
     const target = home || list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
     target == null ? void 0 : target.focus({ preventScroll: true });
@@ -5446,13 +5447,20 @@ const TV = {
     clearTimeout(this.focusTimer);
     this.focusTimer = setTimeout(() => {
       const a = document.activeElement;
-      if (a && a !== document.body && this.visible(a) && a.closest("#app")) return;
+      if (this.launched && a && a !== document.body && this.visible(a) && a.closest("#app")) return;
       if (!$("#player").hidden && !Player.mini) {
         $("#stage").focus({ preventScroll: true });
         return;
       }
       this.focusFirst();
     }, delay);
+  },
+  /** Android's WebView sometimes moves the focus by itself right after a key press (to the first button on the page). The arrow keys are ours: put the selection back. */
+  guardFocus(e) {
+    if (!this.expect || performance.now() - this.expectAt > 400 || e.target === this.expect || !this.expect.isConnected) return;
+    const t = this.expect;
+    this.expect = null;
+    t.focus({ preventScroll: true });
   },
   move(dir) {
     const cands = this.focusables(this.roots());
@@ -5470,7 +5478,7 @@ const TV = {
     });
     let best = null, bestScore = Infinity;
     for (const el of pool) {
-      if (inLine && !sameLine(el.getBoundingClientRect())) continue;
+      if (inLine && (dir === "left" || dir === "right") && !sameLine(el.getBoundingClientRect())) continue;
       const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
       let primary, cross;
       if (dir === "right") {
@@ -5498,6 +5506,8 @@ const TV = {
       }
     }
     if (best) {
+      this.expect = best;
+      this.expectAt = performance.now();
       best.focus({ preventScroll: true });
       best.scrollIntoView({ block: dir === "up" || dir === "down" ? "center" : "nearest", inline: "nearest" });
     } else if (dir === "down") window.scrollBy({ top: 220 });
@@ -6234,6 +6244,7 @@ const Mirror = {
     return v === null ? !!(IS_TV_DEVICE || TV.on) : !!v;
   },
   async poll() {
+    var _a, _b;
     let st;
     try {
       st = await api("/api/mirror/state");
@@ -6242,7 +6253,9 @@ const Mirror = {
     }
     this.st = st;
     this.status();
-    if (st.active && this.auto() && !this.open && st.sid !== this.dismissed) this.show();
+    const sharing = !!((_b = (_a = window.HushApp) == null ? void 0 : _a.isSharing) == null ? void 0 : _b.call(_a));
+    if (st.active && this.auto() && !sharing && !this.open && st.sid !== this.dismissed) this.show();
+    else if (sharing && this.open) this.hide();
     else if (!st.active && this.open) {
       this.hide();
       toast("Mirroring ended");

@@ -3427,6 +3427,7 @@ const TV = {
     const cookie = (document.cookie.match(/(?:^|; )hush_tv=([01])/) || [])[1];
     this.on = store.get("tv", null) ?? (cookie != null ? cookie === "1" : TVUA.test(navigator.userAgent));
     this.apply();
+    document.addEventListener("focusin", (e) => this.guardFocus(e), true);
     const watch = new MutationObserver(() => { clearTimeout(this.obsTimer); this.obsTimer = setTimeout(() => this.focusSoon(0), 350); });
     ["#catalog-view", "#browser-view", "#tasks", "#prefs"].forEach((id) => watch.observe($(id), { childList: true, subtree: true }));   // not the player, which changes every second
   },
@@ -3476,7 +3477,7 @@ const TV = {
     const roots = this.roots();
     const main = roots.filter((r) => r.matches?.("#library, #tasks, #prefs, dialog, .guide, .panel, #controls"));
     const list = this.focusables(main.length ? main : roots);
-    const home = !this.launched && list.find((el) => el.matches('.tv-nav a[href="#/home"]'));
+    const home = !this.launched && this.focusables(roots).find((el) => el.matches('.tv-nav a[href="#/home"]'));
     this.launched = true;                                                  // the very first stop at launch is Home
     const target = home || list.find((el) => el.matches(".card, .chan, .entry a, .lt:not(:disabled), .shelf-row a, .tv-nav a")) || list[0];
     target?.focus({ preventScroll: true });
@@ -3486,10 +3487,16 @@ const TV = {
     clearTimeout(this.focusTimer);
     this.focusTimer = setTimeout(() => {
       const a = document.activeElement;
-      if (a && a !== document.body && this.visible(a) && a.closest("#app")) return;      // keep where it is
+      if (this.launched && a && a !== document.body && this.visible(a) && a.closest("#app")) return;      // keep where it is (the very first time, Home is chosen whatever the system focused)
       if (!$("#player").hidden && !Player.mini) { $("#stage").focus({ preventScroll: true }); return; }
       this.focusFirst();
     }, delay);
+  },
+  /** Android's WebView sometimes moves the focus by itself right after a key press (to the first button on the page). The arrow keys are ours: put the selection back. */
+  guardFocus(e) {
+    if (!this.expect || performance.now() - this.expectAt > 400 || e.target === this.expect || !this.expect.isConnected) return;
+    const t = this.expect; this.expect = null;
+    t.focus({ preventScroll: true });
   },
   move(dir) {
     const cands = this.focusables(this.roots());
@@ -3505,7 +3512,7 @@ const TV = {
       return sameLine(r) && (dir === "right" ? x > cx + 1 : dir === "left" ? x < cx - 1 : dir === "down" ? y > cy + 1 : y < cy - 1); });
     let best = null, bestScore = Infinity;
     for (const el of pool) {
-      if (inLine && !sameLine(el.getBoundingClientRect())) continue;
+      if (inLine && (dir === "left" || dir === "right") && !sameLine(el.getBoundingClientRect())) continue;       // sideways: stay in the row; up and down just take the nearest edge
       const r = el.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, dx = x - cx, dy = y - cy;
       let primary, cross;
       if (dir === "right") { if (r.left < c.right - c.width * 0.4 && dx <= 0) continue; if (dx <= 1) continue; primary = dx; cross = Math.abs(dy); }
@@ -3515,7 +3522,7 @@ const TV = {
       const score = primary + cross * (dir === "up" || dir === "down" ? 0.35 : 2.4);
       if (score < bestScore) { bestScore = score; best = el; }
     }
-    if (best) { best.focus({ preventScroll: true }); best.scrollIntoView({ block: dir === "up" || dir === "down" ? "center" : "nearest", inline: "nearest" }); }
+    if (best) { this.expect = best; this.expectAt = performance.now(); best.focus({ preventScroll: true }); best.scrollIntoView({ block: dir === "up" || dir === "down" ? "center" : "nearest", inline: "nearest" }); }
     else if (dir === "down") window.scrollBy({ top: 220 });
     else if (dir === "up") window.scrollBy({ top: -220 });
   },
@@ -3934,7 +3941,9 @@ const Mirror = {
   async poll() {
     let st; try { st = await api("/api/mirror/state"); } catch { return; }
     this.st = st; this.status();
-    if (st.active && this.auto() && !this.open && st.sid !== this.dismissed) this.show();
+    const sharing = !!window.HushApp?.isSharing?.();                       // the screen that is being sent must not show itself (it would mirror its own mirror)
+    if (st.active && this.auto() && !sharing && !this.open && st.sid !== this.dismissed) this.show();
+    else if (sharing && this.open) this.hide();
     else if (!st.active && this.open) { this.hide(); toast("Mirroring ended"); this.dismissed = ""; }
     else if (st.active && this.open && !video2().src && st.ready) this.play();
   },

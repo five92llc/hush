@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -36,6 +37,7 @@ import kotlin.concurrent.thread
 
 /** Hush on a TV or tablet: the Hush web app full screen, plus a server address, remote keys and self-update. */
 class MainActivity : Activity() {
+    private val REQ_SHARE = 41
     private lateinit var root: FrameLayout
     private lateinit var web: WebView
     private var customView: View? = null
@@ -53,6 +55,7 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        if (BuildConfig.DEBUG) WebView.setWebContentsDebuggingEnabled(true)
         root = FrameLayout(this).apply { setBackgroundColor(Color.parseColor("#191A2C")) }
         setContentView(root)
 
@@ -86,6 +89,7 @@ class MainActivity : Activity() {
             }
         }
         root.addView(web, ViewGroup.LayoutParams(-1, -1))
+        web.requestFocus()                       // take the system focus now, before any page exists, so it is not taken (and moved to the first button) on the first key press
         goImmersive()
         if (server().isEmpty()) askServer(first = true) else load()
         maybeCheckForUpdate()
@@ -223,7 +227,7 @@ class MainActivity : Activity() {
             View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
     }
 
-    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) goImmersive() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) { goImmersive(); if (errorView == null) web.requestFocus() } }
 
     private fun leaveCustomView() {
         customView?.let { root.removeView(it) }
@@ -285,6 +289,27 @@ class MainActivity : Activity() {
         }
     }
 
+    private var pendingShare: Triple<String, String, String>? = null
+
+    /** Sharing the screen to Hush: ask Android for permission to capture it, then start the foreground service that sends it. */
+    private fun startShare(url: String, token: String, device: String) {
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
+        pendingShare = Triple(url, token, device)
+        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        @Suppress("DEPRECATION") startActivityForResult(mpm.createScreenCaptureIntent(), REQ_SHARE)
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != REQ_SHARE) return
+        val p = pendingShare; pendingShare = null
+        if (resultCode != RESULT_OK || data == null || p == null) { Toast.makeText(this, "Screen sharing was not allowed", Toast.LENGTH_SHORT).show(); return }
+        val i = Intent(this, ShareService::class.java).putExtra("url", p.first).putExtra("token", p.second).putExtra("device", p.third).putExtra("code", resultCode).putExtra("data", data)
+        if (Build.VERSION.SDK_INT >= 26) startForegroundService(i) else startService(i)
+        Toast.makeText(this, "Sharing your screen to Hush", Toast.LENGTH_SHORT).show()
+    }
+
     /** What the Hush web pages can ask the app (Settings → App in the web UI uses this). */
     inner class Bridge {
         @JavascriptInterface fun version(): String = BuildConfig.VERSION_NAME
@@ -292,5 +317,8 @@ class MainActivity : Activity() {
         @JavascriptInterface fun checkForUpdate() { runOnUiThread { this@MainActivity.checkForUpdate(manual = true) } }
         @JavascriptInterface fun changeServer() { runOnUiThread { askServer() } }
         @JavascriptInterface fun exit() { runOnUiThread { finishAffinity() } }
+        @JavascriptInterface fun startShare(url: String, token: String, device: String) { runOnUiThread { this@MainActivity.startShare(url, token, device) } }
+        @JavascriptInterface fun stopShare() { runOnUiThread { ShareService.stop(this@MainActivity) } }
+        @JavascriptInterface fun isSharing(): Boolean = ShareService.running
     }
 }

@@ -5,6 +5,9 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- One app for TVs (Android TV, Google TV, Fire TV) and tablets: no touch screen or leanback is required. -->
     <uses-feature android:name="android.software.leanback" android:required="false" />
@@ -32,6 +35,7 @@
             </intent-filter>
         </activity>
 
+        <service android:name=".ShareService" android:exported="false" android:foregroundServiceType="mediaProjection" />
         <receiver android:name=".InstallReceiver" android:exported="false" />
     </application>
 </manifest>
