@@ -21,6 +21,7 @@ from starlette.concurrency import run_in_threadpool
 from . import discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
 from .mirror import MirrorHub
+from .segments import SegmentFinder, KINDS as SEGMENT_KINDS
 from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
 from .remote import RemoteHub
@@ -121,6 +122,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.on_event("startup")
     def _start():
+        threading.Timer(180, segments.queue_all).start()        # a few minutes after starting, look for intros and credits in seasons not yet compared
         analyzer.start()
         tasks.start()
         qb.watch()
@@ -179,6 +181,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         """Why a kids profile may not make this request, or None. Backs up the hidden buttons: the server decides."""
         cfg = rules.kid_settings(prof)
         if path.startswith(KIDS_BLOCKED):
+            return "That is for grown-ups"
+        if path.startswith("/api/segments/") and method != "GET":
             return "That is for grown-ups"
         if path.startswith("/api/sources") and method != "GET":
             return "That is for grown-ups"
@@ -270,6 +274,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             return result
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(502, f"Could not read media: {exc}")
+
+    segments = SegmentFinder(cfg, db, registry, probe)
+    app.state.segments = segments
 
     # ---- pages & session ------------------------------------------------
     app.mount("/static", FreshStatic(directory=WEB), name="static")
@@ -863,6 +870,65 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         except LiveFilterError as exc:
             raise HTTPException(502, str(exc))
         return {"sid": sess.sid, "hls": f"/api/livefilter/{sess.sid}/index.m3u8", "mp4": f"/api/livefilter/{sess.sid}/stream.mp4", "status": sess.status()}
+
+    # ---- intros and credits of episodes ---------------------------------------------------------------------------
+    @app.get("/api/segments/status", dependencies=[need])
+    def segments_status():
+        return segments.status()
+
+    @app.post("/api/segments/scan", dependencies=[need])
+    def segments_scan():
+        """Look for intros and credits in every season of the library (runs quietly in the background)."""
+        return {"queued": segments.queue_all(), **segments.status()}
+
+    @app.get("/api/segments/{source_id}/{item_id}", dependencies=[need])
+    def segments_get(source_id: str, item_id: str, prof: dict = Depends(get_profile)):
+        key = media_key(source_id, item_id)
+        marks = segments.marks(key)
+        m = db.get_meta(key) or {}
+        scanning = False
+        if m.get("show_key") and m.get("season") is not None and not all(k in marks for k in SEGMENT_KINDS):
+            scanning = segments.queue_season(m["show_key"], m["season"])        # first time this season is opened: find them for the next episodes
+        queue = []
+        if m.get("show_key"):                                  # the rest of the show, so "next episode" works however this one was opened
+            queue = [{"src": e["source_id"], "item": e["item_id"], "title": f"S{e['season']:02d}E{e['episode']:02d}" + (f" · {e['title']}" if e.get("title") else "")}
+                     for e in db.episodes_of(m["show_key"]) if e.get("season") is not None and e.get("episode") is not None
+                     and (not prof["kids"] or title_ok(prof, e["media_key"]))]
+        return {**marks, "scanning": scanning, "episode": bool(m.get("show_key")), "queue": queue}
+
+    @app.put("/api/segments/{source_id}/{item_id}", dependencies=[need])
+    def segments_put(source_id: str, item_id: str, body: dict = Body(...)):
+        """Mark an intro or credits by hand; ``season: true`` copies it to the other episodes (credits count from the end)."""
+        kind = str(body.get("kind", ""))
+        try:
+            start, end = float(body["start"]), float(body["end"])
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(400, "start and end are needed")
+        if kind not in SEGMENT_KINDS or not (0 <= start < end):
+            raise HTTPException(400, "Choose intro or credits, and an end after the start")
+        key = media_key(source_id, item_id)
+        db.set_segment(key, kind, start, end, "manual")
+        copied = 0
+        m = db.get_meta(key) or {}
+        if body.get("season") and m.get("show_key") and m.get("season") is not None:
+            own = float(probe(source_id, item_id).duration or 0)
+            for e in db.episodes_of(m["show_key"]):
+                if e["season"] != m["season"] or e["media_key"] == key:
+                    continue
+                if any(r["kind"] == kind and r["source"] == "manual" for r in db.get_segments(e["media_key"])):
+                    continue
+                if kind == "intro":
+                    db.set_segment(e["media_key"], kind, start, end, "manual"); copied += 1
+                else:
+                    dur = float(probe(e["source_id"], e["item_id"]).duration or 0)
+                    if dur and own:
+                        db.set_segment(e["media_key"], kind, max(0.0, dur - (own - start)), dur if end >= own - 1 else max(0.0, dur - (own - end)), "manual"); copied += 1
+        return {**segments.marks(key), "copied": copied}
+
+    @app.delete("/api/segments/{source_id}/{item_id}/{kind}", dependencies=[need])
+    def segments_delete(source_id: str, item_id: str, kind: str):
+        db.delete_segment(media_key(source_id, item_id), "" if kind == "all" else kind)
+        return {"ok": True}
 
     @app.get("/api/library/version", dependencies=[need])
     def library_version():

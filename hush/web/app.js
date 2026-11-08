@@ -2247,6 +2247,8 @@ const Player = {
     this.setupTracks();
     this.applyFilterButton();
     this.captionsOn = !!store.get(pk("cc"), false); this.applyCaptionButton();
+    this.segs = null; this.autoSkipped = false; this.noAutoNext = false; this.nextAt = 0; this.updateSkip(-1);
+    if (info.kind !== "audio" && !info.live && !this.chan) this.loadSegments();
     const music = info.kind === "audio" && !info.live;                    // shuffle and repeat only make sense for music
     $("#shuffle-btn").hidden = $("#repeat-btn").hidden = !music;
     if (this.captionsOn && !info.live) this.startFileCaptions().then((ok) => { if (!ok) { this.captionsOn = false; this.applyCaptionButton(); } });
@@ -2756,10 +2758,67 @@ const Player = {
     $("#player").classList.toggle("unfiltered", !this.filterOn);
   },
 
+  /* ---------- intros, credits and the next episode ---------- */
+  async loadSegments() {
+    const tok = this.openToken;
+    try {
+      const s = await api(`/api/segments/${this.src}/${this.item}`);
+      if (tok !== this.openToken) return;
+      this.segs = s; $("#marks-tools").hidden = !s.episode; this.renderMarks();
+      if (s.queue?.length > 1 && Queue.list.length <= 1) {           // opened on its own (Continue, Resume): the rest of the show follows it
+        const i = s.queue.findIndex((x) => x.src === this.src && x.item === this.item);
+        if (i >= 0) { Queue.list = s.queue; Queue.pos = i; Queue.played = new Set([i]); Queue.ui(); }
+      }
+    } catch { /* no marks: the player works without them */ }
+  },
+  hasNext() { return !this.chan && !this.info?.live && Queue.upNext() != null && Queue.repeat !== "one"; },
+  /** Called every frame: shows Skip intro / Skip credits / the "Next episode" card at the right moments. */
+  updateSkip(t) {
+    const box = $("#skip-box"), btn = $("#skip-btn"), card = $("#next-card");
+    let showBtn = false, showCard = false;
+    const show = (label) => { if (btn.textContent !== label) btn.textContent = label; showBtn = true; };
+    this.skipAction = null;
+    const apply = () => { if (btn.hidden === showBtn) btn.hidden = !showBtn; if (card.hidden === showCard) card.hidden = !showCard; const hide = !showBtn && !showCard; if (box.hidden !== hide) box.hidden = hide; };
+    if (t < 0 || this.mini || !this.info || this.info.live || this.info.kind === "audio") { showBtn = showCard = false; apply(); return; }
+    const s = this.segs || {}, dur = this.duration || 0;
+    const intro = s.intro, credits = s.credits;
+    if (intro && t >= intro.start - 1 && t < intro.end - 1.5) {
+      if (store.get("skipintro", false) && !this.autoSkipped) { this.autoSkipped = true; this.seek(intro.end); toast("Skipped the intro"); return; }
+      show("Skip intro"); this.skipAction = () => { this.seek(intro.end); this.autoSkipped = true; };
+    } else {
+      const creditsOn = credits && t >= credits.start && t < dur - 0.5;
+      const tail = dur > 60 && t >= dur - 20 && t < dur - 0.5;                       // no credits mark: the last 20 seconds still offer the next episode
+      if ((creditsOn || tail) && this.hasNext()) {
+        const left = Math.max(0, Math.ceil(dur - t));
+        showCard = true;
+        const q = Queue.list[Queue.upNext()];
+        const nt = q?.title ? `Next: ${q.title}` : "Next episode"; if ($("#next-title").textContent !== nt) $("#next-title").textContent = nt;
+        const auto = autoplay() && !this.noAutoNext;
+        if (creditsOn && !this.nextAt) this.nextAt = Date.now() + 10000;
+        const secs = auto ? Math.max(0, Math.ceil((this.nextAt ? this.nextAt - Date.now() : left * 1000) / 1000)) : 0;
+        const ct = auto ? `starting in ${Math.min(secs, left)} s` : ""; if ($("#next-count").textContent !== ct) $("#next-count").textContent = ct;
+        if ($("#next-cancel").hidden === auto) $("#next-cancel").hidden = !auto;
+        this.skipAction = () => Queue.next();
+        if (auto && creditsOn && this.nextAt && Date.now() >= this.nextAt && !this.advancing) { this.advancing = true; Queue.next(true); setTimeout(() => { this.advancing = false; }, 3000); }
+      } else if (creditsOn) { show("Skip credits"); this.skipAction = () => this.seek(Math.max(0, dur - 0.4)); }
+      else this.nextAt = 0;
+    }
+    apply();
+  },
+  skipNow() { if (this.skipAction) { this.skipAction(); return true; } return false; },
+  async markSegment(kind, body) {
+    try {
+      this.segs = { ...(await api(`/api/segments/${this.src}/${this.item}`, { method: "PUT", body: { kind, season: $("#mark-season").checked, ...body } })), episode: true };
+      this.renderMarks(); toast(`${kind === "intro" ? "Intro" : "Credits"} marked`);
+    } catch (err) { toast(err.message); }
+  },
+
   renderMarks() {
     const box = $("#tl-marks");
     const d = this.duration || 1;
-    box.replaceChildren(...this.ranges.filter((r) => r.source === "manual" || this.cats.has(r.category)).map((r) => h("i", {
+    const segs = ["intro", "credits"].filter((k) => this.segs?.[k]).map((k) => h("i", { class: "seg", title: k === "intro" ? "Intro" : "Credits",
+      style: `left:${(this.segs[k].start / d) * 100}%;width:${Math.max(0.3, ((Math.min(d, this.segs[k].end) - this.segs[k].start) / d) * 100)}%` }));
+    box.replaceChildren(...segs, ...this.ranges.filter((r) => r.source === "manual" || this.cats.has(r.category)).map((r) => h("i", {
       class: r.enabled === false ? "off" : "",
       style: `left:${(r.start / d) * 100}%;width:${Math.max(0.15, ((r.end - r.start) / d) * 100)}%`,
     })));
@@ -2769,6 +2828,7 @@ const Player = {
     if (this.mini) return;                       // the little player has no timeline or captions to draw
     const t = this.now(), d = this.duration || 1;
     $("#t-now").textContent = fmt(t);
+    this.updateSkip(t);
     $("#tl-played").style.width = `${Math.min(100, (t / d) * 100)}%`;
     $("#tl-head").style.left = `${Math.min(100, (t / d) * 100)}%`;
     $("#timeline").setAttribute("aria-valuenow", Math.round(t));
@@ -3055,7 +3115,20 @@ function applyPendingSeek() {  // live streams start on a keyframe; skip the few
 ["progress", "canplay", "timeupdate"].forEach((ev) => video.addEventListener(ev, applyPendingSeek));
 video.addEventListener("ended", () => {
   $("#player").classList.remove("playing"); Progress.save(true, true);
-  if (autoplay() && !Player.info?.live) Queue.next(true);
+  if (autoplay() && !Player.info?.live && !Player.noAutoNext && !Player.advancing) Queue.next(true);
+});
+$("#skip-btn").addEventListener("click", () => Player.skipNow());
+$("#next-play").addEventListener("click", () => Queue.next());
+$("#next-cancel").addEventListener("click", () => { Player.noAutoNext = true; Player.nextAt = 0; toast("Staying on this episode"); });
+$("#skipintro-toggle").checked = !!store.get("skipintro", false);
+$("#skipintro-toggle").addEventListener("change", (e) => { store.set("skipintro", e.target.checked); toast(e.target.checked ? "Intros are skipped by themselves" : "Intros are offered, not skipped"); });
+$("#mark-intro-start").addEventListener("click", () => { Player.introFrom = Player.now(); toast(`Intro starts at ${fmt(Player.introFrom)}. Press Intro ends here at its end.`); });
+$("#mark-intro-end").addEventListener("click", () => Player.markSegment("intro", { start: Player.introFrom ?? Player.segs?.intro?.start ?? 0, end: Player.now() }));
+$("#mark-credits").addEventListener("click", () => Player.markSegment("credits", { start: Player.now(), end: Player.duration || Player.now() + 1 }));
+$("#mark-clear").addEventListener("click", async () => { try { await api(`/api/segments/${Player.src}/${Player.item}/all`, { method: "DELETE" }); Player.segs = { episode: true }; Player.renderMarks(); toast("Marks cleared"); } catch (err) { toast(err.message); } });
+$("#seg-scan").addEventListener("click", async () => {
+  try { const r = await api("/api/segments/scan", { method: "POST" }); $("#seg-info").textContent = r.numpy ? `Looking through ${r.queued} seasons in the background. Marks appear in the player as they are found.` : "The server needs numpy for this (pip install numpy)."; }
+  catch (err) { toast(err.message); }
 });
 $("#autoplay-toggle").addEventListener("change", (e) => { store.set("autoplay", e.target.checked); toast(e.target.checked ? "Autoplay on" : "Autoplay off"); });
 video.addEventListener("error", () => {
@@ -3578,6 +3651,7 @@ const TV = {
     if (isBack) { e.preventDefault(); this.back(); return true; }
     const dir = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" }[k];
     if (!dir) {
+      if (k === "Enter" && playerOpen && !overlay && !document.activeElement?.closest("#controls") && Player.skipNow()) { e.preventDefault(); idle.bump(); return true; }       // OK on the picture takes the Skip button when there is one
       if (k === "Enter" && playerOpen && !overlay && !document.activeElement?.closest("#controls")) {
         e.preventDefault(); togglePlay(); idle.bump(); return true;           // OK on the picture = play / pause
       }
@@ -3773,6 +3847,7 @@ const Remote = {
       case "home": go("#/home"); break;
       case "guide": if (Player.chan) guide.toggle(); break;
       case "mini": if (playing) Player.toggleMini(); break;
+      case "skip": if (playing) Player.skipNow() || toast("Nothing to skip right now"); break;
       case "captions": if (playing) Player.setCaptions(!Player.captionsOn); break;
       case "text": this.setText(a); break;
       case "tv": TV.set(a.on !== false); break;

@@ -140,6 +140,8 @@
         <button id="add-source-btn" class="btn subtle" type="button">Add a source</button></div>
       <div class="pref"><div><strong>Live TV playlists</strong><p class="hint">Add or manage your .m3u and .m3u8 channel lists.</p></div>
         <button id="pl-settings-btn" class="btn subtle" type="button">Playlists</button></div>
+      <div class="pref"><div><strong>Intros and credits</strong><p id="seg-info" class="hint">Finds each show's theme tune and end credits by comparing its episodes, so the player can offer Skip intro and Skip credits.</p></div>
+        <button id="seg-scan" class="btn subtle" type="button">Look for them now</button></div>
       <div class="pref"><div><strong>Refresh library</strong><p class="hint">Look through every source for new titles, then fill in artwork and upcoming episodes.</p></div>
         <button id="refresh-btn2" class="btn subtle" type="button">Refresh now</button></div>
       <div class="pref"><div><strong>Downloads</strong><p class="hint">Connect to qBittorrent to watch its downloads and RSS rules.</p></div>
@@ -244,6 +246,14 @@
         <div class="wait-bar"><i id="wait-fill"></i></div>
       </div>
       <div id="stage-msg" class="stage-msg" hidden></div>
+      <div id="skip-box" class="skip-box" hidden>
+        <button id="skip-btn" class="btn primary skip-btn" type="button">Skip intro</button>
+        <div id="next-card" class="next-card" hidden>
+          <div class="next-text"><strong id="next-title">Next episode</strong><span id="next-count" class="hint"></span></div>
+          <button id="next-play" class="btn primary" type="button">Play now</button>
+          <button id="next-cancel" class="btn ghost" type="button">Stay</button>
+        </div>
+      </div>
       <div id="cast-bar" class="cast-bar" hidden>
         <div class="cast-ico" aria-hidden="true">📡</div>
         <div class="cast-text"><strong id="cast-name">Casting</strong><span id="cast-time" class="hint"></span></div>
@@ -355,6 +365,15 @@
           <small class="hint">If the sound comes before the picture, add delay. Keys: , and .</small>
         </div>
         <label class="check"><input id="mini-toggle" type="checkbox" checked> Keep playing in a mini player when I go back to the library</label>
+        <label class="check"><input id="skipintro-toggle" type="checkbox"> Skip intros by themselves</label>
+        <div id="marks-tools" class="marks-tools admin-only" hidden>
+          <span class="hint">Mark this episode:</span>
+          <button id="mark-intro-start" class="btn ghost" type="button">Intro starts here</button>
+          <button id="mark-intro-end" class="btn ghost" type="button">Intro ends here</button>
+          <button id="mark-credits" class="btn ghost" type="button">Credits start here</button>
+          <button id="mark-clear" class="btn ghost" type="button">Clear marks</button>
+          <label class="check"><input id="mark-season" type="checkbox" checked> Same for the whole season</label>
+        </div>
         <label class="check"><input id="autoplay-toggle" type="checkbox" checked> Autoplay: start a title when it opens and go on to the next one</label>
         <label>When filtering
           <select id="mode-select">

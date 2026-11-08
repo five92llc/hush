@@ -831,3 +831,12 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .mirror-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; gap: .7rem; align-items: center; padding: .7rem 1rem; background: linear-gradient(rgba(0,0,0,.7), rgba(0,0,0,0)); opacity: 0; transition: opacity .3s; }
 .mirror:hover .mirror-bar, .mirror-bar:focus-within { opacity: 1; }
 .mirror-bar strong { margin-right: auto; }
+
+/* ---------- skip intro, skip credits, next episode ---------- */
+.skip-box { position: absolute; right: 2rem; bottom: 7.5rem; z-index: 6; display: grid; gap: .6rem; justify-items: end; }
+.skip-box[hidden], .skip-btn[hidden], .next-card[hidden] { display: none; }
+.skip-btn { font-size: 1.05rem; padding: .7rem 1.4rem; box-shadow: 0 6px 24px rgba(0,0,0,.45); }
+.next-card { display: flex; align-items: center; gap: .8rem; padding: .8rem 1rem; border-radius: 12px; background: rgba(18,19,34,.94); border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+.next-text { display: grid; margin-right: .6rem; max-width: 22rem; } .next-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tl-marks i.seg { background: var(--lamp); opacity: .35; height: 7px; }
+.marks-tools { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }

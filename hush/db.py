@@ -155,6 +155,20 @@ CREATE TABLE IF NOT EXISTS probes (
     updated_at  REAL NOT NULL,
     PRIMARY KEY (source_id, item_id)
 );
+CREATE TABLE IF NOT EXISTS segments (
+    media_key   TEXT NOT NULL,
+    kind        TEXT NOT NULL,       -- intro | credits
+    start       REAL NOT NULL,
+    end         REAL NOT NULL,
+    source      TEXT NOT NULL,       -- manual | chapter | detected
+    updated_at  REAL NOT NULL,
+    PRIMARY KEY (media_key, kind)
+);
+CREATE TABLE IF NOT EXISTS segment_scans (
+    season_key  TEXT PRIMARY KEY,    -- "<show_key>:<season>"
+    episodes    INTEGER NOT NULL,    -- how many episodes were compared, so a new one triggers another look
+    done_at     REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS channel_numbers (
     chan_key    TEXT PRIMARY KEY,
     number      INTEGER NOT NULL UNIQUE      -- permanent: a channel keeps its number, even when its playlist is re-read
@@ -496,6 +510,26 @@ class DB:
     def save_probe(self, source_id: str, item_id: str, data: dict) -> None:
         self._exec("INSERT OR REPLACE INTO probes(source_id,item_id,data,updated_at) VALUES(?,?,?,?)",
                    (source_id, item_id, json.dumps(data), time.time()))
+
+    # ---- intro and credits marks ---------------------------------------------------------------------
+    def get_segments(self, media_key: str) -> list[dict]:
+        return self._all("SELECT kind, start, end, source FROM segments WHERE media_key=?", (media_key,))
+
+    def set_segment(self, media_key: str, kind: str, start: float, end: float, source: str) -> None:
+        self._exec("INSERT OR REPLACE INTO segments(media_key,kind,start,end,source,updated_at) VALUES(?,?,?,?,?,?)",
+                   (media_key, kind, float(start), float(end), source, time.time()))
+
+    def delete_segment(self, media_key: str, kind: str = "") -> None:
+        if kind:
+            self._exec("DELETE FROM segments WHERE media_key=? AND kind=?", (media_key, kind))
+        else:
+            self._exec("DELETE FROM segments WHERE media_key=?", (media_key,))
+
+    def get_segment_scan(self, season_key: str) -> dict | None:
+        return self._one("SELECT episodes, done_at FROM segment_scans WHERE season_key=?", (season_key,))
+
+    def set_segment_scan(self, season_key: str, episodes: int) -> None:
+        self._exec("INSERT OR REPLACE INTO segment_scans(season_key,episodes,done_at) VALUES(?,?,?)", (season_key, episodes, time.time()))
 
     def delete_old_jobs(self, before: float) -> int:
         return self._exec("DELETE FROM jobs WHERE status IN ('done','error','cancelled') "
