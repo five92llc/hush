@@ -91,6 +91,11 @@ const IS_WEBKIT = /^((?!chrome|android|crios|fxios|edg).)*safari/i.test(UA) || /
    unless the page claims them, so the app handles them itself and hides the pointer. */
 const TVUA = /NetCast|Tizen|Web0S|WebOS|SmartTV|SMART-TV|HbbTV|AppleTV|Xbox|PlayStation|CrKey|BRAVIA|AFTM|AFTT|GoogleTV|HushTV|Android.*\bTV\b/i;
 const IS_TV_DEVICE = TVUA.test(UA);
+if (IS_TV_DEVICE) {                                             // smart TVs: no zooming, no heavy effects
+  document.documentElement.classList.add("lowpower");
+  document.querySelector('meta[name="viewport"]')?.setAttribute("content", "width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no");
+}
+if (typeof IS_LG !== "undefined" && IS_LG) document.documentElement.classList.add("lg");
 if (IS_TV_DEVICE) document.documentElement.classList.add("tvdev");      // set whether or not big screen mode is on
 /** What video this screen can play without the server re-encoding it: 0 none, 1 HEVC, 2 HEVC 10-bit. (Safari gets HLS instead.) */
 const HEVC = (() => {
@@ -3181,6 +3186,8 @@ $("#player").addEventListener("dblclick", () => { if (Player.mini && Player.src)
 $("#mini-toggle").checked = store.get("mini", true);
 $("#mini-toggle").addEventListener("change", (e) => { store.set("mini", e.target.checked); toast(e.target.checked ? "Mini player on" : "Mini player off"); });
 window.addEventListener("resize", () => Player.placeMini());
+let fitTimer = null, fitW = 0;
+window.addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => { if (Math.abs(window.innerWidth - fitW) > 8) { fitW = window.innerWidth; TV.fit(); } }, 250); });
    // route() keeps it playing in the mini player, or stops it
 $("#volume").value = store.get("volume", 1);
 $("#volume").addEventListener("input", (e) => { Player.Audio.volume(Number(e.target.value)); store.set("volume", Number(e.target.value)); });
@@ -3289,7 +3296,7 @@ $("#player").addEventListener("pointermove", () => idle.bump());
 
 document.addEventListener("keydown", (e) => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
-  if (IS_TV_DEVICE || TV.on) hideCursorNow();                    // using the remote: the pointer is not needed
+  if (IS_TV_DEVICE || TV.on) { hideCursorNow(); if (e.key.startsWith("Arrow") || e.key === "Enter") document.documentElement.classList.add("keynav"); }       // using the remote: the pointer is not needed, and must not highlight what it rests on
   if (mediaKey(e)) return;
   if ((TV.on || IS_TV_DEVICE) && TV.handleKey(e)) return;
   if ($("#player").hidden || Player.mini || e.target.matches("input:not([type=checkbox]):not([type=range]), select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -3510,8 +3517,16 @@ const TV = {
     this.apply();
     if (on && !location.hash.startsWith("#/p/")) go("#/home"); else route();
   },
+  /** Big screen text follows the width of the screen, clamped. Older TV browsers cannot do this in CSS, and a wrong size there looked like the page zooming by itself. */
+  fit() {
+    const el = document.documentElement;
+    if (!this.on) { el.style.fontSize = ""; return; }
+    const w = Math.min(window.innerWidth || 1920, 3840);
+    el.style.fontSize = `${Math.max(10, Math.min(26, w * 0.0125)).toFixed(2)}px`;
+  },
   apply() {
     document.documentElement.classList.toggle("tv", this.on);
+    this.fit();
     $("#tv-toggle").setAttribute("aria-pressed", String(this.on));
     Player.placeMini();
     if (this.on) this.focusSoon(200);
@@ -3882,7 +3897,14 @@ $("#remote-copy").addEventListener("click", async () => {
 /* ---- the TV's mouse pointer: hide it while the remote is used; it comes back when the pointer is moved ---- */
 let cursorTimer;
 function hideCursorNow() { clearTimeout(cursorTimer); document.documentElement.classList.add("hide-cursor"); }
-function showCursorBriefly() {
+let lastPointer = null;
+function showCursorBriefly(e) {
+  if (e && IS_TV_DEVICE) {                                       // a Magic Remote reports tiny movements even when it rests: only a real one counts
+    const p = [e.screenX, e.screenY];
+    if (lastPointer && Math.abs(p[0] - lastPointer[0]) + Math.abs(p[1] - lastPointer[1]) < 6) return;
+    lastPointer = p;
+    document.documentElement.classList.remove("keynav");
+  }
   document.documentElement.classList.remove("hide-cursor");
   clearTimeout(cursorTimer);
   if (IS_TV_DEVICE || TV.on) cursorTimer = setTimeout(hideCursorNow, 3500);

@@ -11,5 +11,6 @@
   "iconColor": "#191A2C",
   "uiRevision": 2,
   "disableBackHistoryAPI": true,
-  "requiredACG": []
+  "requiredACG": [],
+  "resolution": "1920x1080"
 }

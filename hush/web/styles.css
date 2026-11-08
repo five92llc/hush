@@ -83,14 +83,14 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 
 /* ---------- login ---------- */
 .login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
-.login-card { width: min(22rem, 100%); display: grid; gap: .8rem; }
+.login-card { width: 22rem; max-width: 100%; width: min(22rem, 100%); display: grid; gap: .8rem; }
 .login-lede { margin: 0 0 1rem; color: var(--linen-dim); }
 
 /* ---------- top bar ---------- */
 .app { min-height: 100vh; display: flex; flex-direction: column; }
 .topbar {
   display: flex; align-items: center; justify-content: space-between;
-  padding: .6rem clamp(1rem, 3vw, 2rem); border-bottom: 1px solid var(--dusk-2);
+  padding: .6rem 3vw; padding: .6rem clamp(1rem, 3vw, 2rem); border-bottom: 1px solid var(--dusk-2);
 }
 .topbar-actions { display: flex; gap: .25rem; }
 .dot { width: .55rem; height: .55rem; border-radius: 50%; background: var(--hush); animation: pulse 1.6s ease-in-out infinite; }
@@ -109,10 +109,11 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .source-list .kind { width: 1.15rem; height: 1.15rem; flex: none; fill: var(--linen-dim); }
 .source-list .err { color: var(--ember); font-size: var(--s-1); padding: 0 .75em; }
 .source-list .remove { margin-left: auto; visibility: hidden; color: var(--linen-dim); padding: 0 .3em; }
-.source-list li:hover .remove, .source-list .remove:focus-visible { visibility: visible; }
+.source-list li:hover .remove { visibility: visible; }
+.source-list .remove:focus-visible { visibility: visible; }
 .url-form { margin-top: auto; display: grid; gap: .35rem; }
 
-.browser { padding: 1.25rem clamp(1rem, 3vw, 2.5rem); min-width: 0; }
+.browser { padding: 1.25rem 3vw; padding: 1.25rem clamp(1rem, 3vw, 2.5rem); min-width: 0; }
 .browser-head { display: flex; gap: 1rem; align-items: center; justify-content: space-between; margin-bottom: 1rem; flex-wrap: wrap; }
 .crumbs { display: flex; flex-wrap: wrap; gap: .2rem; list-style: none; margin: 0; padding: 0; font-family: var(--display); font-size: var(--s2); }
 .crumbs li + li::before { content: "/"; color: var(--line); margin: 0 .35rem 0 .15rem; }
@@ -159,7 +160,7 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .audio-art { display: grid; justify-items: center; gap: 1.5rem; padding: 2rem; text-align: center; }
 .audio-art h2 { font-size: var(--s3); max-width: 20ch; }
 .audio-disc {
-  width: min(16rem, 55vw); aspect-ratio: 1; border-radius: 50%;
+  width: 16rem; max-width: 55vw; width: min(16rem, 55vw); aspect-ratio: 1; border-radius: 50%;
   background: radial-gradient(circle, var(--ink) 0 14%, var(--dusk-2) 15% 16%, var(--dusk) 17% 100%);
   box-shadow: inset 0 0 0 1px var(--line);
 }
@@ -173,8 +174,8 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .stage-msg.error { color: var(--ember); }
 
 .subs {
-  position: absolute; left: 50%; bottom: 5%; transform: translateX(-50%); width: min(90%, 52rem);
-  text-align: center; pointer-events: none; font-size: clamp(1.05rem, 2.4vw, 1.9rem); line-height: 1.3;
+  position: absolute; left: 50%; bottom: 5%; transform: translateX(-50%); width: 90%; max-width: 52rem; width: min(90%, 52rem);
+  text-align: center; pointer-events: none; font-size: 2.4vw; font-size: clamp(1.05rem, 2.4vw, 1.9rem); line-height: 1.3;
 }
 .subs > span {
   background: rgba(0, 0, 0, .72); padding: .1em .45em; border-radius: 4px;
@@ -182,7 +183,7 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 }
 .subs .bleeped { color: var(--hush); letter-spacing: .08em; }
 
-.controls { background: var(--ink-deep); padding: .35rem clamp(.75rem, 2vw, 1.5rem) .5rem; position: relative; transition: opacity .25s; }
+.controls { background: var(--ink-deep); padding: .35rem 2vw .5rem; padding: .35rem clamp(.75rem, 2vw, 1.5rem) .5rem; position: relative; transition: opacity .25s; }
 .player.idle .controls, .player.idle .back { opacity: 0; }
 /* Hidden controls must not keep their row: the picture takes the whole screen. On a TV they always float over it. */
 .player.idle .controls, .tv .player .controls, :fullscreen .player .controls { grid-row: 1; align-self: end; z-index: 2; }
@@ -237,12 +238,12 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .settings {
   position: absolute; right: 1rem; bottom: 100%; margin-bottom: .5rem; z-index: 2;
   background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md);
-  padding: 1rem; display: grid; gap: .8rem; width: min(20rem, calc(100vw - 2rem));
+  padding: 1rem; display: grid; gap: .8rem; width: 20rem; max-width: calc(100vw - 2rem); width: min(20rem, calc(100vw - 2rem));
 }
 
 /* ---------- language panel ---------- */
 .panel {
-  grid-column: 2; grid-row: 1 / 3; width: min(25rem, 100vw); min-height: 0; z-index: 3;
+  grid-column: 2; grid-row: 1 / 3; width: 25rem; max-width: 100vw; width: min(25rem, 100vw); min-height: 0; z-index: 3;
   background: var(--ink); border-left: 1px solid var(--dusk-2); display: flex; flex-direction: column;
   animation: slide-in .22s ease-out;
 }
@@ -299,9 +300,9 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 /* ---------- dialogs & toast ---------- */
 .dialog {
   border: 1px solid var(--line); border-radius: var(--r-md); background: var(--dusk); color: var(--linen);
-  width: min(28rem, calc(100vw - 2rem)); padding: 1.4rem;
+  width: 28rem; max-width: calc(100vw - 2rem); width: min(28rem, calc(100vw - 2rem)); padding: 1.4rem;
 }
-.dialog.wide { width: min(40rem, calc(100vw - 2rem)); }
+.dialog.wide { width: 40rem; max-width: calc(100vw - 2rem); width: min(40rem, calc(100vw - 2rem)); }
 .dialog::backdrop { background: rgba(10, 10, 20, .7); }
 .dialog form { display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
 .dialog input, .dialog select, .dialog fieldset { min-width: 0; max-width: 100%; }
@@ -318,7 +319,7 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .found button { text-align: left; }
 
 .jobs-list { list-style: none; padding: 0; margin: 1rem 0 0; display: grid; gap: .2rem; max-height: 60vh; overflow: auto; }
-.tasks { flex: 1; width: min(52rem, 100%); margin: 0 auto; padding: 1.5rem 1rem 3rem; overflow: auto; }
+.tasks { flex: 1; width: 52rem; max-width: 100%; width: min(52rem, 100%); margin: 0 auto; padding: 1.5rem 1rem 3rem; overflow: auto; }
 .tasks h1 { font-family: var(--display); font-size: var(--s3); margin: 0 0 .3rem; }
 .tasks-list { display: grid; gap: 1rem; margin-top: 1.25rem; }
 .task { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1.1rem 1.25rem; display: grid; gap: .8rem; }
@@ -348,7 +349,8 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .card .art { aspect-ratio: 2 / 3; border-radius: var(--r-md); background: var(--dusk); overflow: hidden; display: grid; place-items: center;
   border: 1px solid var(--line); position: relative; }
 .card .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.card:hover .art, .card:focus-visible .art { border-color: var(--hush); }
+.card:hover .art { border-color: var(--hush); }
+.card:focus-visible .art { border-color: var(--hush); }
 .card .art .noart { padding: .75rem; text-align: center; color: var(--linen-dim); font-family: var(--display); }
 .card .badge { position: absolute; top: .4rem; right: .4rem; }
 .card .name { font-size: var(--s-1); line-height: 1.3; overflow-wrap: anywhere; }
@@ -397,7 +399,8 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .chan { position: relative; display: grid; gap: .4rem; align-content: start; text-decoration: none; color: var(--linen); }
 .chan .logo { aspect-ratio: 16 / 9; border-radius: var(--r-md); background: var(--dusk); border: 1px solid var(--line);
   display: grid; place-items: center; overflow: hidden; padding: .6rem; }
-.chan:hover .logo, .chan:focus-visible .logo { border-color: var(--hush); }
+.chan:hover .logo { border-color: var(--hush); }
+.chan:focus-visible .logo { border-color: var(--hush); }
 .chan .logo img { max-width: 100%; max-height: 100%; object-fit: contain; }
 .chan .logo .noart { font-family: var(--display); color: var(--linen-dim); font-size: var(--s1); }
 .chan .name { font-size: var(--s-1); line-height: 1.3; overflow-wrap: anywhere; }
@@ -442,7 +445,7 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 .recent-row { margin-bottom: 1.25rem; }
 .recent-row h2 { font-size: var(--s0); margin: 0 0 .6rem; color: var(--linen-dim); font-weight: 700; }
 .chan-banner { position: absolute; left: 1.25rem; bottom: 6rem; display: flex; gap: .9rem; align-items: center; z-index: 4;
-  background: rgba(18, 19, 34, .88); border: 1px solid var(--line); border-radius: var(--r-md); padding: .7rem 1rem; max-width: min(34rem, 80%); }
+  background: rgba(18, 19, 34, .88); border: 1px solid var(--line); border-radius: var(--r-md); padding: .7rem 1rem; max-width: 80%; max-width: min(34rem, 80%); }
 .chan-banner[hidden], .chan-entry[hidden] { display: none; }
 .chan-banner img { width: 4.2rem; height: 2.6rem; object-fit: contain; }
 .cb-top { display: flex; gap: .7rem; align-items: baseline; }
@@ -540,11 +543,12 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .tiles { display: flex; flex-wrap: wrap; gap: 1.5rem; justify-content: center; max-width: 60rem; }
 .tile { display: grid; gap: .8rem; justify-items: center; background: none; border: 0; color: var(--linen); font: inherit; cursor: pointer; padding: .6rem; border-radius: var(--r-md); width: 9.5rem; }
 .tile .face { display: grid; place-items: center; width: 7.5rem; height: 7.5rem; border-radius: 22%; font-family: var(--display); font-size: 3rem; color: #191A2C; border: 3px solid transparent; }
-.tile:hover .face, .tile:focus-visible .face, .tile:focus .face { border-color: var(--linen); transform: scale(1.05); transition: transform .12s; }
+.tile:hover .face, .tile:focus .face { border-color: var(--linen); transform: scale(1.05); transition: transform .12s; }
+.tile:focus-visible .face { border-color: var(--linen); transform: scale(1.05); transition: transform .12s; }
 .tile .nm { font-size: var(--s0); }
 .tile .kid { font-size: .72rem; color: var(--lamp); }
 .tile.add .face { background: transparent; border: 2px dashed var(--line); color: var(--linen-dim); }
-.pass { display: grid; gap: .5rem; width: min(28rem, 100%); }
+.pass { display: grid; gap: .5rem; width: 28rem; max-width: 100%; width: min(28rem, 100%); }
 .pass .row input { flex: 1; }
 .swatches { display: flex; gap: .45rem; flex-wrap: wrap; margin-top: .3rem; }
 .swatches button { width: 2rem; height: 2rem; border-radius: 50%; border: 3px solid transparent; cursor: pointer; padding: 0; }
@@ -678,7 +682,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 
 /* ---- big screen drop-down list (TVSelect) ---- */
 .tvsel { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 400; background: rgba(10, 11, 22, .82); display: flex; align-items: center; justify-content: center; }
-.tvsel-box { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1.2rem 1.4rem; width: min(34rem, 86%); max-height: 82%; display: flex; flex-direction: column; }
+.tvsel-box { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1.2rem 1.4rem; width: 34rem; max-width: 86%; width: min(34rem, 86%); max-height: 82%; display: flex; flex-direction: column; }
 .tvsel-box h2 { font-size: var(--s1); margin: 0 0 .8rem; }
 .tvsel-list { overflow-y: auto; display: flex; flex-direction: column; gap: .35rem; }
 .tvsel-opt { text-align: left; font: inherit; font-size: var(--s0); color: var(--linen); background: var(--dusk-2); border: 2px solid transparent; border-radius: var(--r-sm); padding: .65rem .9rem; cursor: pointer; }
@@ -702,7 +706,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .wait-date { font-size: var(--s1); color: var(--linen-dim); }
 .wait-weather { font-size: var(--s1); min-height: 1.6rem; color: var(--linen); }
 .wait-status { margin-top: 1.6rem; font-size: var(--s0); color: var(--lamp); }
-.wait-bar { width: min(26rem, 70%); height: .3rem; background: rgba(255, 255, 255, .12); border-radius: .2rem; overflow: hidden; }
+.wait-bar { width: 26rem; max-width: 70%; width: min(26rem, 70%); height: .3rem; background: rgba(255, 255, 255, .12); border-radius: .2rem; overflow: hidden; }
 .wait-bar i { display: block; height: 100%; width: 0; background: var(--lamp); transition: width 1s linear; }
 .wait-screen:not([hidden]) ~ .stage-msg:not(.error) { display: none; }
 .stage-msg { z-index: 4; }
@@ -711,7 +715,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 
 /* ---- the remote-driven keyboard (TVKeyboard) ---- */
 .tvkb { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 410; background: rgba(10, 11, 22, .9); display: flex; align-items: center; justify-content: center; }
-.tvkb-box { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1rem 1.2rem 1.2rem; width: min(52rem, 94%); }
+.tvkb-box { background: var(--dusk); border: 1px solid var(--line); border-radius: var(--r-md); padding: 1rem 1.2rem 1.2rem; width: 52rem; max-width: 94%; width: min(52rem, 94%); }
 .tvkb-label { font-size: var(--s-1); color: var(--linen-dim); margin-bottom: .3rem; }
 .tvkb-text { font-size: var(--s2); min-height: 2.2rem; background: var(--ink-deep); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .4rem .7rem; margin-bottom: .6rem; overflow-wrap: anywhere; }
 .tvkb-text .caret { color: var(--lamp); }
@@ -779,7 +783,8 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .set-hub { display: grid; grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr)); gap: 1rem; }
 .set-tile { display: flex; flex-direction: column; gap: .35rem; padding: 1.1rem 1.2rem; border-radius: var(--r-md); background: var(--dusk); border: 1px solid var(--line);
   color: inherit; text-decoration: none; transition: transform .15s, border-color .15s, background .15s; }
-.set-tile:hover, .set-tile:focus-visible { transform: translateY(-2px); border-color: var(--hush, #f2b84b); background: var(--dusk-2); }
+.set-tile:hover { transform: translateY(-2px); border-color: var(--hush, #f2b84b); background: var(--dusk-2); }
+.set-tile:focus-visible { transform: translateY(-2px); border-color: var(--hush, #f2b84b); background: var(--dusk-2); }
 .set-tile strong { font-size: 1.05rem; } .set-tile small { opacity: .65; line-height: 1.3; }
 .set-ico { font-size: 1.8rem; line-height: 1; margin-bottom: .2rem; }
 .prefs-back { margin-bottom: 1rem; }
@@ -787,20 +792,20 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .prefs.in-section .prefs-card > h2:first-child { display: none; }
 
 /* ---------- screensaver ---------- */
-.saver { position: fixed; inset: 0; z-index: 9000; background: #05060b; color: #fff; overflow: hidden; cursor: none; opacity: 0; transition: opacity 1.2s ease; }
+.saver { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 9000; background: #05060b; color: #fff; overflow: hidden; cursor: none; opacity: 0; transition: opacity 1.2s ease; }
 .saver.up { opacity: 1; }
-.sv-bg { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 3s ease; transform: scale(1.04); }
+.sv-bg { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background-size: cover; background-position: center; opacity: 0; transition: opacity 3s ease; transform: scale(1.04); }
 .sv-bg.show { opacity: .55; animation: sv-pan 40s ease-in-out infinite alternate; }
 @keyframes sv-pan { from { transform: scale(1.04) translate(0, 0); } to { transform: scale(1.14) translate(-1.5%, -1%); } }
-.sv-shade { position: absolute; inset: 0; background: radial-gradient(ellipse at 30% 70%, rgba(0,0,0,.55), rgba(0,0,0,.2) 55%, rgba(0,0,0,.6)); }
+.sv-shade { position: absolute; top: 0; right: 0; bottom: 0; left: 0; background: radial-gradient(ellipse at 30% 70%, rgba(0,0,0,.55), rgba(0,0,0,.2) 55%, rgba(0,0,0,.6)); }
 .sv-card { position: absolute; left: 0; top: 0; max-width: 92vw; box-sizing: border-box; transition: transform 6s ease-in-out; text-shadow: 0 2px 18px rgba(0,0,0,.6); }
-.sv-time { font-size: clamp(4rem, 15vw, 11rem); font-weight: 700; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
-.sv-date { font-size: clamp(1.1rem, 2.6vw, 2rem); opacity: .85; margin: .3rem 0 1rem; }
-.sv-weather { display: flex; align-items: center; gap: .7rem; font-size: clamp(1.1rem, 2.4vw, 1.8rem); } .sv-wico { font-size: 1.4em; } .sv-wtemp { font-weight: 700; } .sv-wtext { opacity: .8; }
-.sv-info { margin-top: 1.1rem; min-height: 2.6rem; font-size: clamp(1rem, 2vw, 1.5rem); } .sv-info.in { animation: tk-in .8s cubic-bezier(.2,.8,.2,1); }
+.sv-time { font-size: 15vw; font-size: clamp(4rem, 15vw, 11rem); font-weight: 700; line-height: 1; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+.sv-date { font-size: 2.6vw; font-size: clamp(1.1rem, 2.6vw, 2rem); opacity: .85; margin: .3rem 0 1rem; }
+.sv-weather { display: flex; align-items: center; gap: .7rem; font-size: 2.4vw; font-size: clamp(1.1rem, 2.4vw, 1.8rem); } .sv-wico { font-size: 1.4em; } .sv-wtemp { font-weight: 700; } .sv-wtext { opacity: .8; }
+.sv-info { margin-top: 1.1rem; min-height: 2.6rem; font-size: 2vw; font-size: clamp(1rem, 2vw, 1.5rem); } .sv-info.in { animation: tk-in .8s cubic-bezier(.2,.8,.2,1); }
 .sv-info .tk-row { white-space: normal; flex-wrap: wrap; } .sv-info .tk-ico { font-size: 1.6em; } .sv-info .tk-big { font-size: 1.4em; }
 .sv-info .tk-photo { width: 7rem; height: 4.4rem; } .sv-info .tk-main, .sv-info .tk-wrap { max-width: 40rem; -webkit-line-clamp: 2; }
-.sv-world { display: flex; gap: 1.6rem; margin-top: 1.2rem; opacity: .8; font-size: clamp(.9rem, 1.6vw, 1.2rem); font-variant-numeric: tabular-nums; } .sv-world em { font-style: normal; opacity: .65; margin-right: .4rem; }
+.sv-world { display: flex; gap: 1.6rem; margin-top: 1.2rem; opacity: .8; font-size: 1.6vw; font-size: clamp(.9rem, 1.6vw, 1.2rem); font-variant-numeric: tabular-nums; } .sv-world em { font-style: normal; opacity: .65; margin-right: .4rem; }
 
 /* top bar: brand left, panel in the middle of the bar, actions right */
 .topbar { display: grid; grid-template-columns: minmax(max-content, 1fr) minmax(0, 60rem) minmax(max-content, 1fr); gap: .8rem; justify-content: initial; }
@@ -824,7 +829,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 #cast-btn.on { color: var(--lamp); }
 
 /* ---------- mirroring ---------- */
-.mirror { position: fixed; inset: 0; z-index: 8500; background: #000; display: flex; align-items: center; justify-content: center; }
+.mirror { position: fixed; top: 0; right: 0; bottom: 0; left: 0; z-index: 8500; background: #000; display: flex; align-items: center; justify-content: center; }
 .mirror[hidden] { display: none; }
 .mirror video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .mirror-wait { position: absolute; color: var(--linen); font-size: 1.3rem; opacity: .8; }
@@ -840,3 +845,25 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
 .next-text { display: grid; margin-right: .6rem; max-width: 22rem; } .next-text strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tl-marks i.seg { background: var(--lamp); opacity: .35; height: 7px; }
 .marks-tools { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+
+/* ===== Older TV browsers, newer parts: the same fallbacks for the top bar panel, screensaver, mirror and casting ===== */
+.no-flex-gap .tk-row > * + * { margin-left: .75rem; }
+.no-flex-gap .tk-day, .no-flex-gap .tk-city { margin-right: .6rem; }
+.no-flex-gap .tk-day > * + * { margin-left: .3rem; }
+.no-flex-gap .sv-weather > * + * { margin-left: .7rem; }
+.no-flex-gap .sv-world > * + * { margin-left: 1.6rem; }
+.no-flex-gap .cast-bar > * + *, .no-flex-gap .mirror-bar > * + *, .no-flex-gap .next-card > * + * { margin-left: .8rem; }
+.no-flex-gap .cast-btns > * + *, .no-flex-gap .marks-tools > * + *, .no-flex-gap .avsync > * + * { margin-left: .4rem; }
+.no-flex-gap .tk-toggles > * { margin: 0 1.2rem .4rem 0; }
+.no-flex-gap .guide-num > * + * { margin-left: .4rem; }
+.no-flex-gap .set-tile > * + * { margin-top: .35rem; }
+.no-flex-gap .skip-box > * + * { margin-top: .6rem; }
+.no-flex-gap .topbar { display: block; }
+.no-flex-gap .topbar > * { vertical-align: middle; }
+
+/* ===== Smart TVs are slow at some things: no blur behind the top bar, no slow drifting backgrounds, no hover effects while using the remote ===== */
+html.lowpower .ticker { backdrop-filter: none; -webkit-backdrop-filter: none; }
+html.lowpower .wait-screen::before, html.lowpower .wait-screen::after, html.lowpower .sv-bg.show { animation: none; }
+html.lowpower .tk-slide.in, html.lowpower .sv-info.in { animation-duration: .2s; }
+html.keynav body { pointer-events: none; }            /* while the arrow keys are in use, a pointer resting on the screen must not highlight or enlarge things */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }

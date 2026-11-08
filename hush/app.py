@@ -8,6 +8,7 @@ import re
 import subprocess
 import threading
 import time
+from urllib.parse import urlparse
 import uuid
 from pathlib import Path
 from typing import Any
@@ -138,7 +139,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         resp.headers.setdefault("X-Frame-Options", "DENY")
         if resp.headers.get("content-type", "").startswith("text/html"):
             resp.headers.setdefault("Content-Security-Policy",
-                                    "default-src 'self'; script-src 'self' https://www.gstatic.com chrome-extension:; img-src 'self' data: blob:; media-src 'self' blob:; "
+                                    "default-src 'self'; base-uri 'self'; form-action 'self'; object-src 'none'; script-src 'self' https://www.gstatic.com chrome-extension:; img-src 'self' data: blob:; media-src 'self' blob:; "
                                     "style-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
         return resp
 
@@ -1348,6 +1349,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.websocket("/api/remote/ws")
     async def remote_ws(ws: WebSocket):
+        origin = ws.headers.get("origin")
+        if origin and urlparse(origin).netloc != ws.headers.get("host", ""):          # another website's page must not be able to steer your screens
+            await ws.close(code=4403)
+            return
         if auth.enabled and not auth.valid_session(ws.cookies.get(COOKIE)):
             await ws.close(code=4401)
             return

@@ -357,3 +357,20 @@ def test_cast_links_work_without_a_cookie_but_only_for_streams(tmp_path):
     assert fresh.get(prefix + "/api/library/movies").status_code == 403         # a token opens streams, nothing else
     assert fresh.get("/c/forged-token/api/hls/abc/index.m3u8").status_code == 403
     assert fresh.get(prefix + "/api/hls/../library/movies").status_code in (403, 404)
+
+
+def test_a_website_cannot_open_the_remote_control_socket(tmp_path):
+    import pytest
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+    from hush.app import create_app
+    from hush.config import Config
+    cfg = Config(password="", secret_key="k" * 32, data_dir=tmp_path / "d"); cfg.data_dir.mkdir(); cfg.cache_dir.mkdir()
+    c = TestClient(create_app(cfg))
+    with pytest.raises(WebSocketDisconnect) as e:
+        with c.websocket_connect("/api/remote/ws", headers={"origin": "http://evil.example"}) as ws:
+            ws.receive_json()
+    assert e.value.code == 4403
+    with c.websocket_connect("/api/remote/ws", headers={"origin": "http://testserver"}) as ws:    # the Hush page itself is fine
+        ws.send_json({"type": "ping"})
+        assert ws.receive_json() == {"type": "pong"}

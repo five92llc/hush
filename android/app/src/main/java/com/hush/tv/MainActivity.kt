@@ -78,7 +78,8 @@ class MainActivity : Activity() {
                 override fun onReceivedError(view: WebView, req: WebResourceRequest, err: WebResourceError) {
                     if (req.isForMainFrame) { loadFailed = true; showError("Could not reach Hush at ${server()}.") }
                 }
-                override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean = false
+                /** Only the Hush server is shown in this window. The app's bridge (share the screen, change server, update, exit) must never be reachable from any other page. */
+                override fun shouldOverrideUrlLoading(view: WebView, req: WebResourceRequest): Boolean = !sameServer(req.url)
             }
             webChromeClient = object : WebChromeClient() {
                 override fun onShowCustomView(view: View, cb: CustomViewCallback) {     // the page asked for full screen
@@ -97,6 +98,13 @@ class MainActivity : Activity() {
 
     // ---------- server address ----------
     private fun server(): String = prefs.getString("server", "") ?: ""
+
+    /** True when the address is on the Hush server this app is set to. */
+    private fun sameServer(u: Uri?): Boolean {
+        val mine = Uri.parse(server()).host ?: return true          // no server chosen yet: the address screen is local
+        val scheme = u?.scheme ?: return false
+        return (scheme == "http" || scheme == "https" || scheme == "about" || scheme == "data" || scheme == "blob") && (scheme == "about" || scheme == "data" || scheme == "blob" || u.host.equals(mine, ignoreCase = true))
+    }
 
     private fun load() {
         loadFailed = false
@@ -293,6 +301,7 @@ class MainActivity : Activity() {
 
     /** Sharing the screen to Hush: ask Android for permission to capture it, then start the foreground service that sends it. */
     private fun startShare(url: String, token: String, device: String) {
+        if (!sameServer(Uri.parse(url)) || !url.startsWith("http")) { Toast.makeText(this, "Hush will only share to its own server", Toast.LENGTH_LONG).show(); return }
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
         pendingShare = Triple(url, token, device)
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
