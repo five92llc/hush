@@ -54,15 +54,25 @@ def _load(cfg, models_dir: Path):
 def transcribe(wav_path: Path, cfg, models_dir: Path, duration: float | None,
                progress: Callable[[float], None], cancelled: Callable[[], bool]) -> list[Word]:
     model = _load(cfg, models_dir)
-    segments, info = model.transcribe(
-        str(wav_path),
+    options = dict(
         language=cfg.language or None,
         word_timestamps=True,
         vad_filter=True,                       # skip silence and pure music
-        vad_parameters={"min_silence_duration_ms": 500},
         condition_on_previous_text=False,      # reduces runaway hallucinations
         beam_size=max(1, cfg.whisper_beam_size),
     )
+    batch = getattr(cfg, "whisper_batch_size", 0)
+    pipeline = None
+    if batch > 1:
+        try:
+            from faster_whisper import BatchedInferencePipeline      # faster-whisper 1.1 and newer
+            pipeline = BatchedInferencePipeline(model=model)
+        except ImportError:
+            pass
+    if pipeline:                               # it cuts the sound at pauses itself and recognises several pieces together
+        segments, info = pipeline.transcribe(str(wav_path), batch_size=batch, **options)
+    else:
+        segments, info = model.transcribe(str(wav_path), vad_parameters={"min_silence_duration_ms": 500}, **options)
     total = duration or getattr(info, "duration", None) or 1.0
     words: list[Word] = []
     for seg in segments:

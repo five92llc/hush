@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 d9a99cadaf9a85a0c402fec628accfcff91db55ef3028e093ef25a66a794e64d) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 a96257312aba63c8ee58639a53c780f3d5970c564e2fa20b77c6b2c15f92f7d0) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -5061,7 +5061,31 @@ $("#volume").value = store.get("volume", 1);
 $("#volume").addEventListener("input", (e) => {
   Player.Audio.volume(Number(e.target.value));
   store.set("volume", Number(e.target.value));
+  showVolume();
 });
+function showVolume() {
+  const v = Number($("#volume").value);
+  $("#vol-pct").textContent = `${Math.round(v * 100)}%`;
+  $("#vol-btn").classList.toggle("off", v <= 0);
+}
+function volumePop(open) {
+  $("#vol-pop").hidden = !open;
+  $("#vol-btn").setAttribute("aria-expanded", String(open));
+  if (open) idle.show();
+  else idle.bump();
+}
+function nudgeVolume(by) {
+  const el = $("#volume");
+  el.value = Math.max(0, Math.min(1, Math.round((Number(el.value) + by) * 100) / 100));
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+$("#vol-btn").addEventListener("click", () => volumePop($("#vol-pop").hidden));
+$("#vol-up").addEventListener("click", () => nudgeVolume(0.1));
+$("#vol-down").addEventListener("click", () => nudgeVolume(-0.1));
+document.addEventListener("pointerdown", (e) => {
+  if (!$("#vol-pop").hidden && !e.target.closest(".vol")) volumePop(false);
+});
+showVolume();
 $("#filter-btn").addEventListener("click", () => {
   if (isKids()) return;
   Player.filterOn = !Player.filterOn;
@@ -5204,7 +5228,7 @@ const idle = {
     this.show();
     clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      if (!video.paused && $("#panel").hidden && $("#settings").hidden) $("#player").classList.add("idle");
+      if (!video.paused && $("#panel").hidden && $("#settings").hidden && $("#vol-pop").hidden) $("#player").classList.add("idle");
     }, 3e3);
   },
   show() {
@@ -5780,6 +5804,11 @@ const TV = {
     }
     if (!$("#settings").hidden) {
       $("#settings").hidden = true;
+      return;
+    }
+    if (!$("#vol-pop").hidden) {
+      volumePop(false);
+      $("#vol-btn").focus();
       return;
     }
     if (!$("#player").hidden && !Player.mini) {

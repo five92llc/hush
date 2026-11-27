@@ -35,7 +35,8 @@ class AnalysisConfig:
     whisper_device: str = "auto"     # auto | cpu | cuda
     whisper_compute_type: str = "int8"
     whisper_cpu_threads: int = 0     # CPU threads per scan; 0 = library default (4)
-    whisper_beam_size: int = 5       # 1 is about twice as fast, slightly less accurate
+    whisper_beam_size: int = 5       # 1 is faster, slightly less accurate
+    whisper_batch_size: int = 8      # pieces of speech recognised at once (much faster); 0 = one at a time
     language: str | None = "en"
     live_whisper_model: str = "small.en"   # speech recognition for live channels without captions (must keep up with real time)
     live_whisper_threads: int = 6    # CPU threads for it

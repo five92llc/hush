@@ -3228,7 +3228,26 @@ let fitTimer = null, fitW = 0;
 window.addEventListener("resize", () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => { if (Math.abs(window.innerWidth - fitW) > 8) { fitW = window.innerWidth; TV.fit(); } }, 250); });
    // route() keeps it playing in the mini player, or stops it
 $("#volume").value = store.get("volume", 1);
-$("#volume").addEventListener("input", (e) => { Player.Audio.volume(Number(e.target.value)); store.set("volume", Number(e.target.value)); });
+$("#volume").addEventListener("input", (e) => { Player.Audio.volume(Number(e.target.value)); store.set("volume", Number(e.target.value)); showVolume(); });
+/* The volume stands upright in a little pop-up over its button: drag it, or press + and −. */
+function showVolume() {
+  const v = Number($("#volume").value);
+  $("#vol-pct").textContent = `${Math.round(v * 100)}%`;
+  $("#vol-btn").classList.toggle("off", v <= 0);
+}
+function volumePop(open) {
+  $("#vol-pop").hidden = !open; $("#vol-btn").setAttribute("aria-expanded", String(open));
+  if (open) idle.show(); else idle.bump();
+}
+function nudgeVolume(by) {
+  const el = $("#volume"); el.value = Math.max(0, Math.min(1, Math.round((Number(el.value) + by) * 100) / 100));
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+}
+$("#vol-btn").addEventListener("click", () => volumePop($("#vol-pop").hidden));
+$("#vol-up").addEventListener("click", () => nudgeVolume(0.1));
+$("#vol-down").addEventListener("click", () => nudgeVolume(-0.1));
+document.addEventListener("pointerdown", (e) => { if (!$("#vol-pop").hidden && !e.target.closest(".vol")) volumePop(false); });
+showVolume();
 $("#filter-btn").addEventListener("click", () => {
   if (isKids()) return;                                          // the filter stays on for kids
   Player.filterOn = !Player.filterOn; store.set(pk("filterOn"), Player.filterOn);
@@ -3318,7 +3337,7 @@ $("#copy-url").addEventListener("click", async () => {
 /* hide controls while watching */
 const idle = {
   timer: null,
-  bump() { this.show(); clearTimeout(this.timer); this.timer = setTimeout(() => { if (!video.paused && $("#panel").hidden && $("#settings").hidden) $("#player").classList.add("idle"); }, 3000); },
+  bump() { this.show(); clearTimeout(this.timer); this.timer = setTimeout(() => { if (!video.paused && $("#panel").hidden && $("#settings").hidden && $("#vol-pop").hidden) $("#player").classList.add("idle"); }, 3000); },
   show() { $("#player").classList.remove("idle"); clearTimeout(this.timer); },
 };
 $("#player").addEventListener("pointermove", () => idle.bump());
@@ -3658,6 +3677,7 @@ const TV = {
     if (!$("#guide").hidden) { guide.close(); $("#guide-btn").focus(); return; }
     if (!$("#panel").hidden) { togglePanel(false); return; }
     if (!$("#settings").hidden) { $("#settings").hidden = true; return; }
+    if (!$("#vol-pop").hidden) { volumePop(false); $("#vol-btn").focus(); return; }
     if (!$("#player").hidden && !Player.mini) {
       if (document.activeElement?.closest("#controls")) { $("#stage").focus(); return; }   // leave the control bar first
       go(S.libraryHash || "#/home"); return;

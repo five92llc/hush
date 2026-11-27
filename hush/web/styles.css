@@ -233,7 +233,16 @@ label { display: grid; gap: .3em; font-size: var(--s-1); color: var(--linen-dim)
 
 .vol { display: flex; align-items: center; gap: .3rem; color: var(--linen); }
 .vol svg { width: 1.2rem; height: 1.2rem; fill: currentColor; }
-.vol input { width: 5.5rem; accent-color: var(--lamp); }
+.vol { position: relative; }
+#vol-btn .vol-off, #vol-btn.off .vol-wave { display: none; } #vol-btn.off .vol-off { display: inline; }
+.vol-pop { position: absolute; bottom: calc(100% + .6rem); left: 50%; transform: translateX(-50%); z-index: 8; display: flex; flex-direction: column; align-items: center;
+  padding: .5rem .45rem; border-radius: 999px; background: var(--dusk); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0, 0, 0, .5); }
+.vol-pop[hidden] { display: none; }
+.vol-pop .icon-btn { font-size: 1.3rem; line-height: 1; font-weight: 700; }
+.vol-track { position: relative; width: 2.4rem; height: 9rem; margin: .3rem 0; }
+/* a normal slider turned on its end: works the same in every browser, old TV browsers included */
+.vol-track input { position: absolute; top: 50%; left: 50%; width: 9rem; height: 2rem; margin: 0; transform: translate(-50%, -50%) rotate(-90deg); accent-color: var(--lamp); cursor: pointer; }
+.vol-pop output { font-size: .75rem; color: var(--linen-dim); margin-top: .2rem; font-variant-numeric: tabular-nums; }
 
 .settings {
   position: absolute; right: 1rem; bottom: 100%; margin-bottom: .5rem; z-index: 2;
@@ -599,7 +608,7 @@ html.tv { font-size: 1.25vw; font-size: clamp(10px, 1.25vw, 26px); }       /* th
   .url-form { margin-top: 0; }
   .entry { grid-template-columns: 1.6rem 1fr auto; }
   .entry .meta { display: none; }
-  .now-title, .vol, .time .sep-dur { display: none; }
+  .now-title, .time .sep-dur { display: none; }
   .bar { flex-wrap: wrap; }
   .hush-toggle span { display: none; }
 }

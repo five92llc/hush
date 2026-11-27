@@ -374,3 +374,15 @@ def test_a_website_cannot_open_the_remote_control_socket(tmp_path):
     with c.websocket_connect("/api/remote/ws", headers={"origin": "http://testserver"}) as ws:    # the Hush page itself is fine
         ws.send_json({"type": "ping"})
         assert ws.receive_json() == {"type": "pong"}
+
+
+def test_a_title_with_no_sound_in_the_filter_language_is_not_listened_to():
+    from types import SimpleNamespace as NS
+    from hush.analysis.jobs import Analyzer
+    from hush.config import AnalysisConfig
+    check = lambda *tags, lang="en": Analyzer._foreign_only(NS(acfg=AnalysisConfig(language=lang), _wanted_languages=lambda: {"en", "eng"} if lang == "en" else {lang}),
+                                                              NS(audio=[NS(language=t) for t in tags]))
+    assert check("ita", "fre") is True
+    assert check("hin", "eng") is False                 # one track is English
+    assert check("ita", "") is False and check("und") is False      # an unlabelled track might be English: listen
+    assert check() is False

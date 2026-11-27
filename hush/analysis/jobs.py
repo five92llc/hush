@@ -206,8 +206,18 @@ class Analyzer:
             engine = "whisper" if transcribe.available() else "subtitles"
         if engine == "whisper" and not transcribe.available():
             raise RuntimeError("Whisper engine requested but faster-whisper is not installed")
+        if engine == "whisper" and requested == "auto" and self._foreign_only(info):
+            engine = "foreign"
 
-        if engine == "whisper":
+        if engine == "foreign":                    # no sound track in our language: subtitles in our language are the only trustworthy source
+            engine = "subtitles"
+            try:
+                words = self._subtitles(jid, ref, job, info)
+            except RuntimeError:
+                spoken = ", ".join(sorted({s.language.upper() for s in info.audio}))
+                raise RuntimeError(f"Not checked: the sound is {spoken} and there are no subtitles in the filter's language. "
+                                   "Scan it with Whisper by hand to listen anyway.")
+        elif engine == "whisper":
             try:
                 words = self._whisper(jid, ref, job, info)
             except InterruptedError:
@@ -250,10 +260,20 @@ class Analyzer:
             raise InterruptedError("cancelled")
 
     # ---- whisper path ---------------------------------------------------
-    def _pick_audio(self, info) -> int:
+    def _wanted_languages(self) -> set[str]:
         lang = (self.acfg.language or "").lower()
         aliases = {"en": {"en", "eng"}, "es": {"es", "spa"}, "fr": {"fr", "fre", "fra"}}
-        want = aliases.get(lang, {lang})
+        return aliases.get(lang, {lang})
+
+    def _foreign_only(self, info) -> bool:
+        """True when every sound track says it is in some other language: listening with this language's model would take a long time and find nonsense."""
+        if not self.acfg.language:
+            return False
+        tags = [s.language.lower().split("-")[0] for s in info.audio]
+        return bool(tags) and all(t and t not in ("und", "mis", "mul", "zxx") for t in tags) and not set(tags) & self._wanted_languages()
+
+    def _pick_audio(self, info) -> int:
+        want = self._wanted_languages()
         for s in info.audio:
             if s.language.lower() in want:
                 return s.index

@@ -114,6 +114,7 @@ Previous and next, **Shuffle** and **Repeat** (off, all, one) are in the control
 
 Tips:
 
+- **Speed.** Speech is recognised several pieces at a time (`whisper_batch_size: 8`). On a processor, `small.en` with `whisper_beam_size: 1` and one scan at a time (`workers: 1`) is far quicker than `medium.en` with the defaults. A title whose sound is only in another language is not listened to: Hush uses its subtitles in your language, or marks it as not checked.
 - **Model size.** On CPU, `small.en` scans a 2-hour movie in roughly 15–30 minutes depending on the machine. With an NVIDIA GPU (`whisper_device: cuda`) it takes a few minutes, and `medium.en` becomes practical.
 - **Subtitles are fallible.** Subtitle tracks are often cleaned up or paraphrased compared with what's actually said, so Whisper catches more. In `auto` mode Hush uses Whisper and falls back to subtitles if Whisper can't run.
 - **Padding.** Increase `pad_before` and `pad_after` if you hear the edges of words.
@@ -310,3 +311,5 @@ Hush learns where the intro and credits are, in this order: marks you set by han
 - **Kids profiles** are a filter, not a lock: with no passwords on profiles, anyone can switch to a grown-up profile.
 
 **Audio language.** The translate icon in the player opens the **Language** panel, with the video's sound tracks listed at the top (also under **Audio track** in the player settings). Hush starts with English when there is one, and remembers the language you pick for the next titles. The word filter is built from the English sound, so its mutes may not line up with a dubbed track.
+
+**Volume.** The speaker button in the player opens an upright slider with + and − buttons.
