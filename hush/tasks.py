@@ -9,7 +9,7 @@ import logging
 import threading
 import time
 
-from . import upcoming
+from . import backup, upcoming
 from .analysis.walk import walk
 from .sources import media_key
 
@@ -34,6 +34,11 @@ CATALOG = {
     "upcoming": {
         "name": "Upcoming episodes",
         "description": "Checks TVmaze for new episodes of the shows in your library, so Home can show what is coming up.",
+    },
+    "backup": {
+        "name": "Back up",
+        "description": "Saves your watch history, scan results, marks, channel numbers and settings to a backup file. "
+                       "The newest 14 are kept.",
     },
     "cleanup": {
         "name": "Clean up",
@@ -238,6 +243,10 @@ class TaskManager:
 
     def _livetv(self, opts: dict) -> str:
         return self.live.sync_all() if self.live else "Not available"
+
+    def _backup(self, opts: dict) -> str:
+        out = backup.create(self.cfg)
+        return f"Saved {out.name} ({out.stat().st_size / 1048576:.1f} MB)"
 
     def _cleanup(self, opts: dict) -> str:
         active = {j["id"] for j in self.db.active_jobs()}

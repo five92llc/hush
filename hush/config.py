@@ -61,6 +61,7 @@ class Config:
     ffmpeg: str = "ffmpeg"
     ffprobe: str = "ffprobe"
     hwaccel: str = ""               # e.g. "vaapi", "cuda" (passed to -hwaccel)
+    backup_dir: str = ""             # where nightly backups go (default: <data_dir>/backups); a folder on another disk is safer
     video_encoder: str = "auto"       # "auto" uses a GPU when one is found, else libx264
     sources: list[dict[str, Any]] = field(default_factory=list)
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)

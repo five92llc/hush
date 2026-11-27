@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
+from . import backup, discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
 from .mirror import MirrorHub
 from .library import parse as parse_names
@@ -176,7 +176,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "/api/notifications", "/api/qbit", "/api/library/settings", "/api/library/candidates", "/api/rename", "/api/password",
                     "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
                     "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings",
-                    "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream")
+                    "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream",
+                    "/api/backups")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -1701,6 +1702,26 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/library/refresh", dependencies=[need])
     def library_refresh_status():
         return {"running": tasks.refreshing, "result": tasks.refresh_result}
+
+    # ---- backups -------------------------------------------------------------------------------------------------
+    @app.get("/api/backups", dependencies=[need])
+    def backups_list():
+        return {"folder": str(backup.folder(cfg)), "backups": backup.listing(cfg)}
+
+    @app.post("/api/backups", dependencies=[need])
+    def backups_now():
+        try:
+            backup.create(cfg)
+        except OSError as exc:
+            raise HTTPException(502, f"The backup could not be written: {exc}")
+        return backups_list()
+
+    @app.get("/api/backups/{name}", dependencies=[need])
+    def backups_get(name: str):
+        f = backup.folder(cfg) / name
+        if not backup.NAME.match(name) or not f.is_file():
+            raise HTTPException(404)
+        return FileResponse(f, media_type="application/gzip", filename=name)
 
     @app.get("/api/tasks", dependencies=[need])
     def tasks_list():

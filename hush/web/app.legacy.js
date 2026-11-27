@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 057d2a31df853dbadedb7fa8b4cbd375488330db0f310d40eab2ebdc73306ee7) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 b622e65a7e93e350ec6a827be5e286eb4a623d868285b7fdcc380d7fbb2ac677) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -1120,6 +1120,34 @@ const Saver = {
     }, 5e3);
   }
 };
+const BackupCard = {
+  draw(r) {
+    $("#backup-info").textContent = r.backups.length ? `Last one ${when(r.backups[0].at)}. Saved every night in ${r.folder}; the newest 14 are kept.` : `No backup yet. They are saved every night in ${r.folder}.`;
+    $("#backup-list").replaceChildren(...r.backups.slice(0, 5).map((b) => h(
+      "div",
+      { class: "found-row" },
+      h("div", {}, h("strong", {}, new Date(b.at * 1e3).toLocaleString()), h("div", { class: "hint" }, `${(b.size / 1048576).toFixed(1)} MB`)),
+      h("a", { class: "btn ghost", href: `/api/backups/${b.name}`, download: b.name }, "Download")
+    )));
+  },
+  async load() {
+    try {
+      this.draw(await api("/api/backups"));
+    } catch (e) {
+    }
+  }
+};
+$("#backup-now").addEventListener("click", async (e) => {
+  const b = e.currentTarget;
+  b.disabled = true;
+  try {
+    BackupCard.draw(await api("/api/backups", { method: "POST" }));
+    toast("Backed up");
+  } catch (err) {
+    toast(err.message);
+  }
+  b.disabled = false;
+});
 const TickerSettings = {
   cur: { leagues: [], rss: "" },
   async load() {
@@ -6927,6 +6955,7 @@ async function route() {
     ClockCard.load();
     TickerSettings.load();
     Mirror.loadSettings();
+    BackupCard.load();
     const app = window.HushApp;
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = ((_c = S.config) == null ? void 0 : _c.version) ? `Version ${S.config.version}` : "";

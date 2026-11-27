@@ -725,6 +725,22 @@ const Saver = {
   },
 };
 
+/** Settings -> Server: the backups. */
+const BackupCard = {
+  draw(r) {
+    $("#backup-info").textContent = r.backups.length ? `Last one ${when(r.backups[0].at)}. Saved every night in ${r.folder}; the newest 14 are kept.` : `No backup yet. They are saved every night in ${r.folder}.`;
+    $("#backup-list").replaceChildren(...r.backups.slice(0, 5).map((b) => h("div", { class: "found-row" },
+      h("div", {}, h("strong", {}, new Date(b.at * 1000).toLocaleString()), h("div", { class: "hint" }, `${(b.size / 1048576).toFixed(1)} MB`)),
+      h("a", { class: "btn ghost", href: `/api/backups/${b.name}`, download: b.name }, "Download"))));
+  },
+  async load() { try { this.draw(await api("/api/backups")); } catch { /* grown-ups only */ } },
+};
+$("#backup-now").addEventListener("click", async (e) => {
+  const b = e.currentTarget; b.disabled = true;
+  try { BackupCard.draw(await api("/api/backups", { method: "POST" })); toast("Backed up"); } catch (err) { toast(err.message); }
+  b.disabled = false;
+});
+
 /** Settings -> Top bar: leagues for the scores and the feed for the headlines. */
 const TickerSettings = {
   cur: { leagues: [], rss: "" },
@@ -4271,7 +4287,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; Settings.show(src);
-    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings();
+    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";
