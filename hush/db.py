@@ -169,6 +169,12 @@ CREATE TABLE IF NOT EXISTS segment_scans (
     episodes    INTEGER NOT NULL,    -- how many episodes were compared, so a new one triggers another look
     done_at     REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS watch_time (
+    profile_id  TEXT NOT NULL,
+    day         TEXT NOT NULL,       -- local date
+    seconds     REAL NOT NULL,
+    PRIMARY KEY (profile_id, day)
+);
 CREATE TABLE IF NOT EXISTS first_seen (
     media_key   TEXT PRIMARY KEY,
     at          REAL NOT NULL        -- when the title first appeared in the library (0: it was there before this was recorded)
@@ -567,6 +573,14 @@ class DB:
         self._exec(f"INSERT OR REPLACE INTO meta({','.join(cols)},updated_at) VALUES({','.join('?' * len(cols))},?)",
                    (*row.values(), time.time()))
         self._exec("INSERT OR IGNORE INTO first_seen(media_key,at) VALUES(?,?)", (row["media_key"], time.time()))
+
+    def add_watch_time(self, profile_id: str, day: str, seconds: float) -> None:
+        self._exec("INSERT INTO watch_time(profile_id,day,seconds) VALUES(?,?,?) ON CONFLICT(profile_id,day) DO UPDATE SET seconds=seconds+excluded.seconds",
+                   (profile_id, day, seconds))
+
+    def watch_seconds(self, profile_id: str, day: str) -> float:
+        r = self._one("SELECT seconds FROM watch_time WHERE profile_id=? AND day=?", (profile_id, day))
+        return r["seconds"] if r else 0.0
 
     def recently_added(self, since: float, limit: int = 60) -> list[dict]:
         rows = self._all("SELECT m.*, f.at AS added_at, (x.media_key IS NOT NULL) AS scanned, x.flags AS flags FROM first_seen f "

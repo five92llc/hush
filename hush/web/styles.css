@@ -882,3 +882,5 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .search-results section { margin-bottom: 1.5rem; }
 .words-box { display: grid; gap: .3rem; margin: .6rem 0; font-weight: 600; }
 .words-box textarea { width: 100%; font: inherit; font-weight: 400; background: var(--ink-deep); color: var(--linen); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .5rem .7rem; }
+.bed-row { display: flex; flex-wrap: wrap; gap: 1rem; }
+.no-flex-gap .bed-row > * + * { margin-left: 1rem; }

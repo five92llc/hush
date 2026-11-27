@@ -23,6 +23,7 @@ from . import backup, discover, epg, hw, media, mylist, profiles as rules, strea
 from .hls import HLSError, HLSManager
 from .mirror import MirrorHub
 from .library import parse as parse_names
+from . import watch as watching_rules
 from .segments import SegmentFinder, KINDS as SEGMENT_KINDS
 from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
@@ -98,6 +99,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     hls = HLSManager(cfg.data_dir / "hls")
     livefilter = LiveFilter(cfg, analyzer.wordlist, cfg.data_dir / "livefilter")
     mirror = MirrorHub(cfg, db)
+    watching = watching_rules.Watching(db)
     livetv = LiveTV(cfg, db, registry)
     remote = RemoteHub()
     renamer = Renamer(db, registry)
@@ -177,7 +179,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
                     "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings",
                     "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream",
-                    "/api/backups", "/api/wordlist")
+                    "/api/backups", "/api/wordlist", "/api/nowplaying")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -185,6 +187,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         cfg = rules.kid_settings(prof)
         if path.startswith(KIDS_BLOCKED):
             return "That is for grown-ups"
+        if path.startswith(("/api/media/", "/api/raw/", "/api/stream/", "/api/hls/", "/api/filtered/", "/api/external/", "/api/livefilter/open", "/api/mirror/filter")):
+            why = watching_rules.blocked(cfg, db.watch_seconds(prof["id"], watching_rules.today()))
+            if why:                                           # the daily limit or bedtime
+                return why
         if path.startswith("/api/segments/") and method != "GET":
             return "That is for grown-ups"
         if path.startswith("/api/sources") and method != "GET":
@@ -1793,6 +1799,28 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.post("/api/wordlist/reapply", dependencies=[need])
     def wordlist_reapply():
         return {"titles": analyzer.reapply_all()}
+
+    # ---- now playing, daily limits --------------------------------------------------------------------------------
+    @app.post("/api/watching", dependencies=[need])
+    def watching_beat(body: dict = Body(...), prof: dict = Depends(get_profile)):
+        """A player reports what it is playing, every few seconds."""
+        tab = str(body.get("tab", ""))[:40]
+        if not tab:
+            raise HTTPException(400, "tab is needed")
+        out = watching.beat(tab, prof, body)
+        out["blocked"] = watching_rules.blocked(rules.kid_settings(prof), db.watch_seconds(prof["id"], watching_rules.today())) if prof["kids"] else None
+        return out
+
+    @app.get("/api/nowplaying", dependencies=[need])
+    def now_playing():
+        day = watching_rules.today()
+        return {"screens": watching.active(), "today": [{"profile": p["name"], "kids": bool(p["kids"]), "minutes": round(db.watch_seconds(p["id"], day) / 60)} for p in db.list_profiles()]}
+
+    @app.post("/api/nowplaying/{tab}/{cmd}", dependencies=[need])
+    def now_playing_command(tab: str, cmd: str):
+        if not watching.command(tab, cmd):
+            raise HTTPException(404, "That screen is no longer playing")
+        return {"ok": True}
 
     # ---- backups -------------------------------------------------------------------------------------------------
     @app.get("/api/backups", dependencies=[need])

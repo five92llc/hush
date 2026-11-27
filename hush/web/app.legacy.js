@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 5d55f1d76fd21106c8999d59d074cf41a2365197413303f912b125ca24f17d4e) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 52f5817096cc61c9053c28d32ffc46e0e0421788440bfd35ee3853be655108da) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -1121,6 +1121,81 @@ const Saver = {
         this.show();
       }
     }, 5e3);
+  }
+};
+const Beat = {
+  open: false,
+  async send() {
+    if (!Player.info) {
+      if (this.open) {
+        this.open = false;
+        api("/api/watching", { method: "POST", body: { tab: TAB, closed: true } }).catch(() => {
+        });
+      }
+      return;
+    }
+    this.open = true;
+    let r;
+    try {
+      r = await api("/api/watching", { method: "POST", body: {
+        tab: TAB,
+        title: Player.info.title,
+        position: Player.info.live ? 0 : Player.now(),
+        duration: Player.info.live ? 0 : Player.duration,
+        paused: video.paused,
+        live: !!Player.info.live,
+        screen: window.HushApp ? "Hush app" : IS_TV_DEVICE ? "TV" : /Mobile|iPhone|Android/i.test(UA) ? "Phone or tablet" : "Computer"
+      } });
+    } catch (e) {
+      return;
+    }
+    if (r.blocked) {
+      Player.close(true);
+      this.open = false;
+      toast(r.blocked);
+      return;
+    }
+    if (r.command === "pause") {
+      video.pause();
+      toast("Paused from another screen");
+    } else if (r.command === "play") video.play().catch(() => {
+    });
+    else if (r.command === "stop") {
+      Player.close(true);
+      toast("Stopped from another screen");
+    }
+  }
+};
+setInterval(() => Beat.send(), 1e4);
+video.addEventListener("playing", () => {
+  if (!Beat.open) Beat.send();
+});
+const NowCard = {
+  timer: null,
+  async load() {
+    clearTimeout(this.timer);
+    if ($("#prefs").hidden || !location.hash.startsWith("#/settings/now")) return;
+    try {
+      const r = await api("/api/nowplaying");
+      $("#np-list").replaceChildren(...r.screens.length ? r.screens.map((x) => h(
+        "div",
+        { class: "found-row" },
+        h("div", {}, h("strong", {}, x.title || "Something"), h("div", { class: "hint" }, [x.profile, x.screen, x.live ? "Live" : `${fmt(x.position)} of ${fmt(x.duration)}`, x.paused ? "paused" : ""].filter(Boolean).join(" · "))),
+        h("button", { class: "btn subtle", type: "button", onclick: () => this.command(x.tab, x.paused ? "play" : "pause") }, x.paused ? "Play" : "Pause"),
+        h("button", { class: "btn ghost", type: "button", onclick: () => this.command(x.tab, "stop") }, "Stop")
+      )) : [h("p", { class: "hint" }, "Nothing is playing.")]);
+      $("#np-today").textContent = `Watched today: ${r.today.map((p) => `${p.profile} ${p.minutes} min`).join(" · ")}`;
+    } catch (e) {
+    }
+    this.timer = setTimeout(() => this.load(), 5e3);
+  },
+  async command(tab, cmd) {
+    try {
+      await api(`/api/nowplaying/${tab}/${cmd}`, { method: "POST" });
+      toast("Sent. It takes up to 10 seconds.");
+    } catch (err) {
+      toast(err.message);
+    }
   }
 };
 const WordsCard = {
@@ -3000,6 +3075,9 @@ const Catalog = {
     $("#pd-unscanned").checked = st.hide_unscanned === false;
     $("#pd-unrated").checked = !!st.allow_unrated;
     $("#pd-live").checked = !!st.allow_live;
+    $("#pd-minutes").value = st.daily_minutes || "";
+    $("#pd-bed-from").value = st.bed_from || "";
+    $("#pd-bed-to").value = st.bed_to || "";
     const sync = () => {
       $("#pd-kidsopts").hidden = !$("#pd-kids").checked;
     };
@@ -3063,7 +3141,10 @@ const Catalog = {
         max_cert: Number($("#pd-cert").value),
         hide_unscanned: !$("#pd-unscanned").checked,
         allow_unrated: $("#pd-unrated").checked,
-        allow_live: $("#pd-live").checked
+        allow_live: $("#pd-live").checked,
+        daily_minutes: Number($("#pd-minutes").value) || 0,
+        bed_from: $("#pd-bed-from").value,
+        bed_to: $("#pd-bed-to").value
       } : {} };
       try {
         await api(isNew ? "/api/profiles" : `/api/profiles/${p.id}`, { method: isNew ? "POST" : "PUT", body });
@@ -6503,6 +6584,7 @@ const Settings = {
     ["display", "Display", "🖥️", "Big screen mode and the phone remote", false],
     ["topbar", "Top bar", "🎛️", "Clock, weather, scores, headlines and more", false],
     ["mirror", "Mirroring", "📲", "Show a phone or tablet screen on Hush", false],
+    ["now", "Now playing", "▶️", "See and control what is playing; watching today", true],
     ["words", "Words", "🤐", "Add words to mute, or ones never to mute", true],
     ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true],
     ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
@@ -7129,6 +7211,7 @@ async function route() {
     Mirror.loadSettings();
     BackupCard.load();
     WordsCard.load();
+    setTimeout(() => NowCard.load(), 0);
     const app = window.HushApp;
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = ((_c = S.config) == null ? void 0 : _c.version) ? `Version ${S.config.version}` : "";

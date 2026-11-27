@@ -203,6 +203,11 @@
       </div>
     </div>
     <div class="prefs-card admin-only">
+      <h2>Now playing</h2>
+      <div id="np-list" class="found"></div>
+      <p id="np-today" class="hint"></p>
+    </div>
+    <div class="prefs-card admin-only">
       <h2>Words</h2>
       <div class="pref"><div><strong>Skip marked scenes</strong><p class="hint">When on, you can mark a scene in the player (Language panel → Skip a scene) and it is jumped over for everyone while the filter is on. When off, marked scenes play normally.</p></div>
         <input id="scene-skip" type="checkbox" aria-label="Skip marked scenes"></div>
@@ -551,6 +556,8 @@
       <label class="check"><input id="pd-unscanned" type="checkbox"> Also show titles that have not been scanned yet</label>
       <label class="check"><input id="pd-unrated" type="checkbox"> Also show titles with no known rating</label>
       <label class="check"><input id="pd-live" type="checkbox"> Allow Live TV (live channels cannot be checked)</label>
+      <label>Watching per day (minutes, empty for no limit) <input id="pd-minutes" type="number" min="0" max="1440" step="5" inputmode="numeric"></label>
+      <div class="bed-row"><label>No watching from <input id="pd-bed-from" type="time"></label><label>until <input id="pd-bed-to" type="time"></label></div>
       <p class="hint">Titles are checked by Hush's scan and by their rating (from the .nfo file or TMDB), so scan your library first. Whatever the scan finds is hidden. Words the scan catches are also muted if they slip through. Raw folders, Tasks and settings are never shown.</p>
     </fieldset>
     <p id="pd-error" class="error" role="alert"></p>

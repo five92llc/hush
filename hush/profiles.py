@@ -33,6 +33,9 @@ KIDS_DEFAULTS = {
     "hide_unscanned": True,      # a title that was never scanned cannot be vouched for
     "allow_unrated": False,      # a title with no known rating cannot be vouched for either
     "allow_live": False,         # live TV cannot be scanned
+    "daily_minutes": 0,          # watching allowed per day; 0 = no limit
+    "bed_from": "",              # no watching between these times ("20:30" to "07:00")
+    "bed_to": "",
 }
 
 
@@ -60,6 +63,12 @@ def clean_settings(raw: dict) -> dict:
     for k in ("hide_unscanned", "allow_unrated", "allow_live"):
         if k in raw:
             out[k] = bool(raw[k])
+    if "daily_minutes" in raw:
+        out["daily_minutes"] = max(0, min(1440, int(raw["daily_minutes"] or 0)))
+    for k in ("bed_from", "bed_to"):
+        if k in raw:
+            v = str(raw[k] or "")
+            out[k] = v if re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", v) else ""
     return out
 
 
