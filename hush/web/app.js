@@ -2424,7 +2424,7 @@ const Player = {
   /** A server-muted HLS address a TV or speaker can fetch without our cookie: {url, at (the second of the title it starts at)}. */
   async castSource() {
     if (/^(localhost|127\.|\[::1\])/.test(location.hostname)) throw new Error("open Hush by its network address (for example http://192.168.100.228) so the TV can reach it");
-    const base = (await api("/api/cast/token", { method: "POST" })).base;
+    const base = onThisOrigin((await api("/api/cast/token", { method: "POST" })).base);
     const t = this.info.live ? 0 : this.now();
     let path;
     if (this.info.live && this.chan && this.wantsLiveFilter()) {
@@ -2444,9 +2444,9 @@ const Player = {
   /** Safari: while an AirPlay screen is in range, play through a tokenised address (the Apple TV cannot send our cookie). */
   tokenBase: null, tokenizing: false,
   async armAirplay() {
-    if (this.tokenBase || this.tokenizing || !this.info || Cast.active) return;
+    if (this.tokenBase || this.tokenFailed || this.tokenizing || !this.info || Cast.active) return;
     this.tokenizing = true;
-    try { this.tokenBase = (await api("/api/cast/token", { method: "POST" })).base; } catch { this.tokenizing = false; return; }
+    try { this.tokenBase = onThisOrigin((await api("/api/cast/token", { method: "POST" })).base); } catch { this.tokenizing = false; return; }
     this.tokenizing = false;
     if (this.hls && this.mode !== "direct" && !video.paused) this.startAt(this.now()).then(() => video.play().catch(() => {}));     // carry on from here, now through the shareable address
   },
@@ -2539,7 +2539,7 @@ const Player = {
         try { if (!/\/index\.m3u8/.test(url)) { const r = await fetch(url, { credentials: "same-origin" }); if (r.ok) url = new URL(r.url).pathname; } url = this.tokenBase + new URL(url, location.origin).pathname; }
         catch { /* play the normal address */ }
       }
-      if (IS_LG && this.hls && !this.liveFiltered) {                      // LG's player is happier with the playlist address itself than with a redirect to it
+      else if (this.hls && !this.liveFiltered) {          // Safari and LG ask for an address more than once: hand them the playlist itself, or each ask starts the stream again
         try { const r = await fetch(url, { credentials: "same-origin" }); if (r.ok && r.url) url = r.url; } catch { /* use the start address */ }
       }
       if (tok !== this.openToken) return;
@@ -3188,6 +3188,11 @@ video.addEventListener("error", () => {
     Player.startAt(Player.now()).then(() => video.play().catch(() => {}));
     return;
   }
+  if (Player.tokenBase && video.currentSrc.includes("/c/")) {          // the shareable (AirPlay) address would not play: carry on with the ordinary one
+    Player.tokenBase = null; Player.tokenFailed = true;
+    Player.startAt(Player.now()).then(() => video.play().catch(() => {}));
+    return;
+  }
   Player.report(false);
   if (Player.chan) {
     Player.tryAlternate().then((ok) => { if (!ok) Player.message("This channel is not answering. Try another one.", true); });
@@ -3196,7 +3201,7 @@ video.addEventListener("error", () => {
   const code = video.error?.code ? ` (error ${video.error.code})` : "";
   const safari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
   Player.message(safari && Player.mode !== "direct"
-    ? `Safari can't play Hush's live streams yet${code}. Open this page in Chrome, Firefox or Edge, or use "Watch on another player".`
+    ? `Safari couldn't play this stream${code}. Try again, or open this page in Chrome, Firefox or Edge.`
     : `This file couldn't be played${code}. Check that the server can still reach it.`, true);
 });
 // The playhead and captions only need ~10 updates a second; doing it every frame starves a TV's CPU while it decodes video.
@@ -4061,6 +4066,9 @@ for (const ev of ["enterpictureinpicture", "leavepictureinpicture", "webkitprese
 video.addEventListener("loadedmetadata", () => PopOut.button());
 video.addEventListener("timeupdate", () => PopOut.captions());
 
+/** The same path on the address this page was opened with: the page may only play its own origin, and a TV can't always resolve the server's public name. */
+const onThisOrigin = (u) => location.origin + new URL(u, location.origin).pathname;
+
 /** Casting: AirPlay (Safari, iPhone, iPad) and Chromecast (Chrome). The receiver fetches a server-muted stream by itself, so the filter goes with it. */
 const Cast = {
   ctx: null, rp: null, rpc: null, air: false, state: "", name: "", base: 0, startedAt: 0, active: false, token: null, loading: false,
@@ -4217,7 +4225,7 @@ const Mirror = {
         try {
           const t = await api("/api/mirror/token", { method: "POST" });
           if (!t.enabled) { toast("Sharing from Android is switched off in Settings → Mirroring on the Hush server"); return; }
-          app.startShare(t.url, t.token, "Android");
+          app.startShare(onThisOrigin(t.url), t.token, "Android");
           $("#mirror-share").textContent = "Stop sharing";
         } catch (err) { toast(err.message); }
       });
