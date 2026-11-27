@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 9055a89412ffcf3f5dc3734f3490a13446440ef83c2f96b4f65c58e099051b5d) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 86c3c9bbfc486a1a34552325b4e697cb595e440a9cfc757affa55a267e140253) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -1166,10 +1166,6 @@ const Beat = {
     }
   }
 };
-setInterval(() => Beat.send(), 1e4);
-video.addEventListener("playing", () => {
-  if (!Beat.open) Beat.send();
-});
 const NowCard = {
   timer: null,
   async load() {
@@ -5545,6 +5541,10 @@ $("#panel-close").addEventListener("click", () => togglePanel(false));
 $("#reveal").addEventListener("change", () => Player.renderRanges());
 $("#mark-btn").addEventListener("click", () => Player.mark());
 $("#mark-skip-btn").addEventListener("click", () => Player.mark(true));
+setInterval(() => Beat.send(), 1e4);
+video.addEventListener("playing", () => {
+  if (!Beat.open) Beat.send();
+});
 video.addEventListener("timeupdate", () => {
   var _a2;
   if (!((_a2 = S.config) == null ? void 0 : _a2.scene_skip) || !Player.filterOn || !Player.info || Player.info.live || video.paused || video.seeking || Date.now() - (Player.skippedAt || 0) < 2500) return;

@@ -744,8 +744,6 @@ const Beat = {
     else if (r.command === "stop") { Player.close(true); toast("Stopped from another screen"); }
   },
 };
-setInterval(() => Beat.send(), 10000);
-video.addEventListener("playing", () => { if (!Beat.open) Beat.send(); });
 
 /** Settings -> Now playing. */
 const NowCard = {
@@ -3497,6 +3495,9 @@ $("#panel-close").addEventListener("click", () => togglePanel(false));
 $("#reveal").addEventListener("change", () => Player.renderRanges());
 $("#mark-btn").addEventListener("click", () => Player.mark());
 $("#mark-skip-btn").addEventListener("click", () => Player.mark(true));
+/* Report what is playing (see Beat, above). */
+setInterval(() => Beat.send(), 10000);
+video.addEventListener("playing", () => { if (!Beat.open) Beat.send(); });
 /* Scenes marked "skip" are jumped over while the filter is on. */
 video.addEventListener("timeupdate", () => {
   if (!S.config?.scene_skip || !Player.filterOn || !Player.info || Player.info.live || video.paused || video.seeking || Date.now() - (Player.skippedAt || 0) < 2500) return;
