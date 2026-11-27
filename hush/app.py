@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import backup, discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
+from . import backup, selfupdate, discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
 from .mirror import MirrorHub
 from .library import parse as parse_names
@@ -179,7 +179,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
                     "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings",
                     "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream",
-                    "/api/backups", "/api/wordlist", "/api/nowplaying")
+                    "/api/backups", "/api/wordlist", "/api/nowplaying", "/api/update")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -665,7 +665,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         return {"url": f"{base}{path}?{q}", "expires_in_hours": 12}
 
     @app.get("/api/filtered/{source_id}/{item_id}.mkv", dependencies=[need])
-    async def filtered(request: Request, source_id: str, item_id: str, cats: str = "", start: float = 0.0):
+    async def filtered(request: Request, source_id: str, item_id: str, cats: str = "", start: float = 0.0, download: int = 0, fmt: str = "mkv"):
         ref = await run_in_threadpool(resolve, source_id, item_id)
         p = await run_in_threadpool(probe, source_id, item_id)
         f = db.get_filter(media_key(source_id, item_id))
@@ -673,9 +673,16 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         mode = "audio" if not p.video else "remux"   # video is copied untouched
         if start > 0 and mode == "remux":
             start = await run_in_threadpool(media.keyframe_before, cfg.ffprobe, ref, source_id, item_id, start)
+        container = "mp4" if fmt == "mp4" else "matroska"
         cmd, mime = stream.build_ffmpeg_cmd(cfg, ref, source_id, item_id, mode, start,
-                                            mute_ranges=ranges, container="matroska")
-        return await stream.ffmpeg_response(request, cmd, mime)
+                                            mute_ranges=ranges, container=container)
+        response = await stream.ffmpeg_response(request, cmd, mime)
+        if download:                                          # a filtered copy to keep, for watching away from home
+            meta = db.get_meta(media_key(source_id, item_id))
+            name = parse_names.pretty_title(ref.name or ref.title, meta, ((db.get_show(meta["show_key"]) or {}).get("title", "") if meta and meta.get("show_key") else ""))
+            safe = "".join(c for c in name.replace("·", "-") if c.isascii() and (c.isalnum() or c in " -_.()")).strip() or "video"
+            response.headers["Content-Disposition"] = f'attachment; filename="{safe} (Hush).{"mp4" if fmt == "mp4" else "mkv"}"'
+        return response
 
     def _select(ranges: list[dict], cats: str) -> list[dict]:
         wanted = set(cats.split(",")) if cats else None
@@ -1821,6 +1828,21 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not watching.command(tab, cmd):
             raise HTTPException(404, "That screen is no longer playing")
         return {"ok": True}
+
+    # ---- the Update button ----------------------------------------------------------------------------------------
+    @app.get("/api/update", dependencies=[need])
+    def update_status():
+        return {**selfupdate.status(), "scanning": len(db.active_jobs())}
+
+    @app.post("/api/update", dependencies=[need])
+    def update_start():
+        st = selfupdate.status()
+        if not st.get("possible") or st.get("error"):
+            raise HTTPException(409, st.get("error") or "This server can't update itself (it was not installed with git)")
+        if not st.get("behind"):
+            raise HTTPException(409, "Already up to date")
+        selfupdate.start(cfg.data_dir / "update.log")
+        return {"started": True}
 
     # ---- backups -------------------------------------------------------------------------------------------------
     @app.get("/api/backups", dependencies=[need])

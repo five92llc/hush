@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 52f5817096cc61c9053c28d32ffc46e0e0421788440bfd35ee3853be655108da) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 e3b48768317aa608a94ed09e333b70210fa581f89409c4dfed4dc63512bfef1e) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -1198,6 +1198,64 @@ const NowCard = {
     }
   }
 };
+const UpdateRow = {
+  async load() {
+    if (isKids()) return;
+    let u;
+    try {
+      u = await api("/api/update");
+    } catch (e) {
+      return;
+    }
+    $("#update-row").hidden = !u.possible;
+    if (!u.possible) return;
+    $("#update-info").textContent = u.error ? u.error : u.behind ? `${u.behind} update${u.behind === 1 ? "" : "s"} ready: ${u.changes.slice(0, 3).join("; ")}` : "Up to date.";
+    $("#update-btn").hidden = !u.behind;
+    this.state = u;
+  },
+  async run() {
+    var _a2, _b;
+    const warn = ((_a2 = this.state) == null ? void 0 : _a2.scanning) ? ` ${this.state.scanning} scan(s) in progress will start again.` : "";
+    if (!confirm(`Update Hush now? It restarts for a few seconds and anything playing stops.${warn}`)) return;
+    try {
+      await api("/api/update", { method: "POST" });
+    } catch (err) {
+      toast(err.message);
+      return;
+    }
+    $("#update-btn").hidden = true;
+    $("#update-info").textContent = "Updating… this page reloads when Hush is back.";
+    const was = (_b = S.config) == null ? void 0 : _b.version;
+    let tries = 0;
+    const wait = async () => {
+      tries++;
+      try {
+        const c = await api("/api/config");
+        if (c.version !== was) {
+          location.reload();
+          return;
+        }
+      } catch (e) {
+      }
+      if (tries < 90) setTimeout(wait, 4e3);
+      else $("#update-info").textContent = "That is taking longer than expected. Check update.log in the Hush data folder.";
+    };
+    setTimeout(wait, 6e3);
+  }
+};
+$("#update-btn").addEventListener("click", () => UpdateRow.run());
+$("#download-btn").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/external/${Player.src}/${Player.item}?cats=${[...Player.cats].join(",")}`);
+    const a = h("a", { href: `${onThisOrigin(r.url)}${new URL(r.url).search}&download=1&fmt=mp4`, download: "" });
+    document.body.append(a);
+    a.click();
+    a.remove();
+    toast("Downloading. The file is built as it downloads, so keep this page open.");
+  } catch (err) {
+    toast(err.message);
+  }
+});
 const WordsCard = {
   lines: (s) => s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean),
   draw(r) {
@@ -7212,6 +7270,7 @@ async function route() {
     BackupCard.load();
     WordsCard.load();
     setTimeout(() => NowCard.load(), 0);
+    UpdateRow.load();
     const app = window.HushApp;
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = ((_c = S.config) == null ? void 0 : _c.version) ? `Version ${S.config.version}` : "";

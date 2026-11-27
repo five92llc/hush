@@ -766,6 +766,39 @@ const NowCard = {
   async command(tab, cmd) { try { await api(`/api/nowplaying/${tab}/${cmd}`, { method: "POST" }); toast("Sent. It takes up to 10 seconds."); } catch (err) { toast(err.message); } },
 };
 
+/** Settings -> About: update the server from the page. */
+const UpdateRow = {
+  async load() {
+    if (isKids()) return;
+    let u; try { u = await api("/api/update"); } catch { return; }
+    $("#update-row").hidden = !u.possible;
+    if (!u.possible) return;
+    $("#update-info").textContent = u.error ? u.error : u.behind ? `${u.behind} update${u.behind === 1 ? "" : "s"} ready: ${u.changes.slice(0, 3).join("; ")}` : "Up to date.";
+    $("#update-btn").hidden = !u.behind; this.state = u;
+  },
+  async run() {
+    const warn = this.state?.scanning ? ` ${this.state.scanning} scan(s) in progress will start again.` : "";
+    if (!confirm(`Update Hush now? It restarts for a few seconds and anything playing stops.${warn}`)) return;
+    try { await api("/api/update", { method: "POST" }); } catch (err) { toast(err.message); return; }
+    $("#update-btn").hidden = true; $("#update-info").textContent = "Updating… this page reloads when Hush is back.";
+    const was = S.config?.version; let tries = 0;
+    const wait = async () => {
+      tries++;
+      try { const c = await api("/api/config"); if (c.version !== was) { location.reload(); return; } } catch { /* restarting */ }
+      if (tries < 90) setTimeout(wait, 4000); else $("#update-info").textContent = "That is taking longer than expected. Check update.log in the Hush data folder.";
+    };
+    setTimeout(wait, 6000);
+  },
+};
+$("#update-btn").addEventListener("click", () => UpdateRow.run());
+$("#download-btn").addEventListener("click", async () => {
+  try {
+    const r = await api(`/api/external/${Player.src}/${Player.item}?cats=${[...Player.cats].join(",")}`);
+    const a = h("a", { href: `${onThisOrigin(r.url)}${new URL(r.url).search}&download=1&fmt=mp4`, download: "" }); document.body.append(a); a.click(); a.remove();
+    toast("Downloading. The file is built as it downloads, so keep this page open.");
+  } catch (err) { toast(err.message); }
+});
+
 /** Settings -> Words: your own additions and the words never to mute. */
 const WordsCard = {
   lines: (s) => s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean),
@@ -4411,7 +4444,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; Settings.show(src);
-    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load(); WordsCard.load(); setTimeout(() => NowCard.load(), 0);
+    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load(); WordsCard.load(); setTimeout(() => NowCard.load(), 0); UpdateRow.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";
