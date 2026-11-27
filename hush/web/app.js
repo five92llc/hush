@@ -2796,7 +2796,7 @@ const Player = {
   applyFilterButton() {
     const b = $("#filter-btn");
     b.setAttribute("aria-pressed", String(this.filterOn));
-    $("#filter-label").textContent = this.filterOn ? "Filter on" : "Filter off";
+    $("#filter-label").textContent = b.title = this.filterOn ? "Filter on" : "Filter off";
     $("#player").classList.toggle("unfiltered", !this.filterOn);
   },
 

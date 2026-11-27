@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 a96257312aba63c8ee58639a53c780f3d5970c564e2fa20b77c6b2c15f92f7d0) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 c1f0a9937d87e1765b40bc09f927582761afda43dbdfd47b019893b0fbabe408) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -4404,7 +4404,7 @@ const Player = {
   applyFilterButton() {
     const b = $("#filter-btn");
     b.setAttribute("aria-pressed", String(this.filterOn));
-    $("#filter-label").textContent = this.filterOn ? "Filter on" : "Filter off";
+    $("#filter-label").textContent = b.title = this.filterOn ? "Filter on" : "Filter off";
     $("#player").classList.toggle("unfiltered", !this.filterOn);
   },
   /* ---------- intros, credits and the next episode ---------- */
