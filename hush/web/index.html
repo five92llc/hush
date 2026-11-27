@@ -203,6 +203,17 @@
       </div>
     </div>
     <div class="prefs-card admin-only">
+      <h2>Words</h2>
+      <div class="pref"><div><strong>Skip marked scenes</strong><p class="hint">When on, you can mark a scene in the player (Language panel → Skip a scene) and it is jumped over for everyone while the filter is on. When off, marked scenes play normally.</p></div>
+        <input id="scene-skip" type="checkbox" aria-label="Skip marked scenes"></div>
+      <p class="hint">Add your own words to a group, or list words that should never be muted. One per line; a * stands for any ending (damn*).</p>
+      <div id="words-cats"></div>
+      <label class="words-box">Never mute these<textarea id="words-allow" rows="3" spellcheck="false"></textarea></label>
+      <div class="actions"><button id="words-save" class="btn primary" type="button">Save words</button>
+        <button id="words-reapply" class="btn subtle" type="button">Check scanned titles again</button></div>
+      <p id="words-info" class="hint"></p>
+    </div>
+    <div class="prefs-card admin-only">
       <h2>Tuning-in screen</h2>
       <div class="pref"><div><strong>Weather</strong><p id="weather-info" class="hint">Not set. Pick your town to show the weather while a channel opens.</p></div>
         <select id="weather-unit" aria-label="Temperature unit"><option value="c">°C</option><option value="f">°F</option></select></div>
@@ -442,6 +453,7 @@
       </fieldset>
       <div id="range-tools" class="range-tools" hidden>
         <button id="mark-btn" class="btn subtle" type="button" title="Shortcut: M">Mark a moment</button>
+        <button id="mark-skip-btn" class="btn subtle" type="button" title="Mark a scene to be jumped over" hidden>Skip a scene</button>
         <label class="reveal"><input id="reveal" type="checkbox"> Show words</label>
       </div>
       <ol id="ranges" class="ranges"></ol>

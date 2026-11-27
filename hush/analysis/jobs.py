@@ -25,7 +25,7 @@ class Analyzer:
         self.acfg = cfg.analysis
         self.db = db
         self.registry = registry
-        self.wordlist = WordList(self.acfg.wordlist)
+        self.wordlist = WordList(self.acfg.wordlist, db.get_setting("wordlist_custom", None))
         # (priority, order, job id): scans you ask for go ahead of bulk scans
         self.q: queue.PriorityQueue[tuple[int, int, str]] = queue.PriorityQueue()
         self._seq = itertools.count()
@@ -154,7 +154,24 @@ class Analyzer:
         return self.db.get_filter(key)
 
     def reload_wordlist(self) -> None:
-        self.wordlist = WordList(self.acfg.wordlist)
+        self.wordlist.load(self.db.get_setting("wordlist_custom", None))          # in place: the live filter shares this list
+
+    reapplying = ""
+
+    def reapply_all(self) -> int:
+        """Check every scanned title against the word list again, from the saved transcripts (no listening)."""
+        keys = [f.stem.removesuffix(".words") for f in self.cfg.cache_dir.glob("*.words.json")]
+
+        def run():
+            for i, key in enumerate(keys, 1):
+                self.reapplying = f"{i} of {len(keys)}"
+                try:
+                    self.rematch(key)
+                except (OSError, ValueError):
+                    log.warning("could not check %s again", key)
+            self.reapplying = ""
+        threading.Thread(target=run, name="reapply-words", daemon=True).start()
+        return len(keys)
 
     # ---- worker ---------------------------------------------------------
     def _worker(self) -> None:

@@ -177,7 +177,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
                     "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings",
                     "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream",
-                    "/api/backups")
+                    "/api/backups", "/api/wordlist")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -332,7 +332,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/config", dependencies=[need])
     def config_info():
-        return {"version": server_version(), "encoder": hw.encoder_for(cfg), "engines": analyzer.engines(), "categories": analyzer.wordlist.categories_info(),
+        return {"scene_skip": bool(db.get_setting("scene_skip", False)), "version": server_version(), "encoder": hw.encoder_for(cfg), "engines": analyzer.engines(), "categories": analyzer.wordlist.categories_info(),
                 "source_types": ["local", "smb", "ftp", "sftp", "http", "dlna", "jellyfin", "plex"]}
 
     # ---- sources --------------------------------------------------------
@@ -673,7 +673,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     def _select(ranges: list[dict], cats: str) -> list[dict]:
         wanted = set(cats.split(",")) if cats else None
-        return [r for r in ranges if r.get("enabled", True)
+        skipping = bool(db.get_setting("scene_skip", False))
+        return [r for r in ranges if r.get("enabled", True) and (skipping or r.get("action") != "skip")
                 and (wanted is None or r.get("category") in wanted or r.get("source") == "manual")]
 
     # ---- filters --------------------------------------------------------
@@ -702,6 +703,8 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                            "context": str(r.get("context", ""))[:500],
                            "source": "manual" if r.get("source") == "manual" else "auto",
                            "enabled": bool(r.get("enabled", True))})
+            if r.get("action") == "skip":
+                ranges[-1]["action"] = "skip"                  # the player jumps over this scene
         ranges.sort(key=lambda r: r["start"])
         db.save_filter(key, source_id, item_id, body.get("title") or (existing or {}).get("title", ""),
                        (existing or {}).get("duration") or body.get("duration"),
@@ -728,7 +731,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         stem = "".join(c for c in (f.get("title") or key) if c.isalnum() or c in " -_.").strip() or key
         if format == "edl":
             # Kodi EDL: "<start> <end> 1" = mute. Save next to the video as <name>.edl
-            lines = [f"{r['start']:.3f}\t{r['end']:.3f}\t1" for r in _select(f["ranges"], cats)]
+            lines = [f"{r['start']:.3f}\t{r['end']:.3f}\t{0 if r.get('action') == 'skip' else 1}" for r in _select(f["ranges"], cats)]     # 0 = cut
             return PlainTextResponse("\n".join(lines) + "\n", headers={
                 "Content-Disposition": f'attachment; filename="{stem}.edl"'})
         payload = {"hush_filter": 1, "title": f["title"], "duration": f["duration"],
@@ -1742,6 +1745,54 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/library/refresh", dependencies=[need])
     def library_refresh_status():
         return {"running": tasks.refreshing, "result": tasks.refresh_result}
+
+    @app.put("/api/wordlist/scene-skip", dependencies=[need])
+    def scene_skip_set(body: dict = Body(...)):
+        """Whether scenes marked "skip" are jumped over (off until switched on here)."""
+        db.set_setting("scene_skip", bool(body.get("on")))
+        return {"on": bool(db.get_setting("scene_skip", False))}
+
+    # ---- your own words ------------------------------------------------------------------------------------------
+    def _custom_words() -> dict:
+        c = db.get_setting("wordlist_custom", None) or {}
+        return {"add": c.get("add") or {}, "allow": c.get("allow") or []}
+
+    def _clean_words(items) -> list[str]:
+        out = []
+        for w in items or []:
+            w = re.sub(r"\s+", " ", re.sub(r"[^\w' *-]", "", str(w))).strip().lower()[:60]
+            if w and w.strip("* -'") and w not in out:                     # a bare "*" would mute everything
+                out.append(w)
+        return out[:300]
+
+    def _save_words(add: dict, allow: list) -> dict:
+        cats = {c["id"] for c in analyzer.wordlist.categories_info()}
+        db.set_setting("wordlist_custom", {"add": {c: _clean_words(v) for c, v in add.items() if c in cats}, "allow": _clean_words(allow)})
+        analyzer.reload_wordlist()
+        return {"categories": analyzer.wordlist.categories_info(), **_custom_words(), "reapplying": analyzer.reapplying}
+
+    @app.get("/api/wordlist", dependencies=[need])
+    def wordlist_get():
+        return {"categories": analyzer.wordlist.categories_info(), **_custom_words(), "reapplying": analyzer.reapplying}
+
+    @app.put("/api/wordlist", dependencies=[need])
+    def wordlist_put(body: dict = Body(...)):
+        return _save_words(dict(body.get("add") or {}), list(body.get("allow") or []))
+
+    @app.post("/api/wordlist/allow", dependencies=[need])
+    def wordlist_allow(body: dict = Body(...)):
+        """"Never mute this word": adds it to the allowed words and checks this title again."""
+        words = _clean_words(body.get("words"))
+        if not words:
+            raise HTTPException(400, "No word to allow")
+        c = _custom_words()
+        out = _save_words(c["add"], [*c["allow"], *words])
+        key = str(body.get("key", ""))
+        return {**out, "filter": analyzer.rematch(key) if key.isalnum() else None}
+
+    @app.post("/api/wordlist/reapply", dependencies=[need])
+    def wordlist_reapply():
+        return {"titles": analyzer.reapply_all()}
 
     # ---- backups -------------------------------------------------------------------------------------------------
     @app.get("/api/backups", dependencies=[need])

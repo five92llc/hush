@@ -50,19 +50,26 @@ def _tok_match(pat: tuple[str, str], tok: str) -> bool:
 
 
 class WordList:
-    def __init__(self, path: str | Path | None = None):
-        data = yaml.safe_load(Path(path or DEFAULT_WORDLIST).read_text()) or {}
-        self.categories: dict[str, dict] = {}
-        self.patterns: list[tuple[str, list[tuple[str, str]]]] = []  # (category, token patterns)
+    def __init__(self, path: str | Path | None = None, custom: dict | None = None):
+        self.path = path
+        self.load(custom)
+
+    def load(self, custom: dict | None = None) -> None:
+        """Read the list, plus your own words: {"add": {category: [words]}, "allow": [words]}. Changes this object, so everything using it follows."""
+        data = yaml.safe_load(Path(self.path or DEFAULT_WORDLIST).read_text()) or {}
+        custom = custom or {}
+        categories: dict[str, dict] = {}
+        patterns: list[tuple[str, list[tuple[str, str]]]] = []  # (category, token patterns)
         for cat, spec in (data.get("categories") or {}).items():
-            self.categories[cat] = {"label": spec.get("label", cat), "default": spec.get("default", True)}
-            for entry in spec.get("words") or []:
+            categories[cat] = {"label": spec.get("label", cat), "default": spec.get("default", True)}
+            for entry in [*(spec.get("words") or []), *((custom.get("add") or {}).get(cat) or [])]:
                 toks = [t for t in str(entry).split() if t]
                 if toks:
-                    self.patterns.append((cat, [_compile_token(t) for t in toks]))
+                    patterns.append((cat, [_compile_token(t) for t in toks]))
         # Longest phrases first so "son of a bitch" wins over "bitch".
-        self.patterns.sort(key=lambda p: -len(p[1]))
-        self.allow = [_compile_token(a) for a in data.get("allow") or []]
+        patterns.sort(key=lambda p: -len(p[1]))
+        allow = [_compile_token(a) for a in [*(data.get("allow") or []), *(custom.get("allow") or [])] if str(a).strip()]
+        self.categories, self.patterns, self.allow = categories, patterns, allow
 
     def allowed(self, tok: str) -> bool:
         return any(_tok_match(a, tok) for a in self.allow)

@@ -727,6 +727,31 @@ const Saver = {
   },
 };
 
+/** Settings -> Words: your own additions and the words never to mute. */
+const WordsCard = {
+  lines: (s) => s.split(/[\n,]/).map((x) => x.trim()).filter(Boolean),
+  draw(r) {
+    $("#words-cats").replaceChildren(...r.categories.map((c) => h("label", { class: "words-box" }, `Also mute (${c.label})`, h("textarea", { rows: 2, spellcheck: "false", "data-cat": c.id }, (r.add[c.id] || []).join("\n")))));
+    $("#words-allow").value = r.allow.join("\n");
+    $("#words-info").textContent = r.reapplying ? `Checking scanned titles again: ${r.reapplying}` : "";
+  },
+  async load() { $("#scene-skip").checked = !!S.config?.scene_skip; try { this.draw(await api("/api/wordlist")); } catch { /* grown-ups only */ } },
+  async save() {
+    const add = Object.fromEntries($$("#words-cats textarea").map((t) => [t.dataset.cat, this.lines(t.value)]));
+    try { this.draw(await api("/api/wordlist", { method: "PUT", body: { add, allow: this.lines($("#words-allow").value) } })); toast("Saved. New scans use your words; check scanned titles again to update them."); }
+    catch (err) { toast(err.message); }
+  },
+};
+$("#scene-skip").addEventListener("change", async (e) => {
+  const on = e.target.checked;
+  try { await api("/api/wordlist/scene-skip", { method: "PUT", body: { on } }); S.config.scene_skip = on; Player._iv = null; toast(on ? "Marked scenes will be skipped" : "Scene skipping is off"); }
+  catch (err) { e.target.checked = !on; toast(err.message); }
+});
+$("#words-save").addEventListener("click", () => WordsCard.save());
+$("#words-reapply").addEventListener("click", async () => {
+  try { const r = await api("/api/wordlist/reapply", { method: "POST" }); $("#words-info").textContent = `Checking ${plural(r.titles, "scanned title")} again in the background.`; } catch (err) { toast(err.message); }
+});
+
 /** Settings -> Server: the backups. */
 const BackupCard = {
   draw(r) {
@@ -2622,7 +2647,7 @@ const Player = {
   },
 
   categories() { return (S.config?.categories || []); },
-  active(r) { return r.enabled !== false && (r.source === "manual" || this.cats.has(r.category)); },
+  active(r) { return r.enabled !== false && (r.action !== "skip" || !!S.config?.scene_skip) && (r.source === "manual" || this.cats.has(r.category)); },
   activeRanges() { return this.ranges.filter((r) => this.active(r)); },
   rangeAt(t) { return this.ranges.find((r) => this.active(r) && t >= r.start && t < r.end); },
   /* Overlapping ranges are merged so one range's end never unmutes another. */
@@ -2970,6 +2995,7 @@ const Player = {
   /* ---------- language panel ---------- */
   renderPanel() {
     this.renderAudioList();
+    $("#mark-skip-btn").hidden = !S.config?.scene_skip;
     const status = $("#panel-status");
     const hasFilter = !!this.filter;
     const running = this.job && (this.job.status === "running" || this.job.status === "queued");
@@ -3030,7 +3056,7 @@ const Player = {
     },
       h("button", { class: "when", type: "button", onclick: () => { this.selected = r.id; this.seek(r.start - 2); this.renderRanges(); }, "aria-label": `Play from ${fmt(r.start)}` }, fmt(r.start)),
       h("div", {}, h("div", { class: "ctx" }, ...contextNodes(r, reveal)),
-        h("span", { class: "cat" }, r.source === "manual" ? "Marked by you" : (labels[r.category] || r.category))),
+        h("span", { class: "cat" }, r.action === "skip" ? (S.config?.scene_skip ? "Scene skipped" : "Scene (skipping is off)") : r.source === "manual" ? "Marked by you" : (labels[r.category] || r.category))),
       h("div", { class: "ops" },
         h("input", { type: "checkbox", checked: r.enabled !== false, "aria-label": r.enabled === false ? "Not filtered. Filter this moment" : "Filtered. Let this moment play",
           title: "Filter this moment", onchange: (e) => { r.enabled = e.target.checked; this.changed(); } }),
@@ -3041,10 +3067,21 @@ const Player = {
         h("button", { type: "button", onclick: () => this.nudge(r, "start", -0.1) }, "Start earlier"),
         h("button", { type: "button", onclick: () => this.nudge(r, "start", 0.1) }, "Start later"),
         h("button", { type: "button", onclick: () => this.nudge(r, "end", -0.1) }, "End sooner"),
-        h("button", { type: "button", onclick: () => this.nudge(r, "end", 0.1) }, "End later")) : null,
+        h("button", { type: "button", onclick: () => this.nudge(r, "end", 0.1) }, "End later"),
+        r.source === "manual" && S.config?.scene_skip ? h("button", { type: "button", onclick: () => { if (r.action === "skip") delete r.action; else r.action = "skip"; this.skippedAt = Date.now(); this.changed(); } }, r.action === "skip" ? "Mute instead" : "Skip instead") : null,
+        r.source !== "manual" && r.words?.length ? h("button", { type: "button", onclick: () => this.neverMute(r) }, "Never mute this word") : null) : null,
     )));
   },
 
+  async neverMute(r) {
+    const words = [...new Set(r.words.map((w) => w.toLowerCase().replace(/[^\p{L}\p{N}' -]/gu, "").trim()).filter(Boolean))];
+    if (!confirm(`Never mute ${words.map((w) => `"${hide(w)}"`).join(", ")} again, in any title?`)) return;
+    try {
+      const out = await api("/api/wordlist/allow", { method: "POST", body: { words, key: this.info.media_key } });
+      if (out.filter) { this.filter = out.filter; this.ranges = out.filter.ranges; this.renderMarks(); this.renderPanel(); this.Audio.reset(); this.queueHlsRefresh(200); }
+      toast("Allowed. Use Check scanned titles again in Settings to apply it everywhere.");
+    } catch (err) { toast(err.message); }
+  },
   nudge(r, edge, delta) {
     r[edge] = Math.max(0, Math.round((r[edge] + delta) * 1000) / 1000);
     if (r.end - r.start < 0.05) r[edge === "start" ? "start" : "end"] -= delta;
@@ -3066,22 +3103,24 @@ const Player = {
     }, 600);
   },
 
-  mark() {
+  mark(skip = false) {
     if (isKids()) return;
     const t = this.now();
     if (this.markStart == null) {
-      this.markStart = t;
-      $("#mark-btn").textContent = "End mark here";
-      toast("Marking. Press M again where it should end.");
+      this.markStart = t; this.markSkip = skip;
+      $(skip ? "#mark-skip-btn" : "#mark-btn").textContent = skip ? "Scene ends here" : "End mark here";
+      toast(skip ? "Marking a scene. Play to its end, then press Scene ends here." : "Marking. Press M again where it should end.");
       return;
     }
+    skip = this.markSkip;
     const [s, e] = [Math.min(this.markStart, t), Math.max(this.markStart, t)];
-    this.markStart = null; $("#mark-btn").textContent = "Mark a moment";
+    this.markStart = null; $("#mark-btn").textContent = "Mark a moment"; $("#mark-skip-btn").textContent = "Skip a scene";
     if (e - s < 0.2) { toast("That mark was too short."); return; }
     if (!this.filter) this.filter = { engine: "manual", ranges: [] };
     this.ranges.push({ id: Math.random().toString(36).slice(2, 12), start: s, end: e, words: [], category: "manual",
-      context: "", source: "manual", enabled: true });
-    toast(`Marked ${fmt(s)} to ${fmt(e)}`);
+      context: "", source: "manual", enabled: true, ...(skip ? { action: "skip" } : {}) });
+    this.skippedAt = Date.now();                          // do not jump while the person is still looking at what they marked
+    toast(skip ? `Scene ${fmt(s)} to ${fmt(e)} will be skipped` : `Marked ${fmt(s)} to ${fmt(e)}`);
     this.changed();
   },
 
@@ -3349,6 +3388,13 @@ $("#panel-btn").addEventListener("click", () => togglePanel());
 $("#panel-close").addEventListener("click", () => togglePanel(false));
 $("#reveal").addEventListener("change", () => Player.renderRanges());
 $("#mark-btn").addEventListener("click", () => Player.mark());
+$("#mark-skip-btn").addEventListener("click", () => Player.mark(true));
+/* Scenes marked "skip" are jumped over while the filter is on. */
+video.addEventListener("timeupdate", () => {
+  if (!S.config?.scene_skip || !Player.filterOn || !Player.info || Player.info.live || video.paused || video.seeking || Date.now() - (Player.skippedAt || 0) < 2500) return;
+  const t = Player.now(), r = Player.ranges.find((x) => x.action === "skip" && x.enabled !== false && t >= x.start && t < x.end - 0.4);
+  if (r) { Player.skippedAt = Date.now(); toast("Skipped a scene"); Player.seek(r.end + 0.05); }
+});
 $("#rescan-btn").addEventListener("click", () => {
   if (confirm("Scan this title again? Moments you marked or switched off are kept.")) Player.scan();
 });
@@ -4027,7 +4073,7 @@ function go(hash) { if (location.hash === hash) route(); else location.hash = ha
 const Settings = {
   SECTIONS: [
     ["display", "Display", "🖥️", "Big screen mode and the phone remote", false], ["topbar", "Top bar", "🎛️", "Clock, weather, scores, headlines and more", false],
-    ["mirror", "Mirroring", "📲", "Show a phone or tablet screen on Hush", false], ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true], ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
+    ["mirror", "Mirroring", "📲", "Show a phone or tablet screen on Hush", false], ["words", "Words", "🤐", "Add words to mute, or ones never to mute", true], ["library", "Library", "📚", "Sources, Live TV playlists, refresh, downloads", true], ["tuning", "Tuning-in screen", "📺", "The weather town shown while a channel opens", true],
     ["people", "People", "👥", "Profiles and who can watch what", true], ["server", "Server", "⚙️", "How video is prepared for your screens", true],
     ["security", "Security", "🔒", "The password for Hush", true], ["about", "About", "ℹ️", "Versions, app updates and the server address", false],
   ],
@@ -4325,7 +4371,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; Settings.show(src);
-    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load();
+    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load(); WordsCard.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";

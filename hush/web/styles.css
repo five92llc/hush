@@ -880,3 +880,5 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .search-big { width: 100%; max-width: 40rem; font-size: var(--s1); margin: 0 0 1.2rem; }
 .search-results section { margin-bottom: 1.5rem; }
+.words-box { display: grid; gap: .3rem; margin: .6rem 0; font-weight: 600; }
+.words-box textarea { width: 100%; font: inherit; font-weight: 400; background: var(--ink-deep); color: var(--linen); border: 1px solid var(--line); border-radius: var(--r-sm); padding: .5rem .7rem; }
