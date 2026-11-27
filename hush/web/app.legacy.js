@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 c1f0a9937d87e1765b40bc09f927582761afda43dbdfd47b019893b0fbabe408) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 44c4cd0799fea34c3066440adab5215895194ef73128d9fe3c70c891177631c8) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -3601,6 +3601,7 @@ const Player = {
     this.close(false);
     Cast.init();
     Cast.button();
+    $("#pip-btn").hidden = true;
     if (keepMini) $("#library").hidden = libraryWasHidden;
     this.src = sourceId;
     this.item = itemId;
@@ -4213,8 +4214,9 @@ const Player = {
         this.set(false, this.ctx.currentTime + (inside.end - now) / rate);
         this.scheduled.add(inside.id);
       }
+      const ahead = document.hidden || PopOut.active() ? 3 : 0.2;
       for (const r of P.intervals()) {
-        if (r.start <= now || r.start > now + 0.2 || this.scheduled.has(r.id)) continue;
+        if (r.start <= now || r.start > now + ahead * rate || this.scheduled.has(r.id)) continue;
         const t0 = this.ctx.currentTime + (r.start - now) / rate;
         this.set(true, t0);
         this.set(false, this.ctx.currentTime + (r.end - now) / rate);
@@ -4229,7 +4231,7 @@ const Player = {
   keepPlaying() {
     const force = this.forceMini;
     this.forceMini = false;
-    return force || store.get("mini", true) && !!video.currentSrc && !video.paused && !video.ended && !!this.info;
+    return force || PopOut.active() || store.get("mini", true) && !!video.currentSrc && !video.paused && !video.ended && !!this.info;
   },
   /** Shrink to the slot above the sidebar (or the upper-left corner when there is no sidebar). */
   minimize() {
@@ -5284,6 +5286,7 @@ document.addEventListener("keydown", (e) => {
       if (!$("#repeat-btn").hidden) Queue.cycleRepeat();
     },
     c: () => Player.setCaptions(!Player.captionsOn),
+    o: () => PopOut.toggle(),
     ",": () => Player.setAvsync(Player.avsync - 50),
     ".": () => Player.setAvsync(Player.avsync + 50),
     " ": togglePlay,
@@ -6428,6 +6431,83 @@ function audioName(a, i) {
   const rest = String(a.label || "").split(" · ").filter((b) => b && b.toLowerCase() !== String(a.language || "").toLowerCase());
   return [lang, ...rest].join(" · ");
 }
+const PopOut = {
+  track: null,
+  last: "",
+  standard() {
+    return !!(document.pictureInPictureEnabled && video.requestPictureInPicture);
+  },
+  safari() {
+    var _a2;
+    return !!((_a2 = video.webkitSupportsPresentationMode) == null ? void 0 : _a2.call(video, "picture-in-picture"));
+  },
+  supported() {
+    return !window.HushApp && !IS_TV_DEVICE && (this.standard() || this.safari());
+  },
+  active() {
+    return document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture";
+  },
+  button() {
+    const b = $("#pip-btn");
+    b.hidden = !this.supported() || !Player.info || Player.info.kind === "audio";
+    b.setAttribute("aria-pressed", String(this.active()));
+  },
+  async toggle() {
+    if (!this.supported() || !Player.info) {
+      toast("This browser can't open a pop-out window");
+      return;
+    }
+    try {
+      if (this.active()) {
+        this.standard() ? await document.exitPictureInPicture() : video.webkitSetPresentationMode("inline");
+        return;
+      }
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {
+      });
+      this.standard() ? await video.requestPictureInPicture() : video.webkitSetPresentationMode("picture-in-picture");
+    } catch (err) {
+      toast(video.readyState < 1 ? "Wait for the picture to start, then pop it out" : `The pop-out window couldn't open: ${err.message}`);
+    }
+  },
+  changed() {
+    var _a2;
+    this.button();
+    if (this.active()) {
+      toast("Playing in a pop-out window. Drag it anywhere.");
+      try {
+        navigator.mediaSession.setActionHandler("nexttrack", () => Queue.next());
+        navigator.mediaSession.setActionHandler("previoustrack", () => Queue.prev());
+        navigator.mediaSession.setActionHandler("seekbackward", () => Player.seek(Player.now() - 10));
+        navigator.mediaSession.setActionHandler("seekforward", () => Player.seek(Player.now() + 10));
+        navigator.mediaSession.metadata = new MediaMetadata({ title: ((_a2 = Player.info) == null ? void 0 : _a2.title) || "Hush" });
+      } catch (e) {
+      }
+    } else if (this.track) {
+      this.track.mode = "disabled";
+      this.last = "";
+    }
+    Player.Audio.reset();
+  },
+  /** Hush draws captions over its own player, which the little window does not show: hand it the same (censored) words. */
+  captions() {
+    if (!this.active() || !window.VTTCue) return;
+    Player.renderSubs(Player.now());
+    const text = Player.subCues ? $("#subs").textContent : "";
+    if (!this.track) {
+      if (!text) return;
+      this.track = video.addTextTrack("captions", "Hush captions");
+    }
+    this.track.mode = "showing";
+    if (text === this.last) return;
+    this.last = text;
+    for (const c of [...this.track.cues || []]) this.track.removeCue(c);
+    if (text) this.track.addCue(new VTTCue(Math.max(0, video.currentTime - 0.1), video.currentTime + 12, text));
+  }
+};
+$("#pip-btn").addEventListener("click", () => PopOut.toggle());
+for (const ev of ["enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) video.addEventListener(ev, () => PopOut.changed());
+video.addEventListener("loadedmetadata", () => PopOut.button());
+video.addEventListener("timeupdate", () => PopOut.captions());
 const Cast = {
   ctx: null,
   rp: null,

@@ -313,3 +313,5 @@ Hush learns where the intro and credits are, in this order: marks you set by han
 **Audio language.** The translate icon in the player opens the **Language** panel, with the video's sound tracks listed at the top (also under **Audio track** in the player settings). Hush starts with English when there is one, and remembers the language you pick for the next titles. The word filter is built from the English sound, so its mutes may not line up with a dubbed track.
 
 **Volume.** The speaker button in the player opens an upright slider with + and − buttons.
+
+**Pop-out player.** The arrow-out-of-a-box button in the player (or **O**) puts the picture in a small window that stays on top of other apps and can be dragged anywhere on the screen, while you browse elsewhere or use other programs. It uses your browser's picture-in-picture (Chrome, Edge, Safari; Firefox has its own button on the video). The filter keeps muting, and captions show in the window. Not in the TV or Android apps.

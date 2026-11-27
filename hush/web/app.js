@@ -2208,7 +2208,7 @@ const Player = {
     const keepMini = !!opts.mini;                      // switching channel or title from the mini player
     const libraryWasHidden = $("#library").hidden;
     this.close(false);
-    Cast.init(); Cast.button();
+    Cast.init(); Cast.button(); $("#pip-btn").hidden = true;
     if (keepMini) $("#library").hidden = libraryWasHidden;
     this.src = sourceId; this.item = itemId; this.triedTranscode = false;
     const token = this.openToken = (this.openToken || 0) + 1;      // a newer open makes this one stale
@@ -2646,8 +2646,9 @@ const Player = {
         this.set(false, this.ctx.currentTime + (inside.end - now) / rate);
         this.scheduled.add(inside.id);
       }
-      for (const r of P.intervals()) {               // schedule what starts in the next 200 ms
-        if (r.start <= now || r.start > now + 0.2 || this.scheduled.has(r.id)) continue;
+      const ahead = document.hidden || PopOut.active() ? 3 : 0.2;     // a browser slows the timers of a page out of sight, so mutes are booked further ahead there
+      for (const r of P.intervals()) {
+        if (r.start <= now || r.start > now + ahead * rate || this.scheduled.has(r.id)) continue;
         const t0 = this.ctx.currentTime + (r.start - now) / rate;
         this.set(true, t0);
         this.set(false, this.ctx.currentTime + (r.end - now) / rate);
@@ -2661,7 +2662,7 @@ const Player = {
   mini: false, forceMini: false,
   keepPlaying() {
     const force = this.forceMini; this.forceMini = false;
-    return force || (store.get("mini", true) && !!video.currentSrc && !video.paused && !video.ended && !!this.info);
+    return force || PopOut.active() || (store.get("mini", true) && !!video.currentSrc && !video.paused && !video.ended && !!this.info);
   },
   /** Shrink to the slot above the sidebar (or the upper-left corner when there is no sidebar). */
   minimize() {
@@ -3360,7 +3361,7 @@ document.addEventListener("keydown", (e) => {
   }
   const map = {
     n: () => Queue.next(), p: () => Queue.prev(), s: () => { if (!$("#shuffle-btn").hidden) Queue.toggleShuffle(); }, r: () => { if (!$("#repeat-btn").hidden) Queue.cycleRepeat(); },
-    c: () => Player.setCaptions(!Player.captionsOn),
+    c: () => Player.setCaptions(!Player.captionsOn), o: () => PopOut.toggle(),
     ",": () => Player.setAvsync(Player.avsync - 50), ".": () => Player.setAvsync(Player.avsync + 50),
     " ": togglePlay, k: togglePlay, w: () => Player.toggleMini(), f: () => $("#fs-btn").click(), m: () => Player.mark(), h: () => $("#filter-btn").click(),
     j: () => Player.seek(Player.now() - 10), l: () => Player.seek(Player.now() + 10),
@@ -4007,6 +4008,58 @@ function audioName(a, i) {
   const rest = String(a.label || "").split(" · ").filter((b) => b && b.toLowerCase() !== String(a.language || "").toLowerCase());
   return [lang, ...rest].join(" · ");
 }
+
+/** The pop-out player: the picture in a small window of its own that stays on top of other apps and can be dragged anywhere (picture-in-picture). */
+const PopOut = {
+  track: null, last: "",
+  standard() { return !!(document.pictureInPictureEnabled && video.requestPictureInPicture); },
+  safari() { return !!video.webkitSupportsPresentationMode?.("picture-in-picture"); },
+  supported() { return !window.HushApp && !IS_TV_DEVICE && (this.standard() || this.safari()); },
+  active() { return document.pictureInPictureElement === video || video.webkitPresentationMode === "picture-in-picture"; },
+  button() {
+    const b = $("#pip-btn");
+    b.hidden = !this.supported() || !Player.info || Player.info.kind === "audio";
+    b.setAttribute("aria-pressed", String(this.active()));
+  },
+  async toggle() {
+    if (!this.supported() || !Player.info) { toast("This browser can't open a pop-out window"); return; }
+    try {
+      if (this.active()) { this.standard() ? await document.exitPictureInPicture() : video.webkitSetPresentationMode("inline"); return; }
+      if (document.fullscreenElement) await document.exitFullscreen().catch(() => {});
+      this.standard() ? await video.requestPictureInPicture() : video.webkitSetPresentationMode("picture-in-picture");
+    } catch (err) { toast(video.readyState < 1 ? "Wait for the picture to start, then pop it out" : `The pop-out window couldn't open: ${err.message}`); }
+  },
+  changed() {
+    this.button();
+    if (this.active()) {
+      toast("Playing in a pop-out window. Drag it anywhere.");
+      try {
+        navigator.mediaSession.setActionHandler("nexttrack", () => Queue.next());
+        navigator.mediaSession.setActionHandler("previoustrack", () => Queue.prev());
+        navigator.mediaSession.setActionHandler("seekbackward", () => Player.seek(Player.now() - 10));
+        navigator.mediaSession.setActionHandler("seekforward", () => Player.seek(Player.now() + 10));
+        navigator.mediaSession.metadata = new MediaMetadata({ title: Player.info?.title || "Hush" });
+      } catch { /* the window still has its own play button */ }
+    } else if (this.track) { this.track.mode = "disabled"; this.last = ""; }
+    Player.Audio.reset();
+  },
+  /** Hush draws captions over its own player, which the little window does not show: hand it the same (censored) words. */
+  captions() {
+    if (!this.active() || !window.VTTCue) return;
+    Player.renderSubs(Player.now());
+    const text = Player.subCues ? $("#subs").textContent : "";
+    if (!this.track) { if (!text) return; this.track = video.addTextTrack("captions", "Hush captions"); }
+    this.track.mode = "showing";
+    if (text === this.last) return;
+    this.last = text;
+    for (const c of [...(this.track.cues || [])]) this.track.removeCue(c);
+    if (text) this.track.addCue(new VTTCue(Math.max(0, video.currentTime - 0.1), video.currentTime + 12, text));
+  },
+};
+$("#pip-btn").addEventListener("click", () => PopOut.toggle());
+for (const ev of ["enterpictureinpicture", "leavepictureinpicture", "webkitpresentationmodechanged"]) video.addEventListener(ev, () => PopOut.changed());
+video.addEventListener("loadedmetadata", () => PopOut.button());
+video.addEventListener("timeupdate", () => PopOut.captions());
 
 /** Casting: AirPlay (Safari, iPhone, iPad) and Chromecast (Chrome). The receiver fetches a server-muted stream by itself, so the filter goes with it. */
 const Cast = {
