@@ -2250,6 +2250,10 @@ const Player = {
     $("#t-dur").textContent = info.live ? "LIVE" : fmt(this.duration);
     $("#timeline").setAttribute("aria-valuemax", Math.round(this.duration));
     this.setupTracks();
+    if (this.audioIndex != null && this.audioIndex !== info.probe.audio[0].index && !info.live) {
+      await this.audioMode();                                       // a track other than the first needs the sound repackaged
+      if (token !== this.openToken) return;
+    }
     this.applyFilterButton();
     this.captionsOn = !!store.get(pk("cc"), false); this.applyCaptionButton();
     this.segs = null; this.autoSkipped = false; this.noAutoNext = false; this.nextAt = 0; this.updateSkip(-1);
@@ -2294,9 +2298,12 @@ const Player = {
   setupTracks() {
     const p = this.info.probe;
     const aSel = $("#audio-select");
-    aSel.replaceChildren(...p.audio.map((a) => h("option", { value: a.index }, a.label || `Track ${a.index}`)));
+    aSel.replaceChildren(...p.audio.map((a, i) => h("option", { value: a.index }, audioName(a, i))));
     aSel.disabled = p.audio.length < 2;
-    this.audioIndex = p.audio.length ? p.audio[0].index : null;
+    const want = store.get(pk("audiolang"), "en");              // the language last chosen here; English otherwise (the sound the filter is built from)
+    const pick = p.audio.find((a) => langCode(a.language) === want) || p.audio[0];
+    this.audioIndex = pick ? pick.index : null;
+    if (pick) aSel.value = String(pick.index);
     const sSel = $("#sub-select");
     sSel.replaceChildren(h("option", { value: "" }, "Off"),
       ...p.subtitles.map((s) => h("option", { value: s.index }, s.label || `Subtitles ${s.index}`)));
@@ -2313,6 +2320,36 @@ const Player = {
     this.avsync = Math.max(0, Math.min(3000, ms)); store.set("avsync", this.avsync);
     this.Audio.setDelay(this.avsync);
     $("#avsync-val").textContent = `${this.avsync} ms`;
+  },
+
+  /* ---------- audio language ---------- */
+  /** How this title must be played with the chosen sound track (a browser playing the file as it is only ever takes the first one). */
+  async audioMode() {
+    try { const info = await api(`/api/media/${this.src}/${this.item}?audio=${this.audioIndex}`); this.mode = info.mode; }
+    catch { this.mode = "remux"; }
+  },
+  async chooseAudio(index) {
+    const a = this.info?.probe.audio.find((x) => x.index === index);
+    if (!a || index === this.audioIndex) return;
+    const t = this.now(), playing = !video.paused;
+    this.audioIndex = index; $("#audio-select").value = String(index);
+    if (a.language) store.set(pk("audiolang"), langCode(a.language));
+    this.renderAudioList();
+    await this.audioMode();
+    if (this.mode === "direct") {
+      this.offset = 0; video.src = `/api/raw/${this.src}/${this.item}`;
+      video.addEventListener("loadedmetadata", () => { video.currentTime = t; }, { once: true });
+    } else await this.startAt(t);
+    if (playing) video.play().catch(() => {});
+    const name = audioName(a, 0);
+    toast(this.filterOn && this.ranges.length && a.language && langCode(a.language) !== "en"
+      ? `${name}. The filter was built from the English sound, so mutes may not line up in this language.` : `Audio: ${name}`);
+  },
+  renderAudioList() {
+    const list = this.info?.live ? [] : (this.info?.probe.audio || []);
+    $("#audio-langs").hidden = !list.length;
+    $("#audio-list").replaceChildren(...list.map((a, i) => h("button", { class: "audio-opt", type: "button", "aria-pressed": String(a.index === this.audioIndex),
+      onclick: () => this.chooseAudio(a.index) }, audioName(a, i))), list.length === 1 ? h("p", { class: "hint" }, "This video has only this one sound track.") : "");
   },
 
   /* ---------- captions: one button for every kind of playback ---------- */
@@ -2878,6 +2915,7 @@ const Player = {
 
   /* ---------- language panel ---------- */
   renderPanel() {
+    this.renderAudioList();
     const status = $("#panel-status");
     const hasFilter = !!this.filter;
     const running = this.job && (this.job.status === "running" || this.job.status === "queued");
@@ -2896,7 +2934,7 @@ const Player = {
         h("div", { class: "actions" }, h("button", { class: "btn ghost", type: "button", onclick: () => this.cancelScan() }, "Cancel scan")));
     } else if (!hasFilter) {
       const failed = this.job?.status === "error" ? h("p", { class: "error" }, jobText(this.job)) : null;
-      status.replaceChildren(
+      status.replaceChildren(...[
         h("p", {}, eng.whisper
           ? "This title hasn't been scanned. Hush listens to the dialogue and marks every word on your list, then mutes those moments while you watch."
           : "This title hasn't been scanned. Hush reads the subtitle track, marks every word on your list, then mutes those moments while you watch."),
@@ -2909,7 +2947,7 @@ const Player = {
         h("div", { class: "actions" },
           h("label", { class: "btn ghost", style: "display:inline-flex" }, "Load a filter file",
             h("input", { type: "file", accept: ".json,application/json", hidden: true, onchange: (e) => this.importFile(e.target.files[0]) }))),
-      );
+      ].filter(Boolean));
     } else {
       const n = this.activeRanges().length;
       const how = { whisper: "from the dialogue audio", subtitles: "from the subtitles", manual: "by hand" }[this.filter.engine] || "";
@@ -3205,16 +3243,7 @@ $("#avsync-more").addEventListener("click", () => Player.setAvsync(Player.avsync
 $("#avsync-reset").addEventListener("click", () => Player.setAvsync(0));
 $("#avsync-val").textContent = `${Player.avsync} ms`;
 $("#cc-btn").addEventListener("click", () => Player.setCaptions(!Player.captionsOn));
-$("#audio-select").addEventListener("change", async (e) => {
-  const t = Player.now();
-  Player.audioIndex = Number(e.target.value);
-  try {
-    const info = await api(`/api/media/${Player.src}/${Player.item}?audio=${Player.audioIndex}`);
-    Player.mode = info.mode === "direct" ? "direct" : info.mode;
-  } catch { Player.mode = "remux"; }
-  if (Player.mode === "direct") { video.src = `/api/raw/${Player.src}/${Player.item}`; video.currentTime = t; video.play().catch(() => {}); }
-  else Player.startAt(t);
-});
+$("#audio-select").addEventListener("change", (e) => Player.chooseAudio(Number(e.target.value)));
 $("#settings-btn").addEventListener("click", (e) => {
   const s = $("#settings"); s.hidden = !s.hidden; e.currentTarget.setAttribute("aria-expanded", String(!s.hidden));
 });
@@ -3944,6 +3973,20 @@ const Settings = {
     TV.focusSoon(60);
   },
 };
+
+/* Sound tracks are named by language ("English · 5.1"), whatever three- or two-letter code the file uses. */
+const LANG_CODES = { eng: "en", hin: "hi", tam: "ta", tel: "te", spa: "es", fre: "fr", fra: "fr", ger: "de", deu: "de", ita: "it", por: "pt", rus: "ru", jpn: "ja", kor: "ko", chi: "zh", zho: "zh",
+  ara: "ar", dut: "nl", nld: "nl", swe: "sv", nor: "no", dan: "da", fin: "fi", pol: "pl", tur: "tr", tha: "th", vie: "vi", ind: "id", heb: "he", gre: "el", ell: "el", ces: "cs", cze: "cs",
+  hun: "hu", rum: "ro", ron: "ro", ukr: "uk", ben: "bn", mal: "ml", kan: "kn", mar: "mr", urd: "ur", per: "fa", fas: "fa" };
+const LANG_NAMES = { en: "English", hi: "Hindi", ta: "Tamil", te: "Telugu", es: "Spanish", fr: "French", de: "German", it: "Italian", pt: "Portuguese", ru: "Russian", ja: "Japanese", ko: "Korean",
+  zh: "Chinese", ar: "Arabic", nl: "Dutch", sv: "Swedish", no: "Norwegian", da: "Danish", fi: "Finnish", pl: "Polish", tr: "Turkish", th: "Thai", vi: "Vietnamese", id: "Indonesian", he: "Hebrew",
+  el: "Greek", cs: "Czech", hu: "Hungarian", ro: "Romanian", uk: "Ukrainian", bn: "Bengali", ml: "Malayalam", kn: "Kannada", mr: "Marathi", ur: "Urdu", fa: "Persian" };
+const langCode = (l) => { const c = String(l || "").toLowerCase().split("-")[0]; return LANG_CODES[c] || c; };
+function audioName(a, i) {
+  const lang = LANG_NAMES[langCode(a.language)] || (a.language ? a.language.toUpperCase() : `Track ${i + 1}`);
+  const rest = String(a.label || "").split(" · ").filter((b) => b && b.toLowerCase() !== String(a.language || "").toLowerCase());
+  return [lang, ...rest].join(" · ");
+}
 
 /** Casting: AirPlay (Safari, iPhone, iPad) and Chromecast (Chrome). The receiver fetches a server-muted stream by itself, so the filter goes with it. */
 const Cast = {

@@ -867,3 +867,6 @@ html.lowpower .wait-screen::before, html.lowpower .wait-screen::after, html.lowp
 html.lowpower .tk-slide.in, html.lowpower .sv-info.in { animation-duration: .2s; }
 html.keynav body { pointer-events: none; }            /* while the arrow keys are in use, a pointer resting on the screen must not highlight or enlarge things */
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.audio-opt { display: block; width: 100%; text-align: left; margin: 0 0 .3rem; padding: .55rem .7rem; border-radius: var(--r-sm); border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.audio-opt[aria-pressed="true"] { background: var(--hush-soft); border-color: var(--hush); }
+.audio-opt[aria-pressed="true"]::before { content: "✓ "; }
