@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTex
 from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 
-from . import backup, selfupdate, discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
+from . import backup, opensubtitles, selfupdate, discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
 from .mirror import MirrorHub
 from .library import parse as parse_names
@@ -80,6 +80,9 @@ class Cache:
         if hit and time.time() - hit[0] < CACHE_TTL:
             return hit[1]
         return None
+
+    def drop(self, key) -> None:
+        self._d.pop(key, None)
 
     def put(self, key, value):
         if len(self._d) > 500:
@@ -179,7 +182,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                     "/api/browse", "/api/live/playlists", "/api/transcript", "/api/weather/search", "/api/weather/location", "/api/live/renumber", "/api/clocks/set",
                     "/api/ticker/news", "/api/ticker/health", "/api/ticker/settings",
                     "/api/mirror/settings", "/api/mirror/token", "/api/mirror/stop", "/api/mirror/hls", "/api/mirror/stream",
-                    "/api/backups", "/api/wordlist", "/api/nowplaying", "/api/update")
+                    "/api/backups", "/api/wordlist", "/api/nowplaying", "/api/update", "/api/subtitles")
     ITEM_PATHS = {"media", "raw", "stream", "seekpoint", "subtitle", "sidecars", "captions", "external", "filtered"}
 
     def kids_refusal(prof: dict, method: str, path: str) -> str | None:
@@ -1828,6 +1831,64 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         if not watching.command(tab, cmd):
             raise HTTPException(404, "That screen is no longer playing")
         return {"ok": True}
+
+    # ---- subtitles from OpenSubtitles ------------------------------------------------------------------------------
+    def _os_settings() -> dict:
+        return db.get_setting("opensubtitles", None) or {}
+
+    def _os_public() -> dict:
+        s = _os_settings()
+        return {"has_key": bool(s.get("key")), "username": s.get("username", ""), "has_password": bool(s.get("password")), "language": s.get("language", "en")}
+
+    @app.get("/api/subtitles/settings", dependencies=[need])
+    def os_settings_get():
+        return _os_public()
+
+    @app.put("/api/subtitles/settings", dependencies=[need])
+    def os_settings_put(body: dict = Body(...)):
+        s = _os_settings()
+        for k in ("key", "password"):
+            if str(body.get(k) or "").strip():                    # an empty box keeps what is saved
+                s[k] = str(body[k]).strip()[:200]
+        s["username"] = str(body.get("username", s.get("username", ""))).strip()[:100]
+        s["language"] = re.sub(r"[^a-z-]", "", str(body.get("language") or "en").lower())[:8] or "en"
+        if body.get("forget"):
+            s = {"language": s["language"]}
+        db.set_setting("opensubtitles", s)
+        return _os_public()
+
+    @app.get("/api/subtitles/find/{source_id}/{item_id}", dependencies=[need])
+    def os_find(source_id: str, item_id: str):
+        s = _os_settings()
+        if not s.get("key"):
+            raise HTTPException(409, "Add your OpenSubtitles API key in Settings → Library first")
+        ref = resolve(source_id, item_id)
+        meta = db.get_meta(media_key(source_id, item_id)) or {}
+        show = db.get_show(meta["show_key"]) if meta.get("show_key") else None
+        guess = parse_names.parse_name(ref.name or ref.title)
+        title = (show or {}).get("title") or meta.get("title") or guess["title"] or ref.title
+        season = meta.get("season", guess["season"]) if (show or guess["kind"] == "episode") else None
+        episode = meta.get("episode", guess["episode"]) if season is not None else None
+        try:
+            return opensubtitles.search(s["key"], title, meta.get("year") or guess["year"], season, episode, s.get("language", "en"))
+        except opensubtitles.SubtitleError as exc:
+            raise HTTPException(502, str(exc))
+
+    @app.post("/api/subtitles/get/{source_id}/{item_id}", dependencies=[need])
+    def os_get(source_id: str, item_id: str, body: dict = Body(...)):
+        s = _os_settings()
+        ref = resolve(source_id, item_id)
+        if not s.get("key"):
+            raise HTTPException(409, "Add your OpenSubtitles API key in Settings → Library first")
+        if not ref.path:
+            raise HTTPException(409, "Subtitles can only be saved next to files in a folder source")
+        try:
+            data = opensubtitles.fetch(s["key"], int(body.get("file_id", 0)), s.get("username", ""), s.get("password", ""))
+            out = opensubtitles.save_beside(Path(ref.path), data, s.get("language", "en"))
+        except (opensubtitles.SubtitleError, ValueError) as exc:
+            raise HTTPException(502, str(exc))
+        cache.drop(("ref", source_id, item_id))
+        return {"saved": out.name}
 
     # ---- the Update button ----------------------------------------------------------------------------------------
     @app.get("/api/update", dependencies=[need])

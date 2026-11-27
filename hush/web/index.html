@@ -142,6 +142,13 @@
         <button id="add-source-btn" class="btn subtle" type="button">Add a source</button></div>
       <div class="pref"><div><strong>Live TV playlists</strong><p class="hint">Add or manage your .m3u and .m3u8 channel lists.</p></div>
         <button id="pl-settings-btn" class="btn subtle" type="button">Playlists</button></div>
+      <div class="pref"><div><strong>Subtitle finder</strong><p id="os-info" class="hint">Fetches missing subtitles from OpenSubtitles. Needs your own free API key from opensubtitles.com.</p></div></div>
+      <form id="os-form" class="row">
+        <input id="os-key" type="password" placeholder="API key" aria-label="OpenSubtitles API key" autocomplete="off">
+        <input id="os-user" type="text" placeholder="User name (optional)" aria-label="OpenSubtitles user name" autocomplete="off">
+        <input id="os-pass" type="password" placeholder="Password (optional)" aria-label="OpenSubtitles password" autocomplete="new-password">
+        <input id="os-lang" type="text" maxlength="8" placeholder="Language: en" aria-label="Subtitle language code">
+        <button class="btn subtle" type="submit">Save</button><button id="os-forget" class="btn ghost" type="button">Forget</button></form>
       <div class="pref"><div><strong>Intros and credits</strong><p id="seg-info" class="hint">Finds each show's theme tune and end credits by comparing its episodes, so the player can offer Skip intro and Skip credits.</p></div>
         <button id="seg-scan" class="btn subtle" type="button">Look for them now</button></div>
       <div class="pref"><div><strong>Refresh library</strong><p class="hint">Look through every source for new titles, then fill in artwork and upcoming episodes.</p></div>
@@ -391,6 +398,7 @@
       <div id="settings" class="settings" hidden>
         <label>Audio track <select id="audio-select"></select></label>
         <label>Subtitles <select id="sub-select"><option value="">Off</option></select></label>
+        <div class="subfind admin-only"><button id="subfind-btn" class="btn ghost" type="button">Find subtitles online</button><div id="subfind-list" class="found"></div></div>
         <div class="avsync" id="avsync-row">
           <span>Sound sync</span>
           <button id="avsync-less" class="btn ghost" type="button" aria-label="Sound earlier by 50 milliseconds">−</button>

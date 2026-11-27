@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 e3b48768317aa608a94ed09e333b70210fa581f89409c4dfed4dc63512bfef1e) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 9055a89412ffcf3f5dc3734f3490a13446440ef83c2f96b4f65c58e099051b5d) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -1198,6 +1198,70 @@ const NowCard = {
     }
   }
 };
+const SubFinder = {
+  draw(s) {
+    $("#os-info").textContent = s.has_key ? `Ready (${s.language}). Use Find subtitles online in the player settings.` : "Fetches missing subtitles from OpenSubtitles. Needs your own free API key from opensubtitles.com.";
+    $("#os-key").value = "";
+    $("#os-pass").value = "";
+    $("#os-user").value = s.username;
+    $("#os-lang").value = s.language;
+    $("#os-key").placeholder = s.has_key ? "API key (saved)" : "API key";
+    $("#os-pass").placeholder = s.has_password ? "Password (saved)" : "Password (optional)";
+  },
+  async load() {
+    if (!isKids()) try {
+      this.draw(await api("/api/subtitles/settings"));
+    } catch (e) {
+    }
+  },
+  async save(extra) {
+    try {
+      this.draw(await api("/api/subtitles/settings", { method: "PUT", body: { key: $("#os-key").value, username: $("#os-user").value, password: $("#os-pass").value, language: $("#os-lang").value, ...extra } }));
+      toast("Saved");
+    } catch (err) {
+      toast(err.message);
+    }
+  },
+  async find() {
+    const box = $("#subfind-list"), src = Player.src, item = Player.item;
+    box.replaceChildren(h("p", { class: "hint" }, "Searching…"));
+    try {
+      const found = await api(`/api/subtitles/find/${src}/${item}`);
+      box.replaceChildren(...found.length ? found.map((f) => h(
+        "div",
+        { class: "found-row" },
+        h("div", {}, h("div", {}, f.name), h("div", { class: "hint" }, `${f.language}${f.hearing ? " · for the hard of hearing" : ""} · ${f.downloads} downloads`)),
+        h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api(`/api/subtitles/get/${src}/${item}`, { method: "POST", body: { file_id: f.file_id } });
+            box.replaceChildren(h("p", { class: "hint" }, "Saved next to the video."));
+            if (src === Player.src && item === Player.item) {
+              Player.setupTracks();
+              await Player.tracksReady;
+              const o = [...$("#sub-select").options].filter((x) => x.value.startsWith("side")).pop();
+              if (o) {
+                $("#sub-select").value = o.value;
+                Player.loadSubs(o.value);
+              }
+            }
+          } catch (err) {
+            toast(err.message);
+            e.currentTarget.disabled = false;
+          }
+        } }, "Use")
+      )) : [h("p", { class: "hint" }, "Nothing found for this title.")]);
+    } catch (err) {
+      box.replaceChildren(h("p", { class: "error" }, err.message));
+    }
+  }
+};
+$("#subfind-btn").addEventListener("click", () => SubFinder.find());
+$("#os-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  SubFinder.save();
+});
+$("#os-forget").addEventListener("click", () => SubFinder.save({ forget: true }));
 const UpdateRow = {
   async load() {
     if (isKids()) return;
@@ -3941,6 +4005,7 @@ const Player = {
     $("#audio-art").hidden = info.kind !== "audio";
     $("#t-dur").textContent = info.live ? "LIVE" : fmt(this.duration);
     $("#timeline").setAttribute("aria-valuemax", Math.round(this.duration));
+    $("#subfind-list").replaceChildren();
     this.setupTracks();
     if (this.audioIndex != null && this.audioIndex !== info.probe.audio[0].index && !info.live) {
       await this.audioMode();
@@ -7271,6 +7336,7 @@ async function route() {
     WordsCard.load();
     setTimeout(() => NowCard.load(), 0);
     UpdateRow.load();
+    SubFinder.load();
     const app = window.HushApp;
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = ((_c = S.config) == null ? void 0 : _c.version) ? `Version ${S.config.version}` : "";

@@ -766,6 +766,40 @@ const NowCard = {
   async command(tab, cmd) { try { await api(`/api/nowplaying/${tab}/${cmd}`, { method: "POST" }); toast("Sent. It takes up to 10 seconds."); } catch (err) { toast(err.message); } },
 };
 
+/** Settings -> Library, and the player: subtitles from OpenSubtitles. */
+const SubFinder = {
+  draw(s) {
+    $("#os-info").textContent = s.has_key ? `Ready (${s.language}). Use Find subtitles online in the player settings.` : "Fetches missing subtitles from OpenSubtitles. Needs your own free API key from opensubtitles.com.";
+    $("#os-key").value = ""; $("#os-pass").value = ""; $("#os-user").value = s.username; $("#os-lang").value = s.language;
+    $("#os-key").placeholder = s.has_key ? "API key (saved)" : "API key"; $("#os-pass").placeholder = s.has_password ? "Password (saved)" : "Password (optional)";
+  },
+  async load() { if (!isKids()) try { this.draw(await api("/api/subtitles/settings")); } catch { /* ignore */ } },
+  async save(extra) {
+    try { this.draw(await api("/api/subtitles/settings", { method: "PUT", body: { key: $("#os-key").value, username: $("#os-user").value, password: $("#os-pass").value, language: $("#os-lang").value, ...extra } })); toast("Saved"); }
+    catch (err) { toast(err.message); }
+  },
+  async find() {
+    const box = $("#subfind-list"), src = Player.src, item = Player.item;
+    box.replaceChildren(h("p", { class: "hint" }, "Searching…"));
+    try {
+      const found = await api(`/api/subtitles/find/${src}/${item}`);
+      box.replaceChildren(...(found.length ? found.map((f) => h("div", { class: "found-row" },
+        h("div", {}, h("div", {}, f.name), h("div", { class: "hint" }, `${f.language}${f.hearing ? " · for the hard of hearing" : ""} · ${f.downloads} downloads`)),
+        h("button", { class: "btn subtle", type: "button", onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api(`/api/subtitles/get/${src}/${item}`, { method: "POST", body: { file_id: f.file_id } });
+            box.replaceChildren(h("p", { class: "hint" }, "Saved next to the video."));
+            if (src === Player.src && item === Player.item) { Player.setupTracks(); await Player.tracksReady; const o = [...$("#sub-select").options].filter((x) => x.value.startsWith("side")).pop(); if (o) { $("#sub-select").value = o.value; Player.loadSubs(o.value); } }
+          } catch (err) { toast(err.message); e.currentTarget.disabled = false; }
+        } }, "Use"))) : [h("p", { class: "hint" }, "Nothing found for this title.")]));
+    } catch (err) { box.replaceChildren(h("p", { class: "error" }, err.message)); }
+  },
+};
+$("#subfind-btn").addEventListener("click", () => SubFinder.find());
+$("#os-form").addEventListener("submit", (e) => { e.preventDefault(); SubFinder.save(); });
+$("#os-forget").addEventListener("click", () => SubFinder.save({ forget: true }));
+
 /** Settings -> About: update the server from the page. */
 const UpdateRow = {
   async load() {
@@ -2400,6 +2434,7 @@ const Player = {
     $("#audio-art").hidden = info.kind !== "audio";
     $("#t-dur").textContent = info.live ? "LIVE" : fmt(this.duration);
     $("#timeline").setAttribute("aria-valuemax", Math.round(this.duration));
+    $("#subfind-list").replaceChildren();
     this.setupTracks();
     if (this.audioIndex != null && this.audioIndex !== info.probe.audio[0].index && !info.live) {
       await this.audioMode();                                       // a track other than the first needs the sound repackaged
@@ -4444,7 +4479,7 @@ async function route() {
   if (view === "tasks") { $("#library").hidden = true; Tasks.open(); return; }
   if (view === "settings") {
     $("#library").hidden = true; $("#prefs").hidden = false; Settings.show(src);
-    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load(); WordsCard.load(); setTimeout(() => NowCard.load(), 0); UpdateRow.load();
+    WeatherCard.load(); ClockCard.load(); TickerSettings.load(); Mirror.loadSettings(); BackupCard.load(); WordsCard.load(); setTimeout(() => NowCard.load(), 0); UpdateRow.load(); SubFinder.load();
     const app = window.HushApp;                                       // present only inside the Android app
     $("#app-card").hidden = $("#app-server-row").hidden = !app;
     $("#server-info").textContent = S.config?.version ? `Version ${S.config.version}` : "";
