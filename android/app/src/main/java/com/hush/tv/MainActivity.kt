@@ -38,6 +38,7 @@ import kotlin.concurrent.thread
 /** Hush on a TV or tablet: the Hush web app full screen, plus a server address, remote keys and self-update. */
 class MainActivity : Activity() {
     private val REQ_SHARE = 41
+    private val REQ_PERMS = 42
     private lateinit var root: FrameLayout
     private lateinit var web: WebView
     private var customView: View? = null
@@ -302,8 +303,24 @@ class MainActivity : Activity() {
     /** Sharing the screen to Hush: ask Android for permission to capture it, then start the foreground service that sends it. */
     private fun startShare(url: String, token: String, device: String) {
         if (!sameServer(Uri.parse(url)) || !url.startsWith("http")) { Toast.makeText(this, "Hush will only share to its own server", Toast.LENGTH_LONG).show(); return }
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != android.content.pm.PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 7)
         pendingShare = Triple(url, token, device)
+        // Notifications (so Stop can be shown) and, from Android 10, permission to capture the sound. Sharing goes on without them if refused.
+        val wanted = mutableListOf<String>()
+        if (Build.VERSION.SDK_INT >= 33) wanted.add("android.permission.POST_NOTIFICATIONS")
+        if (Build.VERSION.SDK_INT >= 29) wanted.add("android.permission.RECORD_AUDIO")
+        val missing = wanted.filter { Build.VERSION.SDK_INT >= 23 && checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (missing.isNotEmpty() && !asked) { asked = true; requestPermissions(missing.toTypedArray(), REQ_PERMS); return }
+        askToCapture()
+    }
+
+    private var asked = false
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_PERMS && pendingShare != null) askToCapture()
+    }
+
+    private fun askToCapture() {
         val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         @Suppress("DEPRECATION") startActivityForResult(mpm.createScreenCaptureIntent(), REQ_SHARE)
     }

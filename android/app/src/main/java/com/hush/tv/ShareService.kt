@@ -7,7 +7,12 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
+import android.media.AudioAttributes
+import android.media.AudioFormat
+import android.media.AudioPlaybackCaptureConfiguration
+import android.media.AudioRecord
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.MediaCodec
@@ -38,7 +43,9 @@ class ShareService : Service() {
     private var codec: MediaCodec? = null
     private var surface: Surface? = null
     private var conn: HttpURLConnection? = null
-    private val queue = LinkedBlockingQueue<ByteArray>(90)
+    private val queue = LinkedBlockingQueue<Pair<Char, ByteArray>>(400)
+    private var recorder: AudioRecord? = null
+    private var audioCodec: MediaCodec? = null
     @Volatile private var stopping = false
 
     override fun onBind(intent: Intent?): IBinder? = null
@@ -103,7 +110,8 @@ class ShareService : Service() {
         enc.start()
         codec = enc
         display = proj.createVirtualDisplay("hush-share", w, h, dm.densityDpi, DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, surface, null, null)
-        thread(name = "share-send") { send(url, token, device) }
+        val withSound = startSound(proj)
+        thread(name = "share-send") { send(url, token, device, withSound) }
         thread(name = "share-encode") { drain(enc) }
     }
 
@@ -127,10 +135,10 @@ class ShareService : Service() {
                         if (isKey) dropping = false
                         if (!dropping) {
                             val out = if (isKey && config != null && !startsWithSps(bytes)) config + bytes else bytes     // the stream must carry its headers before every key frame
-                            if (!queue.offer(out)) dropping = true
+                            if (queue.size > 90 || !queue.offer(Pair('V', out))) dropping = true
                         }
                     }
-                    if (isConfig && queue.remainingCapacity() > 0) queue.offer(bytes)
+                    if (isConfig) queue.offer(Pair('V', bytes))
                 }
                 enc.releaseOutputBuffer(i, false)
             }
@@ -145,17 +153,74 @@ class ShareService : Service() {
         return i < b.size && (b[i].toInt() and 0x1f) == 7
     }
 
-    private fun send(url: String, token: String, device: String) {
+    /** Android 10 and newer let an app capture what the others play (music, video, games; apps may opt out). Returns false when that is not possible. */
+    private fun startSound(proj: MediaProjection): Boolean {
+        if (Build.VERSION.SDK_INT < 29 || checkSelfPermission("android.permission.RECORD_AUDIO") != PackageManager.PERMISSION_GRANTED) return false
+        return try {
+            val capture = AudioPlaybackCaptureConfiguration.Builder(proj)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA).addMatchingUsage(AudioAttributes.USAGE_GAME).addMatchingUsage(AudioAttributes.USAGE_UNKNOWN).build()
+            val pcm = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_16BIT).setSampleRate(44100).setChannelMask(AudioFormat.CHANNEL_IN_STEREO).build()
+            val rec = AudioRecord.Builder().setAudioFormat(pcm).setBufferSizeInBytes(32768).setAudioPlaybackCaptureConfig(capture).build()
+            val fmt = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, 44100, 2).apply {
+                setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
+                setInteger(MediaFormat.KEY_BIT_RATE, 128_000); setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
+            }
+            val enc = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_AUDIO_AAC)
+            enc.configure(fmt, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE); enc.start(); rec.startRecording()
+            recorder = rec; audioCodec = enc
+            thread(name = "share-sound") { sound(rec, enc) }
+            true
+        } catch (_: Exception) { false }
+    }
+
+    private fun sound(rec: AudioRecord, enc: MediaCodec) {
+        val info = MediaCodec.BufferInfo()
+        val chunk = ByteArray(4096)
+        var samples = 0L
+        try {
+            while (!stopping) {
+                val n = rec.read(chunk, 0, chunk.size)
+                if (n > 0) {
+                    val i = enc.dequeueInputBuffer(100_000)
+                    if (i >= 0) { enc.getInputBuffer(i)!!.apply { clear(); put(chunk, 0, n) }; enc.queueInputBuffer(i, 0, n, samples * 1_000_000L / 44100, 0); samples += n / 4 }
+                }
+                var o = enc.dequeueOutputBuffer(info, 0)
+                while (o >= 0) {
+                    if (info.size > 0 && info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) {
+                        val buf = enc.getOutputBuffer(o)!!
+                        buf.position(info.offset); buf.limit(info.offset + info.size)
+                        val frame = ByteArray(7 + info.size); adts(frame); buf.get(frame, 7, info.size)
+                        queue.offer(Pair('A', frame))
+                    }
+                    enc.releaseOutputBuffer(o, false); o = enc.dequeueOutputBuffer(info, 0)
+                }
+            }
+        } catch (_: Exception) { /* stopped */ }
+    }
+
+    /** The 7-byte header that lets each AAC frame stand on its own: AAC LC, 44.1 kHz, stereo. */
+    private fun adts(f: ByteArray) {
+        val len = f.size
+        f[0] = 0xFF.toByte(); f[1] = 0xF1.toByte(); f[2] = ((1 shl 6) or (4 shl 2)).toByte()
+        f[3] = ((2 shl 6) or (len shr 11)).toByte(); f[4] = ((len shr 3) and 0xFF).toByte(); f[5] = (((len and 7) shl 5) or 0x1F).toByte(); f[6] = 0xFC.toByte()
+    }
+
+    private fun send(url: String, token: String, device: String, withSound: Boolean) {
         try {
             val c = URL(url).openConnection() as HttpURLConnection
             conn = c
             c.requestMethod = "POST"; c.doOutput = true; c.setChunkedStreamingMode(16384)
             c.connectTimeout = 8000; c.readTimeout = 0
             c.setRequestProperty("x-hush-token", token); c.setRequestProperty("x-hush-device", device)
-            c.setRequestProperty("Content-Type", "video/h264")
+            c.setRequestProperty("Content-Type", if (withSound) "application/x-hush-screen" else "video/h264")
+            if (withSound) c.setRequestProperty("x-hush-audio", "1")
             val out = c.outputStream
             while (!stopping) {
-                val chunk = queue.poll(500, TimeUnit.MILLISECONDS) ?: continue
+                val (kind, chunk) = queue.poll(500, TimeUnit.MILLISECONDS) ?: continue
+                if (withSound) {                                  // picture and sound in one stream: kind, length, data
+                    val n = chunk.size
+                    out.write(byteArrayOf(kind.code.toByte(), (n ushr 24).toByte(), (n ushr 16).toByte(), (n ushr 8).toByte(), n.toByte()))
+                }
                 out.write(chunk)
             }
             out.flush(); out.close()
@@ -172,6 +237,8 @@ class ShareService : Service() {
         try { display?.release() } catch (_: Exception) {}
         try { codec?.stop(); codec?.release() } catch (_: Exception) {}
         try { surface?.release() } catch (_: Exception) {}
+        try { recorder?.stop(); recorder?.release() } catch (_: Exception) {}
+        try { audioCodec?.stop(); audioCodec?.release() } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
         try { conn?.disconnect() } catch (_: Exception) {}
         if (message != null) Handler(Looper.getMainLooper()).post { Toast.makeText(applicationContext, message, Toast.LENGTH_SHORT).show() }

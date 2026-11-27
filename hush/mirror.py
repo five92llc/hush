@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import queue
 import re
 import shutil
 import subprocess
@@ -33,6 +34,7 @@ class Session:
         self.started = time.time()
         self.last = time.time()
         self.bytes = 0
+        self.feeder: Feeder | None = None      # set when the sender mixes picture and sound in one stream
 
     @property
     def alive(self) -> bool:
@@ -44,6 +46,51 @@ class Session:
             return ".ts" in (self.folder / "index.m3u8").read_text(errors="ignore")
         except OSError:
             return False
+
+
+class Feeder:
+    """Takes the sender's framed stream (1 byte "V" or "A", 4 bytes length, data) apart and hands picture and sound to ffmpeg.
+    Each goes through its own thread and queue, so ffmpeg waiting on one never holds up the other."""
+    MAX = 4_000_000
+
+    def __init__(self, video_out, audio_path: Path):
+        self.buf = bytearray()
+        self.q = {b"V": queue.Queue(maxsize=600), b"A": queue.Queue(maxsize=600)}
+        self.threads = [threading.Thread(target=self._pump, args=(self.q[b"V"], lambda: video_out), daemon=True),
+                        threading.Thread(target=self._pump, args=(self.q[b"A"], lambda: open(audio_path, "wb", buffering=0)), daemon=True)]
+        for t in self.threads:
+            t.start()
+
+    @staticmethod
+    def _pump(q: "queue.Queue", opener) -> None:
+        try:
+            out = opener()                       # opening the sound pipe waits until ffmpeg reads it
+            while (data := q.get()) is not None:
+                out.write(data); out.flush()
+            out.close()
+        except (OSError, ValueError):
+            pass
+
+    def feed(self, chunk: bytes) -> None:
+        self.buf += chunk
+        while len(self.buf) >= 5:
+            kind, size = bytes(self.buf[:1]), int.from_bytes(self.buf[1:5], "big")
+            if kind not in self.q or size > self.MAX:
+                raise ValueError("not a Hush screen stream")
+            if len(self.buf) < 5 + size:
+                break
+            data = bytes(self.buf[5:5 + size]); del self.buf[:5 + size]
+            try:
+                self.q[kind].put_nowait(data)
+            except queue.Full:                   # far behind: lose this piece rather than the whole mirror
+                pass
+
+    def close(self) -> None:
+        for q in self.q.values():
+            try:
+                q.put_nowait(None)
+            except queue.Full:
+                pass
 
 
 class MirrorHub:
@@ -147,13 +194,24 @@ class MirrorHub:
         self._set(Session("airplay", "an Apple device", d, proc))
 
     # ---- Android (and anything else that can send H.264) ----------------------------------------------------
-    def start_ingest(self, name: str) -> Session:
+    def start_ingest(self, name: str, audio: bool = False) -> Session:
         d = self._new_folder()
-        cmd = [self.cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", "-probesize", "50000", "-analyzeduration", "300000", "-use_wallclock_as_timestamps", "1", "-f", "h264", "-i", "pipe:0",
-               "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "64k",
+        live = ["-probesize", "50000", "-analyzeduration", "300000", "-use_wallclock_as_timestamps", "1"]
+        sound = ["-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo"]                     # an older app sends no sound
+        extra: list[str] = []
+        if audio:
+            os.mkfifo(d / "audio.aac")
+            # two live pipes: start reading both at once, stamp each by arrival, and never hold one back for the other
+            live = ["-probesize", "32", "-analyzeduration", "0", "-use_wallclock_as_timestamps", "1"]
+            sound = [*live, "-f", "aac", "-i", str(d / "audio.aac")]
+            extra = ["-max_interleave_delta", "0"]
+        cmd = [self.cfg.ffmpeg, "-hide_banner", "-loglevel", "error", "-fflags", "nobuffer", *live, "-f", "h264", "-i", "pipe:0",
+               *sound, "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", *extra, "-c:a", "aac", "-b:a", "128k" if audio else "64k",
                *HLS_OUT, str(d / "seg%d.ts"), str(d / "index.m3u8")]
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=open(d / "ffmpeg.log", "wb"))
         s = Session("android", name[:40] or "an Android device", d, proc)
+        if audio:
+            s.feeder = Feeder(proc.stdin, d / "audio.aac")
         self._set(s)
         return s
 
@@ -165,6 +223,8 @@ class MirrorHub:
             self._end(old)
 
     def _end(self, s: Session) -> None:
+        if s.feeder:
+            s.feeder.close()
         try:
             if s.proc.stdin:
                 s.proc.stdin.close()

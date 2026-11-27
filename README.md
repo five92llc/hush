@@ -291,7 +291,7 @@ The language filter goes with it: Hush sends the screen a stream with the flagge
 Hush is the screen. Mirroring goes **through the Hush server**: it receives the phone's screen and plays it as a live feed on any Hush screen that has **Show mirrors on this screen** switched on (TVs have it on by default; a screen that is already mirroring shows a **Filter profanity** button that listens to the sound and bleeps words, about 10 seconds behind live; kids profiles always get the filtered feed). Expect about 2 to 4 seconds of delay without the filter, so it suits photos, videos and presentations better than games.
 
 - **iPhone, iPad and Mac (AirPlay).** One-time setup on the server: `sudo ./scripts/install-mirror.sh`. Then in Hush open **Settings → Mirroring** and switch on **AirPlay**. On the device open Control Centre, tap **Screen Mirroring** and choose **Hush** (the name is editable; tick *Ask for a code* to require a code the first time). Hush runs UxPlay on a hidden display with a virtual sound card, so no monitor or speakers are needed on the server.
-- **Android phones and tablets.** Install the Hush app on the phone or tablet, open **Settings → Mirroring** in it and tap **Share this screen**. Android asks permission to capture the screen, then streams it to the server. The picture is sent at up to 1280 pixels, about 3 Mbps; sound from the phone is not sent yet (the mirror plays silently), and turning the phone sideways after you start sharing does not resize the picture (stop and share again). A notification with a Stop button shows while sharing. Sharing works from the Hush app on a TV too. If nginx is in front of Hush it needs `proxy_request_buffering off` and `client_max_body_size 0` for `/api/mirror/ingest`.
+- **Android phones and tablets.** Install the Hush app on the phone or tablet, open **Settings → Mirroring** in it and tap **Share this screen**. Android asks permission to capture the screen, then streams it to the server. The picture is sent at up to 1280 pixels, about 3 Mbps; from Android 10 the sound of music, video and games is sent too if you allow the microphone permission when asked (Android calls capturing sound that; the microphone itself is not used, and some apps forbid capture), and turning the phone sideways after you start sharing does not resize the picture (stop and share again). A notification with a Stop button shows while sharing. Sharing works from the Hush app on a TV too. If nginx is in front of Hush it needs `proxy_request_buffering off` and `client_max_body_size 0` for `/api/mirror/ingest`.
 - Only one screen is mirrored at a time (the newest one). A screen that closes the mirror with **Close** is not pulled back to it until the next mirror starts. Anyone on your network can see an AirPlay receiver that is switched on; use the code option on a shared network.
 
 ## Skip intro, skip credits and the next episode
@@ -317,3 +317,40 @@ Hush learns where the intro and credits are, in this order: marks you set by han
 **Pop-out player.** The arrow-out-of-a-box button in the player (or **O**) puts the picture in a small window that stays on top of other apps and can be dragged anywhere on the screen, while you browse elsewhere or use other programs. It uses your browser's picture-in-picture (Chrome, Edge, Safari; Firefox has its own button on the video). The filter keeps muting, and captions show in the window. Not in the TV or Android apps.
 
 **Clean titles.** The player, folder lists, Next episode card and scan list show "Show · S01E03 · Episode" or "Movie (Year)" instead of the long file name, using the library details or, failing that, the name itself. Files are not renamed; **Tidy file names** under Tasks does that if you want it (renaming can break torrents that are still seeding).
+
+## Backups
+
+Every night Hush saves its database (history, My List, scan results, intro marks, channel numbers, profiles and settings) and the scan transcripts to `hush-backup-<date>.tar.gz`; the newest 14 are kept. **Settings → Server** backs up now and downloads them. They are saved in `<data_dir>/backups` unless you set `backup_dir:` in `config.yaml` — put it on another disk or your NAS, because a backup on the same disk is lost with it. To restore, on the server:
+
+```bash
+sudo systemctl stop hush
+cd ~/hush && .venv/bin/python -m hush.backup restore <file name>
+sudo systemctl start hush
+```
+
+## Search and recently added
+
+**Search** (or press **/**) looks through movies, shows, episode names and live channels at once. Home has a **Recently added** row, and the top bar a slide for it.
+
+## Your words and scenes
+
+**Settings → Words**: add words to any group, list words that are never muted, and **Check scanned titles again** (from the saved transcripts, without listening). In the Language panel a muted moment offers **Never mute this word**. Switch on **Skip marked scenes** there to get **Skip a scene** in the panel: mark a start and end, and the player jumps over it for everyone while the filter is on.
+
+## Limits and Now playing
+
+A kids profile can have a daily watching limit and a bedtime (edit the profile). **Settings → Now playing** lists what every screen is playing, with Pause and Stop, and today's watching per profile.
+
+## Update from the page, take it with you, find subtitles
+
+- **Settings → About → Update server** runs `update.sh` (git installs with passwordless `sudo systemctl restart hush`).
+- **Download filtered copy** (Language panel of a scanned title) saves an MP4 with the flagged words muted.
+- **Find subtitles online** (player settings) uses OpenSubtitles with your own API key (**Settings → Library → Subtitle finder**) and saves the file next to the video.
+
+## Watching away from home (Tailscale)
+
+Do not forward Hush's port on your router. A private network such as Tailscale reaches it safely:
+
+1. Create an account at tailscale.com and install the Tailscale app on your phone, tablet or laptop.
+2. If Hush runs in a container on TrueNAS, give the container access to `/dev/net/tun` (Instances → your container → Devices), or install Tailscale on the TrueNAS host from Apps and advertise your home network (`192.168.100.0/24`) as a subnet route.
+3. On the server: `curl -fsSL https://tailscale.com/install.sh | sh` then `sudo tailscale up`, and sign in with the link it prints.
+4. Away from home, open `http://<the server's Tailscale name or 100.x address>` in a browser, or set that as the server address in the Hush app.

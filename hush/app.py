@@ -862,12 +862,17 @@ def create_app(cfg: Config | None = None) -> FastAPI:
             raise HTTPException(403, "Sharing from Android is switched off")
         if auth.enabled and not auth.check_scoped("mirror", request.headers.get("x-hush-token")):
             raise HTTPException(401, "Sign in to Hush on this device first")
-        s = await run_in_threadpool(mirror.start_ingest, request.headers.get("x-hush-device", "an Android device"))
+        s = await run_in_threadpool(mirror.start_ingest, request.headers.get("x-hush-device", "an Android device"), request.headers.get("x-hush-audio") == "1")
         try:
             async for chunk in request.stream():
-                await run_in_threadpool(lambda c=chunk: (s.proc.stdin.write(c), s.proc.stdin.flush()))
+                if s.feeder:
+                    s.feeder.feed(chunk)
+                else:
+                    await run_in_threadpool(lambda c=chunk: (s.proc.stdin.write(c), s.proc.stdin.flush()))
                 s.bytes += len(chunk)
-        except (BrokenPipeError, OSError):
+                if not s.alive:
+                    break
+        except (BrokenPipeError, OSError, ValueError):
             pass
         finally:
             if mirror.session is s:

@@ -51,3 +51,28 @@ def test_settings_are_cleaned_and_the_sender_needs_a_token(tmp_path):
     assert anon.post("/api/mirror/ingest", content=b"x").status_code == 401
     assert anon.post("/api/mirror/ingest", content=b"x", headers={"x-hush-token": "9999999999.bad"}).status_code == 401
     assert anon.get("/api/mirror/state").status_code == 401
+
+
+def test_a_sender_with_sound_gets_it_into_the_feed(tmp_path):
+    tone = subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "sine=frequency=500:sample_rate=44100", "-t", "7", "-ac", "2", "-c:a", "aac",
+                           "-f", "adts", "-"], capture_output=True, check=True).stdout
+    video = h264(7)
+    cfg = Config(data_dir=tmp_path / "d"); cfg.data_dir.mkdir()
+    hub = MirrorHub(cfg, DB(cfg.db_path))
+    try:
+        s = hub.start_ingest("Phone", audio=True)
+        frame = lambda k, d: k + len(d).to_bytes(4, "big") + d      # noqa: E731
+        n = 140
+        for i in range(n):                                          # in real time, picture and sound taking turns, cut at awkward places
+            packet = frame(b"V", video[len(video) * i // n:len(video) * (i + 1) // n]) + frame(b"A", tone[len(tone) * i // n:len(tone) * (i + 1) // n])
+            s.feeder.feed(packet[:7]); s.feeder.feed(packet[7:])
+            time.sleep(7.0 / n)
+        end = time.time() + 15
+        while time.time() < end and not s.ready:
+            time.sleep(0.3)
+        assert s.ready, (s.folder / "ffmpeg.log").read_text()
+        out = subprocess.run(["ffmpeg", "-hide_banner", "-i", str(s.folder / "index.m3u8"), "-t", "2", "-vn", "-af", "volumedetect", "-f", "null", "-"],
+                             capture_output=True, text=True, timeout=30).stderr
+        assert "max_volume" in out and "max_volume: -91" not in out, out[-600:]      # real sound, not silence
+    finally:
+        hub.shutdown()
