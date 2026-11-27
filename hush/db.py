@@ -169,6 +169,10 @@ CREATE TABLE IF NOT EXISTS segment_scans (
     episodes    INTEGER NOT NULL,    -- how many episodes were compared, so a new one triggers another look
     done_at     REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS first_seen (
+    media_key   TEXT PRIMARY KEY,
+    at          REAL NOT NULL        -- when the title first appeared in the library (0: it was there before this was recorded)
+);
 CREATE TABLE IF NOT EXISTS channel_numbers (
     chan_key    TEXT PRIMARY KEY,
     number      INTEGER NOT NULL UNIQUE      -- permanent: a channel keeps its number, even when its playlist is re-read
@@ -302,6 +306,9 @@ class DB:
             c.executemany("UPDATE channels SET letter=? WHERE chan_key=?",
                           [(letter_of(n), k) for k, n in c.execute("SELECT chan_key, name FROM channels")])
         c.execute("CREATE INDEX IF NOT EXISTS channels_letter ON channels(letter)")
+
+        if not c.execute("SELECT 1 FROM first_seen LIMIT 1").fetchone():
+            c.execute("INSERT OR IGNORE INTO first_seen(media_key,at) SELECT media_key, 0 FROM meta")
 
         # Profiles: everything that existed before belongs to the first profile.
         if not c.execute("SELECT 1 FROM profiles LIMIT 1").fetchone():
@@ -559,6 +566,20 @@ class DB:
         row["locked"] = int(bool(m.get("locked")))
         self._exec(f"INSERT OR REPLACE INTO meta({','.join(cols)},updated_at) VALUES({','.join('?' * len(cols))},?)",
                    (*row.values(), time.time()))
+        self._exec("INSERT OR IGNORE INTO first_seen(media_key,at) VALUES(?,?)", (row["media_key"], time.time()))
+
+    def recently_added(self, since: float, limit: int = 60) -> list[dict]:
+        rows = self._all("SELECT m.*, f.at AS added_at, (x.media_key IS NOT NULL) AS scanned, x.flags AS flags FROM first_seen f "
+                         "JOIN meta m ON m.media_key=f.media_key LEFT JOIN filters x ON x.media_key=m.media_key "
+                         "WHERE f.at>? ORDER BY f.at DESC, m.season DESC, m.episode DESC LIMIT ?", (since, limit))
+        return [self._decode(r) for r in rows]
+
+    def search_episodes(self, q: str, limit: int = 60) -> list[dict]:
+        like = "%" + q.replace("\\", "").replace("%", "").replace("_", " ") + "%"
+        rows = self._all("SELECT m.*, s.title AS show_title, s.cert AS show_cert, (x.media_key IS NOT NULL) AS scanned, x.flags AS flags FROM meta m "
+                         "LEFT JOIN shows s ON s.show_key=m.show_key LEFT JOIN filters x ON x.media_key=m.media_key "
+                         "WHERE m.kind='episode' AND m.title LIKE ? ORDER BY s.title, m.season, m.episode LIMIT ?", (like, limit))
+        return [self._decode(r) for r in rows]
 
     def get_show(self, show_key: str) -> dict | None:
         return self._decode(self._one("SELECT * FROM shows WHERE show_key=?", (show_key,)))

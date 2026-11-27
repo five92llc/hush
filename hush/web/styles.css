@@ -878,3 +878,5 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .audio-opt[aria-pressed="true"] { background: var(--hush-soft); border-color: var(--hush); }
 .audio-opt[aria-pressed="true"]::before { content: "✓ "; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.search-big { width: 100%; max-width: 40rem; font-size: var(--s1); margin: 0 0 1.2rem; }
+.search-results section { margin-bottom: 1.5rem; }

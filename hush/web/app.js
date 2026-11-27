@@ -475,7 +475,7 @@ const MOONS = [["New moon", "🌑"], ["Waxing crescent", "🌒"], ["First quarte
 /** The top bar panel: slides between the clock, weather, scores, headlines and more. */
 const Ticker = {
   SLIDES: [["clock", "Clock and date"], ["weather", "Weather now"], ["details", "Weather details"], ["forecast", "Forecast"], ["sun", "Sunset and moon"], ["world", "World clocks"],
-    ["channel", "What's on this channel"], ["coming", "Coming up (your shows)"], ["downloads", "Downloads"], ["sports", "Sports scores"], ["news", "Headlines"],
+    ["channel", "What's on this channel"], ["coming", "Coming up (your shows)"], ["new", "Recently added"], ["downloads", "Downloads"], ["sports", "Sports scores"], ["news", "Headlines"],
     ["photo", "Photo of the day"], ["health", "Server health"], ["quote", "Quote of the day"], ["server", "Server version"]],
   data: {}, clocks: [], at: 0, order: [], timer: null, tick: null,
   enabled(id) { return store.get(`tk-${id}`, true) !== false; },
@@ -484,6 +484,7 @@ const Ticker = {
     const want = (id) => this.enabled(id);
     const jobs = [this.get("/api/weather", "weather"), api("/api/clocks").then((v) => { this.clocks = v; }).catch(() => {})];
     if (want("coming")) jobs.push(this.get("/api/library/upcoming", "coming"));
+    if (want("new")) jobs.push(this.get("/api/library/recent?days=14", "added"));
     if (want("news") && !isKids()) jobs.push(this.get("/api/ticker/news", "news"));
     if (want("photo")) jobs.push(this.get("/api/ticker/photo", "photo"));
     await Promise.all(jobs); this.refreshPages();
@@ -536,6 +537,7 @@ const Ticker = {
       });
       else if (id === "coming" && D.coming?.length) add(() => { const u = D.coming[0], more = D.coming[1];
         return this.row("🗓️", h("span", { class: "tk-main" }, u.show_title), h("span", { class: "tk-sub" }, `S${u.season}E${u.episode} · ${when(u.airs_at)}${more ? ` · then ${more.show_title}` : ""}`)); });
+      else if (id === "new" && D.added?.length) add(() => this.row("🆕", h("span", { class: "tk-main" }, D.added[0].title), h("span", { class: "tk-sub" }, `${D.added[0].subtitle}${D.added.length > 1 ? ` · and ${D.added.length - 1} more new` : ""}`)));
       else if (id === "downloads" && D.downloads?.connected) {
         const act = (D.downloads.torrents || []).filter((t) => !t.done && !t.paused);
         if (act.length) add(() => { const speed = act.reduce((n, t) => n + t.dlspeed, 0), t = act[0];
@@ -1278,6 +1280,7 @@ const Catalog = {
     try {
       if (view === "profiles") await this.profilesPage();
       else if (view === "home") await this.home();
+      else if (view === "search") await this.searchPage();
       else if (view === "folders") await this.folders();
       else if (view === "live") await this.live();
       else if (view === "mylist") await this.mylist();
@@ -1741,11 +1744,42 @@ const Catalog = {
       h("div", { class: "shelf-head" }, h("h2", {}, title), seeAll ? h("a", { href: seeAll }, "See all →") : null),
       h("div", { class: "shelf-row" }, ...cards));
   },
+  /** One search box for movies, shows, episodes and live channels. */
+  lastSearch: "",
+  async searchPage() {
+    document.title = "Search – Hush"; this.cameFrom = "#/search";
+    const results = h("div", { class: "search-results" });
+    let timer = null, seq = 0;
+    const card = (href, art, name, sub, onclick) => h("a", { class: "card", href, onclick }, h("div", { class: "art" }, art ? h("img", { src: thumb(art), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, name)),
+      h("span", { class: "name" }, name), h("span", { class: "sub" }, sub || ""));
+    const run = async (q) => {
+      const n = ++seq; this.lastSearch = q;
+      if (q.trim().length < 2) { results.replaceChildren(h("p", { class: "hint" }, "Type at least two letters.")); return; }
+      let r;
+      try { r = await api(`/api/search?q=${encodeURIComponent(q)}`); } catch (err) { results.replaceChildren(h("p", { class: "error" }, err.message)); return; }
+      if (n !== seq) return;
+      const sections = [
+        ["Movies", r.movies.map((m) => card(`#/title/${m.media_key}`, m.art_url, m.title, m.year || ""))],
+        ["TV shows", r.shows.map((x) => card(`#/show/${x.show_key}`, x.art_url, x.title, plural(x.episodes, "episode")))],
+        ["Episodes", r.episodes.map((e) => card(`#/p/${e.source_id}/${e.item_id}`, e.art_url, e.title, e.subtitle, () => Queue.set([{ src: e.source_id, item: e.item_id, title: `${e.title} · ${e.subtitle}` }])))],
+        ["Live TV", r.channels.map((c) => h("a", { class: "chan", href: `#/p/url/${c.item_id}`, onclick: () => { Queue.set(r.channels.map((x) => chanItem(x))); Queue.loadMore = null; } },
+          h("div", { class: "logo" }, c.logo_url ? h("img", { src: thumb(c.logo_url, 160), alt: "", loading: "lazy" }) : h("span", { class: "noart" }, initials(c.name))), h("span", { class: "name" }, splitTags(c.name).title)))],
+      ].filter(([, list]) => list.length);
+      results.replaceChildren(...(sections.length ? sections.map(([title, list]) => h("section", {}, h("h2", {}, title), h("div", { class: "grid" }, ...list))) : [h("p", { class: "hint" }, `Nothing found for "${q}".`)]));
+    };
+    const input = h("input", { type: "search", class: "search-big", placeholder: "Movies, shows, episodes, channels…", "aria-label": "Search", value: this.lastSearch, autocomplete: "off",
+      oninput: (e) => { clearTimeout(timer); timer = setTimeout(() => run(e.target.value), 300); } });
+    input.addEventListener("change", () => run(input.value));
+    this.box().replaceChildren(h("div", { class: "catalog-head" }, h("div", {}, h("h1", {}, "Search"))), input, results);
+    run(this.lastSearch);
+    if (!TV.on) input.focus();
+  },
+
   async home() {
     this.cameFrom = "#/home";
     document.title = "Home – Hush";
     const get = (p, f = (x) => x) => api(p).then(f).catch(() => []);
-    const [cont, recent, favs, movies, shows, soon, mine] = await Promise.all([
+    const [added, cont, recent, favs, movies, shows, soon, mine] = await Promise.all([get("/api/library/recent"),
       get("/api/progress/recent?limit=12"), get("/api/live/channels?recent=true&limit=12", (r) => r.channels),
       get("/api/live/channels?favorites=true&limit=16", (r) => r.channels), get("/api/library/movies"), get("/api/library/shows"), get("/api/library/upcoming"), get("/api/watchlist")]);
     const upNext = mine.filter((i) => i.status === "watching" && i.progress?.next && !i.progress.next.position);
@@ -1765,6 +1799,9 @@ const Catalog = {
           it.media_key ? h("button", { class: "x", type: "button", title: "Remove from Continue watching", "aria-label": `Remove ${it.title}`, onclick: (e) => { e.preventDefault(); e.stopPropagation(); clearContinue(it, e.currentTarget.closest(".card")); } }, "✕") : null),
         h("span", { class: "name" }, it.title),
         h("span", { class: "sub" }, [it.subtitle, it.duration ? `${fmt(it.duration - it.position)} left` : ""].filter(Boolean).join(" · "))))),
+      this.shelf("Recently added", null, added.map((x) => h("a", { class: "card", href: x.kind === "movie" ? `#/title/${x.media_key}` : `#/show/${x.show_key}` },
+        h("div", { class: "art" }, x.art_url ? h("img", { src: thumb(x.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, x.title)),
+        h("span", { class: "name" }, x.title), h("span", { class: "sub" }, x.subtitle)))),
       this.shelf("Up next on My List", "#/mylist", upNext.slice(0, 16).map((i) => h("a", { class: "card wide", href: `#/p/${i.progress.next.source_id}/${i.progress.next.item_id}`,
         onclick: () => Queue.set([{ src: i.progress.next.source_id, item: i.progress.next.item_id, title: i.progress.next.title }]) },
         h("div", { class: "art" }, i.art_url ? h("img", { src: thumb(i.art_url), alt: "", loading: "lazy" }) : h("div", { class: "noart" }, i.title)),
@@ -3369,6 +3406,7 @@ document.addEventListener("keydown", (e) => {
   if (IS_TV_DEVICE || TV.on) { hideCursorNow(); if (e.key.startsWith("Arrow") || e.key === "Enter") document.documentElement.classList.add("keynav"); }       // using the remote: the pointer is not needed, and must not highlight what it rests on
   if (mediaKey(e)) return;
   if ((TV.on || IS_TV_DEVICE) && TV.handleKey(e)) return;
+  if (e.key === "/" && $("#player").hidden && !$("#app").hidden && !e.target.matches("input, select, textarea")) { e.preventDefault(); go("#/search"); return; }
   if ($("#player").hidden || Player.mini || e.target.matches("input:not([type=checkbox]):not([type=range]), select, textarea") || e.ctrlKey || e.metaKey || e.altKey) return;
   if (document.querySelector("dialog[open]")) return;
   const k = normKey(e).toLowerCase();
@@ -4299,7 +4337,7 @@ async function route() {
     return;
   }
   $("#library").hidden = false;
-  const inCatalog = ["home", "movies", "shows", "show", "title", "live", "folders", "profiles", "mylist", "downloads"].includes(view);
+  const inCatalog = ["home", "search", "movies", "shows", "show", "title", "live", "folders", "profiles", "mylist", "downloads"].includes(view);
   $("#catalog-view").hidden = !inCatalog; $("#browser-view").hidden = inCatalog;
   $$("#rail-links a").forEach((a) => { if (!inCatalog) a.removeAttribute("aria-current"); });
   if (inCatalog) { Catalog.open(view, src); return; }

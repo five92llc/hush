@@ -1147,6 +1147,46 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         db.delete_watch(prof["id"], ref)
         return {"ok": True}
 
+    def _episode_card(prof: dict, e: dict) -> dict | None:
+        if prof["kids"] and not title_ok(prof, e["media_key"]):
+            return None
+        show = db.get_show(e["show_key"]) if e.get("show_key") else None
+        title = e.get("show_title") or (show or {}).get("title") or e.get("title") or ""
+        art = f"/api/art/{e['media_key']}.jpg" if e.get("art") else (f"/api/art/{e['show_key']}.jpg" if show and show.get("art") else None)
+        sub = f"S{e.get('season') or 0:02d}E{e.get('episode') or 0:02d}" + (f" · {e['title']}" if e.get("title") else "")
+        return {"kind": "episode", "media_key": e["media_key"], "source_id": e["source_id"], "item_id": e["item_id"], "title": title, "subtitle": sub, "art_url": art, "show_key": e.get("show_key")}
+
+    @app.get("/api/library/recent", dependencies=[need])
+    def library_recent(days: int = Query(30, ge=1, le=365), prof: dict = Depends(get_profile)):
+        """What appeared in the library lately, newest first: movies, and one card per show for its new episodes."""
+        out, shows = [], set()
+        for m in db.recently_added(time.time() - days * 86400, 200):
+            if m["kind"] == "movie":
+                if not prof["kids"] or title_ok(prof, m["media_key"]):
+                    out.append({"kind": "movie", "media_key": m["media_key"], "source_id": m["source_id"], "item_id": m["item_id"], "title": m["title"],
+                                "subtitle": str(m.get("year") or ""), "art_url": f"/api/art/{m['media_key']}.jpg" if m.get("art") else None})
+            elif m.get("show_key") not in shows:
+                card = _episode_card(prof, m)
+                if card:
+                    shows.add(m.get("show_key")); out.append(card)
+            if len(out) >= 24:
+                break
+        return out
+
+    @app.get("/api/search", dependencies=[need])
+    def search(q: str = "", prof: dict = Depends(get_profile)):
+        """One box for everything: movies, shows, episode names and live channels."""
+        q = q.strip()[:80]
+        if len(q) < 2:
+            return {"movies": [], "shows": [], "episodes": [], "channels": []}
+        low = q.casefold()
+        hit = lambda t: all(w in (t or "").casefold() for w in low.split())   # noqa: E731
+        live_ok = not prof["kids"] or rules.kid_settings(prof).get("allow_live")
+        return {"movies": [m for m in library_movies(prof) if hit(m.get("title"))][:30],
+                "shows": [s for s in library_shows(prof) if hit(s.get("title"))][:30],
+                "episodes": [c for c in (_episode_card(prof, e) for e in db.search_episodes(q)) if c][:30],
+                "channels": [_channel(c) for c in db.list_channels(q, "", False, True, 36, 0, "", False, prof["id"])] if live_ok else []}
+
     @app.get("/api/library/upcoming", dependencies=[need])
     def library_upcoming(prof: dict = Depends(get_profile)):
         """Episodes of the shows in the library that have not aired yet, soonest first."""

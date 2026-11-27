@@ -27,3 +27,16 @@ def test_only_the_newest_backups_are_kept(tmp_path, monkeypatch):
     for _ in range(3):
         backup.create(cfg)
     assert [b["name"][12:27] for b in backup.listing(cfg)] == ["20260101-000003", "20260101-000002"]
+
+
+def test_recently_added_only_counts_titles_that_arrive_after_recording_began(tmp_path):
+    import time
+    from hush.db import DB
+    db = DB(tmp_path / "h.db")
+    m = lambda k, t: {"media_key": k, "source_id": "s", "item_id": k, "kind": "movie", "title": t}
+    db.save_meta(m("a", "New One"))
+    assert [x["title"] for x in db.recently_added(time.time() - 60)] == ["New One"]
+    db.save_meta(m("a", "New One, retitled"))                                  # an update is not a new arrival
+    assert len(db.recently_added(time.time() - 60)) == 1
+    db._exec("DELETE FROM first_seen"); db._migrate()                          # an existing library starts as "already there"
+    assert db.recently_added(time.time() - 60) == []
