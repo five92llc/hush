@@ -315,3 +315,5 @@ Hush learns where the intro and credits are, in this order: marks you set by han
 **Volume.** The speaker button in the player opens an upright slider with + and − buttons.
 
 **Pop-out player.** The arrow-out-of-a-box button in the player (or **O**) puts the picture in a small window that stays on top of other apps and can be dragged anywhere on the screen, while you browse elsewhere or use other programs. It uses your browser's picture-in-picture (Chrome, Edge, Safari; Firefox has its own button on the video). The filter keeps muting, and captions show in the window. Not in the TV or Android apps.
+
+**Clean titles.** The player, folder lists, Next episode card and scan list show "Show · S01E03 · Episode" or "Movie (Year)" instead of the long file name, using the library details or, failing that, the name itself. Files are not renamed; **Tidy file names** under Tasks does that if you want it (renaming can break torrents that are still seeding).

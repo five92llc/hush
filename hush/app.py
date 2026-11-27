@@ -22,6 +22,7 @@ from starlette.concurrency import run_in_threadpool
 from . import discover, epg, hw, media, mylist, profiles as rules, stream, ticker, weather
 from .hls import HLSError, HLSManager
 from .mirror import MirrorHub
+from .library import parse as parse_names
 from .segments import SegmentFinder, KINDS as SEGMENT_KINDS
 from .livefilter import LiveFilter, LiveFilterError
 from .live import LiveTV
@@ -358,6 +359,9 @@ def create_app(cfg: Config | None = None) -> FastAPI:
     @app.get("/api/browse/{source_id}", dependencies=[need])
     def browse(source_id: str, dir: str = "", prof: dict = Depends(get_profile)):
         entries = [e.to_dict(source_id) for e in registry.get(source_id).browse(dir)]
+        for e in entries:
+            if e.get("kind") == "video" and "media_key" in e:
+                e["label"] = clean_name(e["media_key"], e["name"])
         keys = [e["media_key"] for e in entries if "media_key" in e]
         done = db.filtered_keys(keys)
         prog = db.progress_map(prof["id"], keys)
@@ -381,6 +385,11 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         db.set_setting("recent_urls", src.urls)
         return {"source_id": "url", "item_id": enc(url), "kind": src.kind_of(url)}
 
+    def clean_name(key: str, filename: str) -> str:
+        meta = db.get_meta(key)
+        show = db.get_show(meta["show_key"]) if meta and meta.get("show_key") else None
+        return parse_names.pretty_title(filename, meta, (show or {}).get("title") or "")
+
     # ---- media ----------------------------------------------------------
     @app.get("/api/media/{source_id}/{item_id}", dependencies=[need])
     def media_info(source_id: str, item_id: str, audio: int | None = None, hevc: int = 0, prof: dict = Depends(get_profile)):
@@ -391,7 +400,10 @@ def create_app(cfg: Config | None = None) -> FastAPI:
         prog = db.get_progress(prof["id"], key)
         resume = ({"position": prog["position"], "finished": bool(prog["finished"])}
                   if prog and not ref.live else None)
-        return {"title": ref.title, "kind": "video" if p.video else "audio", "name": ref.name,
+        title = ref.title
+        if p.video and not ref.live and source_id != "url":
+            title = clean_name(key, ref.name or ref.title)
+        return {"title": title, "kind": "video" if p.video else "audio", "name": ref.name,
                 "live": ref.live, "resume": resume, "media_key": key, "probe": p.to_dict(), "mode": media.choose_mode(ref, p, audio, hevc),
                 "has_filter": bool(f), "job": db.active_job_for(key)}
 
@@ -1430,7 +1442,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
                 break
             m = db.get_meta(p["media_key"]) or {}
             show = db.get_show(m["show_key"]) if m.get("show_key") else None
-            title = (show["title"] if show else (m.get("title") or p["title"] or "Untitled"))
+            title = (show["title"] if show else (m.get("title") or (parse_names.pretty_title(p["title"]) if p["title"] else "Untitled")))
             sub = ""
             if show:
                 sub = f"S{m.get('season', 0):02d}E{m.get('episode', 0):02d}" + (f" · {m['title']}" if m.get("title") else "")
@@ -1743,7 +1755,7 @@ def create_app(cfg: Config | None = None) -> FastAPI:
 
     @app.get("/api/jobs", dependencies=[need])
     def jobs():
-        return db.list_jobs()
+        return [{**j, "label": clean_name(j["media_key"], j["title"]) if j.get("title") else ""} for j in db.list_jobs()]
 
     @app.get("/api/jobs/{job_id}", dependencies=[need])
     def job(job_id: str):

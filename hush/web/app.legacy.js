@@ -1,4 +1,4 @@
-/* app.legacy.js - built from app.js (sha256 44c4cd0799fea34c3066440adab5215895194ef73128d9fe3c70c891177631c8) by scripts/build-legacy.sh. Do not edit. */
+/* app.legacy.js - built from app.js (sha256 734acc46957ff573615f5cb90ba52da110553d06dddbb50310532337adba1743) by scripts/build-legacy.sh. Do not edit. */
 var _a;
 window.__hushBooted = true;
 "use strict";
@@ -320,8 +320,8 @@ function renderEntries() {
     bar.replaceChildren();
     S.letterBar = null;
   }
-  const items = S.entries.filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!wanted || S.entries.length < 15 || letterOf(e.name) === wanted));
-  Queue.set(items.filter((e) => e.kind !== "dir").map((e) => ({ src: e.source_id || S.source, item: e.id, title: e.name })));
+  const items = S.entries.filter((e) => (!q || e.name.toLowerCase().includes(q) || (e.label || "").toLowerCase().includes(q)) && (!wanted || S.entries.length < 15 || letterOf(e.name) === wanted));
+  Queue.set(items.filter((e) => e.kind !== "dir").map((e) => ({ src: e.source_id || S.source, item: e.id, title: e.label || e.name })));
   const list = $("#entries");
   list.replaceChildren(...items.map((e) => {
     var _a2;
@@ -331,7 +331,7 @@ function renderEntries() {
       "li",
       { class: `entry ${e.kind}` },
       icon(isDir ? "dir" : e.kind),
-      h("a", { class: "name", href: target, title: e.name }, e.name),
+      h("a", { class: "name", href: target, title: e.name }, e.label || e.name),
       h(
         "span",
         { class: "meta" },
@@ -561,7 +561,7 @@ const Jobs = {
     ul.replaceChildren(...this.list.map((j) => h(
       "li",
       {},
-      h("span", { class: "job-title" }, j.title || "Untitled"),
+      h("span", { class: "job-title" }, j.label || j.title || "Untitled"),
       h(
         "span",
         { class: "job-action" },

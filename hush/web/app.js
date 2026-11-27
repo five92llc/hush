@@ -241,15 +241,15 @@ function renderEntries() {
     if (!S.letterBar) { S.letterBar = makeLetterBar((l) => { S.letter = l; renderEntries(); }); bar.replaceChildren(S.letterBar.el); }
     S.letterBar.set(new Set(S.entries.map((e) => letterOf(e.name))), wanted);
   } else { bar.replaceChildren(); S.letterBar = null; }
-  const items = S.entries.filter((e) => (!q || e.name.toLowerCase().includes(q)) && (!wanted || S.entries.length < 15 || letterOf(e.name) === wanted));
-  Queue.set(items.filter((e) => e.kind !== "dir").map((e) => ({ src: e.source_id || S.source, item: e.id, title: e.name })));
+  const items = S.entries.filter((e) => (!q || e.name.toLowerCase().includes(q) || (e.label || "").toLowerCase().includes(q)) && (!wanted || S.entries.length < 15 || letterOf(e.name) === wanted));
+  Queue.set(items.filter((e) => e.kind !== "dir").map((e) => ({ src: e.source_id || S.source, item: e.id, title: e.label || e.name })));
   const list = $("#entries");
   list.replaceChildren(...items.map((e) => {
     const isDir = e.kind === "dir";
     const target = isDir ? `#/b/${S.source}/${e.id}` : `#/p/${e.source_id || S.source}/${e.id}`;
     return h("li", { class: `entry ${e.kind}` },
       icon(isDir ? "dir" : e.kind),
-      h("a", { class: "name", href: target, title: e.name }, e.name),
+      h("a", { class: "name", href: target, title: e.name }, e.label || e.name),
       h("span", { class: "meta" }, isDir ? "" : [e.meta?.year, fmtSize(e.size)].filter(Boolean).join("  "),
         e.watched ? h("span", { class: "resume" }, "  ✓ Watched") : e.resume ? h("span", { class: "resume" }, `  Resume ${fmt(e.resume)}`) : null),
       isDir ? h("span") : e.filtered
@@ -414,7 +414,7 @@ const Jobs = {
       ? "Paused. A scan that is already running will finish, then nothing new starts." : "";
     if (!this.list.length) { ul.replaceChildren(h("li", {}, h("span", { class: "stage" }, "Nothing has been scanned yet. Open a title and choose Scan to build its filter."))); return; }
     ul.replaceChildren(...this.list.map((j) => h("li", {},
-      h("span", { class: "job-title" }, j.title || "Untitled"),
+      h("span", { class: "job-title" }, (j.label || j.title) || "Untitled"),
       h("span", { class: "job-action" },
         j.status === "queued" ? h("button", { class: "btn ghost", type: "button", title: "Move this title to the front of the queue", onclick: () => this.act(`/api/jobs/${j.id}/next`) }, "Scan next") : null,
         j.status === "running" || j.status === "queued"

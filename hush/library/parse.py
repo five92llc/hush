@@ -79,6 +79,28 @@ def display_title(meta: dict) -> str:
     return f"{meta['title']} ({meta['year']})" if meta.get("year") else meta["title"]
 
 
+def pretty_title(filename: str, meta: dict | None = None, show_title: str = "") -> str:
+    """The name to put on screen instead of a long file name: "Show · S01E03 · Episode" or "Movie (Year)".
+    What the library knows comes first; otherwise it is read out of the file name. The file itself is never touched."""
+    meta = meta or {}
+    guess = parse_name(filename or "")
+    season, episode = meta.get("season"), meta.get("episode")
+    if meta.get("kind") == "episode" or (not meta and guess["kind"] == "episode"):
+        show = show_title or guess["title"]
+        season = guess["season"] if season is None else season
+        episode = guess["episode"] if episode is None else episode
+        if show and season is not None and episode is not None:
+            ep = (meta.get("title") if meta else guess["ep_title"]) or ""
+            if re.search(r"s\d{1,2}[ ._-]?e\d{1,3}|\d{1,2}x\d{2}", ep, re.I) or _JUNK.search(ep):     # a file name posing as an episode title
+                ep = ""
+            return f"{show} · S{season:02d}E{episode:02d}" + (f" · {ep}" if ep else "")
+    if meta.get("kind") == "movie" and meta.get("title"):
+        return display_title(meta)
+    if guess["kind"] == "movie" and guess["title"]:
+        return display_title(guess)
+    return filename
+
+
 # ---- NFO (Kodi / Jellyfin / Plex sidecars) ---------------------------------------------
 def read_nfo(path: Path) -> dict:
     """Fields from a .nfo file; {} when it is missing or not XML."""

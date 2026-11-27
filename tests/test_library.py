@@ -469,3 +469,13 @@ def test_online_fanart_uses_the_imdb_id_and_does_not_retry_at_once(tmp_path, mon
     assert all(w == art.FANART_WIDTH for _, w in fetched)
     assert db.get_meta("m1")["fanart"] == 1 and db.get_show("sh")["fanart"] == 1
     assert lib.sync_online_fanart() == 0 and len(fetched) == 2
+
+
+def test_long_file_names_become_clean_titles():
+    from hush.library.parse import pretty_title
+    name = "Lupin S01 E03 WebRip 720p Hindi English AAC 5.1 x264 MSubs - mkvCinemas.mkv"
+    assert pretty_title(name) == "Lupin · S01E03"
+    assert pretty_title(name, {"kind": "episode", "title": "Chapter 3", "season": 1, "episode": 3}, "Lupin") == "Lupin · S01E03 · Chapter 3"
+    assert pretty_title("9-1-1.S10E05.720p.HDTV.x264-GRP.mkv", {"kind": "episode", "title": "9-1-1.S10E05", "season": 10, "episode": 5}, "9-1-1") == "9-1-1 · S10E05"
+    assert pretty_title("72.Hours.2026.1080p.WEBRip.10Bit.DDP5.1.x265-NeoNoir.mkv") == "72 Hours (2026)"
+    assert pretty_title("x.mkv", {"kind": "movie", "title": "Deep Water", "year": 2026}) == "Deep Water (2026)"
